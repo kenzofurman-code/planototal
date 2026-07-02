@@ -293,6 +293,27 @@ create table if not exists change_log (
   source text default 'user'
 );
 
+create table if not exists short_term_state (
+  project_key text primary key,
+  payload jsonb not null default '{"weekly":[],"teams":[],"reasons":[],"history":[]}'::jsonb,
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id) on delete set null
+);
+
+alter table short_term_state enable row level security;
+
+drop policy if exists "authenticated_short_term_select" on short_term_state;
+create policy "authenticated_short_term_select" on short_term_state
+  for select to authenticated using (true);
+
+drop policy if exists "authenticated_short_term_insert" on short_term_state;
+create policy "authenticated_short_term_insert" on short_term_state
+  for insert to authenticated with check (true);
+
+drop policy if exists "authenticated_short_term_update" on short_term_state;
+create policy "authenticated_short_term_update" on short_term_state
+  for update to authenticated using (true) with check (true);
+
 create index if not exists idx_schedule_tasks_project on schedule_tasks(project_id, version_id);
 create index if not exists idx_procurement_cards_project on procurement_cards(project_id);
 create index if not exists idx_change_log_project on change_log(project_id, changed_at desc);

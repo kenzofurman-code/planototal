@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import * as XLSX from 'xlsx';
 import {
@@ -21,6 +21,7 @@ import {
 import { projects, procurement, tasks as initialTasks } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { isSupabaseConfigured } from './lib/supabase';
+import { loadShortTermState, saveShortTermState, type ShortTermWeeklyItem } from './lib/shortTermRepository';
 import type { CalendarEvent, Page, Project, ScheduleDependency, Task } from './types';
 import './styles.css';
 
@@ -77,8 +78,8 @@ function App() {
         {page === 'schedule' && <Schedule tasks={tasks} setTasks={setTasks} />}
         {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'procurement' && <Procurement />}
-        {page === 'medium' && <MediumPlan />}
-        {page === 'short' && <ShortTerm />}
+        {page === 'medium' && <MediumPlan tasks={tasks} />}
+        {page === 'short' && <ShortTerm tasks={tasks} projectId={project.id} />}
         {page === 'financial' && <Financial tasks={tasks} />}
         {page === 'settings' && <SettingsPage />}
       </main>
@@ -708,20 +709,124 @@ function Procurement() {
   );
 }
 
-function MediumPlan() {
-  const weeks = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8', 'S9', 'S10', 'S11', 'S12'];
+function MediumPlan({ tasks }: { tasks: Task[] }) {
+  type Unit = { id: string; name: string; weight: number; quantity: number; startDate: string; endDate: string; responsible: string };
+  type Window = { id: string; startDate: string; endDate: string; createdAt: string; tasks: Task[] };
+  const [analysisStart, setAnalysisStart] = useState(() => tasks[0]?.startDate ?? toIsoDate(new Date()));
+  const [windowData, setWindowData] = useState<Window | null>(null);
+  const [units, setUnits] = useState<Record<string, Unit[]>>({});
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [newUnitName, setNewUnitName] = useState('');
+  const mediumLabelsRef = useRef<HTMLDivElement | null>(null);
+  function threeMonthsAfter(value: string) {
+    const date = parseDate(value);
+    date.setMonth(date.getMonth() + 3);
+    return toIsoDate(date);
+  }
+  const analysisEnd = threeMonthsAfter(analysisStart);
+  const previewTasks = tasks.filter((task) => task.startDate <= analysisEnd && task.endDate >= analysisStart);
+  function createWindow() {
+    const snapshot = previewTasks.map((task) => ({ ...task, services: [...(task.services ?? [])] }));
+    setWindowData({ id: crypto.randomUUID(), startDate: analysisStart, endDate: analysisEnd, createdAt: new Date().toISOString(), tasks: snapshot });
+    setUnits(Object.fromEntries(snapshot.map((task) => [task.id, [{ id: crypto.randomUUID(), name: task.lot, weight: 100, quantity: task.quantity ?? 0, startDate: task.startDate, endDate: task.endDate, responsible: task.responsible ?? '' }]])));
+    setSelectedTaskId(null);
+  }
+  function addUnit(task: Task) {
+    if (!newUnitName.trim()) return;
+    const current = units[task.id] ?? [];
+    const next = [...current, { id: crypto.randomUUID(), name: newUnitName.trim(), weight: 0, quantity: 0, startDate: task.startDate, endDate: task.endDate, responsible: task.responsible ?? '' }];
+    const base = Math.floor(10000 / next.length) / 100;
+    const distributed = next.map((unit, index) => ({ ...unit, weight: index === next.length - 1 ? Number((100 - base * (next.length - 1)).toFixed(2)) : base }));
+    setUnits({ ...units, [task.id]: distributed });
+    setNewUnitName('');
+  }
+  function updateUnit(taskId: string, unitId: string, patch: Partial<Unit>) {
+    setUnits({ ...units, [taskId]: (units[taskId] ?? []).map((unit) => unit.id === unitId ? { ...unit, ...patch } : unit) });
+  }
+  function removeUnit(taskId: string, unitId: string) {
+    const remaining = (units[taskId] ?? []).filter((unit) => unit.id !== unitId);
+    if (!remaining.length) return;
+    const base = Math.floor(10000 / remaining.length) / 100;
+    setUnits({ ...units, [taskId]: remaining.map((unit, index) => ({ ...unit, weight: index === remaining.length - 1 ? Number((100 - base * (remaining.length - 1)).toFixed(2)) : base })) });
+  }
+  const selectedTask = windowData?.tasks.find((task) => task.id === selectedTaskId);
+  const dayWidth = 13;
+  const timelineWidth = windowData ? Math.max(1100, (diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1) * dayWidth) : 0;
   return (
-    <section className="page">
-      <PageHeader title="Médio prazo" subtitle="Abertura de lotes, ponderação e matriz semanal." />
-      <div className="card table-wrap"><table><thead><tr><th>Lote aberto</th><th>Peso</th>{weeks.map((w) => <th key={w}>{w}</th>)}</tr></thead><tbody>{['Balancim 1', 'Balancim 2', 'Balancim 3'].map((lot, i) => <tr key={lot}><td>FACHADA / Fachada A / {lot}</td><td>{[30, 40, 30][i]}%</td>{weeks.map((w, wi) => <td key={w}>{wi >= i && wi <= i + 3 ? <span className="tag">{['BAL', 'EMB', 'IMP', 'TEX'][wi - i]}</span> : null}</td>)}</tr>)}</tbody></table></div>
+    <section className="page medium-page">
+      <PageHeader title="Médio prazo" subtitle="Janela independente de três meses para abertura e detalhamento dos lotes." />
+      <div className="medium-filter card"><label>Início da análise<input type="date" value={analysisStart} onChange={(event) => setAnalysisStart(event.target.value)} /></label><div><small>Período de três meses</small><strong>{parseDate(analysisStart).toLocaleDateString('pt-BR')} a {parseDate(analysisEnd).toLocaleDateString('pt-BR')}</strong></div><div><small>Atividades encontradas</small><strong>{previewTasks.length}</strong></div><button className="primary" onClick={createWindow}>{windowData ? 'Criar nova janela' : 'Filtrar e criar janela'}</button></div>
+      {!windowData && <div className="medium-empty card"><CalendarRange size={34} /><h3>Defina o período de análise</h3><p>As atividades serão copiadas do longo prazo e permanecerão independentes de alterações posteriores na base.</p></div>}
+      {windowData && <><div className="medium-window-info"><span className="pill">Janela congelada</span><b>{windowData.tasks.length} atividades</b><small>Criada em {new Date(windowData.createdAt).toLocaleString('pt-BR')}</small></div><div className="medium-timeline-shell"><div ref={mediumLabelsRef} className="medium-label-column"><div className="medium-label-head">Lote / atividade</div>{windowData.tasks.map((task) => <div className="medium-label-row" key={task.id} style={{ height: Math.max(76, (units[task.id]?.length ?? 1) * 66 + 10) }}><span>{task.lotMother} · {task.lot}</span><b>{task.packageName}</b><button onClick={() => setSelectedTaskId(task.id)}>Abrir local</button></div>)}</div><div className="medium-timeline-scroll" onScroll={(event) => { if (mediumLabelsRef.current) mediumLabelsRef.current.scrollTop = event.currentTarget.scrollTop; }}><div className="medium-timeline" style={{ width: timelineWidth }}><div className="medium-time-head">{Array.from({ length: 14 }).map((_, index) => { const date = addDays(parseDate(windowData.startDate), index * 7); return <span key={index} style={{ left: diffDays(parseDate(windowData.startDate), date) * dayWidth }}>S{index + 1}<small>{date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</small></span>})}</div>{windowData.tasks.map((task) => <div className="medium-task-row" key={task.id} style={{ height: Math.max(76, (units[task.id]?.length ?? 1) * 66 + 10) }}>{(units[task.id] ?? []).map((unit, unitIndex) => { const x = Math.max(0, diffDays(parseDate(windowData.startDate), parseDate(unit.startDate))) * dayWidth; const width = Math.max(90, (diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1) * dayWidth); return <button className="medium-task-card" key={unit.id} style={{ left: x, top: unitIndex * 66, width, borderColor: task.color }} onClick={() => setSelectedTaskId(task.id)}><i style={{ background: task.color }} /><strong>{unit.name}</strong><span>{task.packageName}</span><small>{unit.weight}% · {unit.quantity || '—'} {task.unit ?? ''} · {unit.responsible || 'Sem responsável'}</small></button>})}</div>)}</div></div></div></>}
+      <aside className={`calendar-drawer medium-drawer ${selectedTask ? 'open' : ''}`}>{selectedTask && <><button className="drawer-close" onClick={() => setSelectedTaskId(null)}>×</button><h3>Abrir local</h3><p><b>{selectedTask.packageName}</b><br />{selectedTask.lotMother} · {selectedTask.lot}</p><div className="medium-unit-add"><input value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Ex.: Balancim 1, Apto 101..." /><button className="primary" onClick={() => addUnit(selectedTask)}>Adicionar unidade</button></div><div className="medium-unit-list">{(units[selectedTask.id] ?? []).map((unit) => <article key={unit.id}><header><input value={unit.name} onChange={(event) => updateUnit(selectedTask.id, unit.id, { name: event.target.value })} /><button disabled={(units[selectedTask.id] ?? []).length === 1} onClick={() => removeUnit(selectedTask.id, unit.id)}>×</button></header><div><label>Peso %<input type="number" min="0" max="100" step=".01" value={unit.weight} onChange={(event) => updateUnit(selectedTask.id, unit.id, { weight: Number(event.target.value) })} /></label><label>Quantidade<input type="number" min="0" value={unit.quantity} onChange={(event) => updateUnit(selectedTask.id, unit.id, { quantity: Number(event.target.value) })} /></label><label>Início<input type="date" value={unit.startDate} onChange={(event) => updateUnit(selectedTask.id, unit.id, { startDate: event.target.value })} /></label><label>Fim<input type="date" value={unit.endDate} onChange={(event) => updateUnit(selectedTask.id, unit.id, { endDate: event.target.value })} /></label><label className="wide">Responsável<input value={unit.responsible} onChange={(event) => updateUnit(selectedTask.id, unit.id, { responsible: event.target.value })} /></label></div></article>)}</div><div className={`medium-weight-total ${Math.abs((units[selectedTask.id] ?? []).reduce((sum, unit) => sum + unit.weight, 0) - 100) < .01 ? 'ok' : 'invalid'}`}>Soma dos pesos: <b>{(units[selectedTask.id] ?? []).reduce((sum, unit) => sum + unit.weight, 0).toFixed(2)}%</b></div></>}</aside>
     </section>
   );
 }
 
-function ShortTerm() {
-  const marking = 100 * 0.2;
-  const wall = 50 * 0.8;
-  return <section className="page"><PageHeader title="Curto prazo" subtitle="Microserviços ponderados e medição." /><div className="metric-grid"><Metric label="Marcação 20% x 100%" value="20%" /><Metric label="Elevação 80% x 50%" value="40%" /><Metric label="Pacote consolidado" value={`${marking + wall}%`} /></div></section>;
+function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
+  type ShortTab = 'dashboard' | 'planning' | 'matrix' | 'ppc' | 'history' | 'config';
+  const [tab, setTab] = useState<ShortTab>('dashboard');
+  const [weekStart, setWeekStart] = useState(() => toIsoDate(new Date()));
+  const [teams, setTeams] = useState(['Equipe própria', 'Empreiteiro A']);
+  const [reasons, setReasons] = useState(['Clima', 'Material', 'Mão de obra', 'Projeto', 'Liberação']);
+  const [weekly, setWeekly] = useState<ShortTermWeeklyItem[]>([]);
+  const [history, setHistory] = useState<Array<{ week: string; ppc: number; planned: number; completed: number }>>([]);
+  const [persistenceReady, setPersistenceReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'local' | 'saving' | 'saved' | 'error'>('local');
+  useEffect(() => {
+    let active = true;
+    setPersistenceReady(false);
+    void loadShortTermState(projectId).then((state) => {
+      if (!active) return;
+      if (state) {
+        setWeekly(state.weekly ?? []);
+        setTeams(state.teams?.length ? state.teams : ['Equipe própria', 'Empreiteiro A']);
+        setReasons(state.reasons?.length ? state.reasons : ['Clima', 'Material', 'Mão de obra', 'Projeto', 'Liberação']);
+        setHistory(state.history ?? []);
+      }
+      setSyncStatus(isSupabaseConfigured ? 'saved' : 'local');
+      setPersistenceReady(true);
+    }).catch(() => { if (active) { setSyncStatus('error'); setPersistenceReady(true); } });
+    return () => { active = false; };
+  }, [projectId]);
+  useEffect(() => {
+    if (!persistenceReady || !isSupabaseConfigured) return;
+    setSyncStatus('saving');
+    const timer = window.setTimeout(() => {
+      void saveShortTermState(projectId, { weekly, teams, reasons, history })
+        .then(() => setSyncStatus('saved'))
+        .catch(() => setSyncStatus('error'));
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [projectId, weekly, teams, reasons, history, persistenceReady]);
+  const weekEnd = toIsoDate(addDays(parseDate(weekStart), 6));
+  const candidates = tasks.filter((task) => task.startDate <= weekEnd && task.endDate >= weekStart);
+  const currentWeekly = weekly.filter((item) => item.weekStart === weekStart);
+  const weeklyTasks = currentWeekly.map((item) => ({ item, task: tasks.find((task) => task.id === item.taskId) })).filter((entry): entry is { item: ShortTermWeeklyItem; task: Task } => Boolean(entry.task));
+  const completed = weeklyTasks.filter(({ item }) => item.measured >= item.planned).length;
+  const ppc = weeklyTasks.length ? completed / weeklyTasks.length * 100 : 0;
+  const measuredAverage = weeklyTasks.length ? weeklyTasks.reduce((sum, entry) => sum + entry.item.measured, 0) / weeklyTasks.length : 0;
+  function addTask(task: Task) {
+    if (currentWeekly.some((item) => item.taskId === task.id)) return;
+    setWeekly([...weekly, { id: crypto.randomUUID(), taskId: task.id, weekStart, planned: 100, measured: 0, team: teams[0] ?? '', reason: '', notes: '' }]);
+  }
+  function updateWeekly(id: string, patch: Partial<ShortTermWeeklyItem>) {
+    setWeekly(weekly.map((item) => item.id === id ? { ...item, ...patch } : item));
+  }
+  function finalizeWeek() {
+    setHistory([...history.filter((item) => item.week !== weekStart), { week: weekStart, ppc, planned: weeklyTasks.length, completed }]);
+  }
+  const tabLabels: Array<[ShortTab, string]> = [['dashboard', 'Painel'], ['planning', 'Planejamento semanal'], ['matrix', 'Matriz geral'], ['ppc', 'Detalhamento PPC'], ['history', 'Histórico andamento'], ['config', 'Configurações']];
+  return <section className="page short-term">
+    <PageHeader title="Curto prazo" subtitle="Planejamento semanal, medição física e acompanhamento da obra."><span className={`sync-pill ${syncStatus}`}>{syncStatus === 'saved' ? 'Supabase sincronizado' : syncStatus === 'saving' ? 'Salvando…' : syncStatus === 'error' ? 'Falha na sincronização' : 'Modo local'}</span></PageHeader>
+    <nav className="short-tabs">{tabLabels.map(([value, label]) => <button className={tab === value ? 'active' : ''} onClick={() => setTab(value)} key={value}>{label}</button>)}</nav>
+    {tab === 'dashboard' && <><div className="metric-grid"><Metric label="PPC da semana" value={`${ppc.toFixed(1)}%`} /><Metric label="Atividades planejadas" value={String(weeklyTasks.length)} /><Metric label="Concluídas" value={String(completed)} /><Metric label="Avanço médio" value={`${measuredAverage.toFixed(1)}%`} /></div><div className="short-dashboard-grid"><div className="card"><h3>Resumo da semana</h3><div className="ppc-ring" style={{ '--ppc': `${ppc * 3.6}deg` } as React.CSSProperties}><strong>{ppc.toFixed(0)}%</strong><span>PPC</span></div></div><div className="card"><h3>Pendências por motivo</h3>{reasons.map((reason) => <div className="reason-row" key={reason}><span>{reason}</span><b>{currentWeekly.filter((item) => item.reason === reason).length}</b></div>)}</div></div></>}
+    {tab === 'planning' && <><div className="weekly-toolbar card"><label>Início da semana<input type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} /></label><span>{parseDate(weekStart).toLocaleDateString('pt-BR')} a {parseDate(weekEnd).toLocaleDateString('pt-BR')}</span><button className="primary" onClick={finalizeWeek}>Finalizar semana</button></div><div className="short-planning-grid"><div className="card candidate-list"><h3>Atividades do cronograma</h3><small>{candidates.length} atividades no período</small>{candidates.map((task) => <button key={task.id} disabled={currentWeekly.some((item) => item.taskId === task.id)} onClick={() => addTask(task)}><span><b>{task.packageName}</b><small>{task.lotMother} · {task.lot}</small></span><i>＋</i></button>)}</div><div className="card weekly-list"><h3>Plano semanal</h3>{weeklyTasks.map(({ item, task }) => <article key={item.id}><header><div><b>{task.packageName}</b><small>{task.lotMother} · {task.lot}</small></div><button onClick={() => setWeekly(weekly.filter((entry) => entry.id !== item.id))}>×</button></header><div className="weekly-fields"><label>Meta %<input type="number" min="0" max="100" value={item.planned} onChange={(event) => updateWeekly(item.id, { planned: Number(event.target.value) })} /></label><label>Realizado %<input type="number" min="0" max="100" value={item.measured} onChange={(event) => updateWeekly(item.id, { measured: Number(event.target.value) })} /></label><label>Equipe<select value={item.team} onChange={(event) => updateWeekly(item.id, { team: event.target.value })}>{teams.map((team) => <option key={team}>{team}</option>)}</select></label><label>Motivo<select value={item.reason} onChange={(event) => updateWeekly(item.id, { reason: event.target.value })}><option value="">Sem restrição</option>{reasons.map((reason) => <option key={reason}>{reason}</option>)}</select></label></div><textarea placeholder="Observações da semana" value={item.notes} onChange={(event) => updateWeekly(item.id, { notes: event.target.value })} /></article>)}</div></div></>}
+    {tab === 'matrix' && <div className="card table-wrap"><table><thead><tr><th>Lote-mãe</th><th>Lote</th><th>Pacote</th><th>Planejado</th><th>Realizado</th><th>Situação</th></tr></thead><tbody>{weeklyTasks.map(({ item, task }) => <tr key={item.id}><td>{task.lotMother}</td><td>{task.lot}</td><td>{task.packageName}</td><td>{item.planned}%</td><td>{item.measured}%</td><td><span className={`short-status ${item.measured >= item.planned ? 'ok' : 'late'}`}>{item.measured >= item.planned ? 'Concluída' : 'Pendente'}</span></td></tr>)}</tbody></table></div>}
+    {tab === 'ppc' && <div className="short-team-grid">{teams.map((team) => { const teamItems = weeklyTasks.filter(({ item }) => item.team === team); const teamDone = teamItems.filter(({ item }) => item.measured >= item.planned).length; const teamPpc = teamItems.length ? teamDone / teamItems.length * 100 : 0; return <article className="card" key={team}><small>EQUIPE / EMPREITEIRO</small><h3>{team}</h3><strong>{teamPpc.toFixed(1)}%</strong><span>{teamDone}/{teamItems.length} atividades concluídas</span></article>})}</div>}
+    {tab === 'history' && <div className="card table-wrap"><table><thead><tr><th>Semana</th><th>Planejadas</th><th>Concluídas</th><th>PPC</th></tr></thead><tbody>{history.map((item) => <tr key={item.week}><td>{parseDate(item.week).toLocaleDateString('pt-BR')}</td><td>{item.planned}</td><td>{item.completed}</td><td><b>{item.ppc.toFixed(1)}%</b></td></tr>)}</tbody></table>{!history.length && <p>Nenhuma semana finalizada.</p>}</div>}
+    {tab === 'config' && <div className="short-config-grid"><div className="card"><h3>Equipes</h3>{teams.map((team) => <div className="config-chip" key={team}><span>{team}</span><button onClick={() => setTeams(teams.filter((item) => item !== team))}>×</button></div>)}<button onClick={() => { const name = window.prompt('Nome da equipe'); if (name?.trim()) setTeams([...teams, name.trim()]); }}>Adicionar equipe</button></div><div className="card"><h3>Motivos de atraso</h3>{reasons.map((reason) => <div className="config-chip" key={reason}><span>{reason}</span><button onClick={() => setReasons(reasons.filter((item) => item !== reason))}>×</button></div>)}<button onClick={() => { const name = window.prompt('Novo motivo'); if (name?.trim()) setReasons([...reasons, name.trim()]); }}>Adicionar motivo</button></div></div>}
+  </section>;
 }
 
 function Financial({ tasks }: { tasks: Task[] }) {
