@@ -40,6 +40,19 @@ th { background: #f8fafc; color: #475569; }
 .file-button { border-radius: 10px; padding: 9px 12px; cursor: pointer; }
 .file-button input { display: none; }
 .line-shell { display: grid; grid-template-columns: 320px 1fr; height: calc(100vh - 160px); border: 1px solid #e5e7eb; background: #fff; border-radius: 18px; overflow: hidden; }
+.line-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: -8px 0 12px; }
+.line-toolbar label { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #475569; }
+.dep-list { padding: 8px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fafafa; font-size: 12px; line-height: 1.5; }
+.dep-list > div { display: flex; align-items: center; gap: 4px; }
+.dep-remove { margin-left: auto; padding: 0 5px; border: 0; color: #b91c1c; background: transparent; }
+.task-bar { cursor: grab; touch-action: none; filter: drop-shadow(0 1px 2px rgba(0,0,0,.2)); }
+.resize-handle { cursor: ew-resize; touch-action: none; }
+.target-highlight { stroke: #22c55e; stroke-width: 3; }
+.dependency-path, .dependency-preview { fill: none; pointer-events: none; }
+.dependency-path { stroke: #60636f; stroke-width: 1.4; opacity: .75; }
+.dependency-preview { stroke: #16a34a; stroke-width: 2.2; stroke-dasharray: 6 4; }
+.link-mode-banner { position: fixed; left: 50%; top: 76px; transform: translateX(-50%); z-index: 50; display: none; padding: 9px 13px; border-radius: 999px; background: #16a34a; color: #fff; font-size: 13px; font-weight: 700; box-shadow: 0 10px 25px rgba(0,0,0,.25); }
+.link-mode-banner.show { display: block; }
 .settings-panel { padding: 14px; border-right: 1px solid #e5e7eb; overflow: auto; }
 .settings-panel label { display: grid; gap: 4px; font-size: 12px; color: #475569; margin-bottom: 10px; }
 .chart-scroll { overflow: auto; }

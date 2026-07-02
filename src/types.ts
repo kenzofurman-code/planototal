@@ -35,6 +35,12 @@ export type Task = {
   cost?: number;
 };
 
+export type ScheduleDependency = {
+  from: string;
+  to: string;
+  type: 'FS';
+};
+
 export type ProcurementCard = {
   id: string;
   stage: string;

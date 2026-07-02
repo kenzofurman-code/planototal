@@ -16,7 +16,7 @@ import {
 import { projects, procurement, tasks as initialTasks } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { isSupabaseConfigured } from './lib/supabase';
-import type { Page, Project, Task } from './types';
+import type { Page, Project, ScheduleDependency, Task } from './types';
 import './styles.css';
 
 const pages: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
@@ -159,10 +159,17 @@ function Schedule({ tasks }: { tasks: Task[] }) {
 
 function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
   const [zoom, setZoom] = useState(3);
+  const [editMode, setEditMode] = useState(true);
+  const [dependencyMode, setDependencyMode] = useState(true);
+  const [showDeps, setShowDeps] = useState(true);
+  const [snapWeek, setSnapWeek] = useState(false);
+  const [dependencies, setDependencies] = useState<ScheduleDependency[]>([]);
   const [groupLines, setGroupLines] = useState<Record<string, number>>({ 'TORRE-PAVIMENTOS': 3, FACHADA: 3 });
   const [familyLane, setFamilyLane] = useState<Record<string, number>>({ ESTRUTURA: 1, ALVENARIA: 1, INSTALAÇÕES: 2, REVESTIMENTO: 3, FACHADA: 2, ESQUADRIAS: 3 });
-  const [drag, setDrag] = useState<null | { id: string; mode: 'move' | 'resize'; startX: number; start: string; end: string }>(null);
+  const [drag, setDrag] = useState<null | { id: string; mode: 'pending' | 'move' | 'resize' | 'link'; startX: number; startY: number; start: string; end: string; target?: string }>(null);
+  const [linkPoint, setLinkPoint] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const longPressRef = useRef<number | null>(null);
 
   const groups = Array.from(new Set(tasks.map((t) => t.lotMother)));
   const families = Array.from(new Set(tasks.map((t) => t.packageFamily)));
@@ -184,27 +191,81 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
 
   function xFor(d: Date) { return diffDays(projectStart, d) * zoomPx[zoom]; }
   function pointerX(event: React.PointerEvent) { return event.clientX - (svgRef.current?.getBoundingClientRect().left ?? 0); }
+  function pointerY(event: React.PointerEvent) { return event.clientY - (svgRef.current?.getBoundingClientRect().top ?? 0); }
   function updateTask(id: string, patch: Partial<Task>) { setTasks(tasks.map((t) => t.id === id ? { ...t, ...patch } : t)); }
+  function snapDate(date: Date) {
+    return snapWeek ? addDays(projectStart, Math.round(diffDays(projectStart, date) / 7) * 7) : date;
+  }
+  function clearLongPress() {
+    if (longPressRef.current !== null) window.clearTimeout(longPressRef.current);
+    longPressRef.current = null;
+  }
+  function beginDrag(event: React.PointerEvent<SVGElement>, task: Task, mode: 'pending' | 'resize') {
+    if (!editMode) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDrag({ id: task.id, mode, startX: pointerX(event), startY: pointerY(event), start: task.startDate, end: task.endDate });
+    if (mode === 'pending' && dependencyMode) {
+      clearLongPress();
+      longPressRef.current = window.setTimeout(() => {
+        setDrag((current) => current?.id === task.id && current.mode === 'pending' ? { ...current, mode: 'link' } : current);
+      }, 500);
+    }
+  }
 
   function onMove(event: React.PointerEvent) {
     if (!drag) return;
     const task = tasks.find((t) => t.id === drag.id);
     if (!task) return;
+    const dx = pointerX(event) - drag.startX;
+    const dy = pointerY(event) - drag.startY;
+    if (drag.mode === 'pending') {
+      if (Math.abs(dx) > 7 || Math.abs(dy) > 7) clearLongPress();
+      if (dependencyMode && Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) + 4) setDrag({ ...drag, mode: 'link' });
+      else if (Math.abs(dx) > 5) setDrag({ ...drag, mode: 'move' });
+      return;
+    }
+    if (drag.mode === 'link') {
+      const target = document.elementsFromPoint(event.clientX, event.clientY)
+        .map((element) => element.closest('[data-task-id]')?.getAttribute('data-task-id'))
+        .find((id) => id && id !== drag.id) ?? undefined;
+      setDrag({ ...drag, target });
+      setLinkPoint({ x: pointerX(event), y: pointerY(event) });
+      return;
+    }
     if (drag.mode === 'move') {
-      const delta = Math.round((pointerX(event) - drag.startX) / zoomPx[zoom]);
+      const delta = Math.round(dx / zoomPx[zoom]);
       const duration = diffDays(parseDate(drag.start), parseDate(drag.end));
-      const newStart = addDays(parseDate(drag.start), delta);
+      const newStart = snapDate(addDays(parseDate(drag.start), delta));
       updateTask(task.id, { startDate: toIsoDate(newStart), endDate: toIsoDate(addDays(newStart, duration)) });
     } else {
-      const newEnd = addDays(projectStart, Math.round(pointerX(event) / zoomPx[zoom]));
+      const newEnd = snapDate(addDays(projectStart, Math.round(pointerX(event) / zoomPx[zoom])));
       if (newEnd >= parseDate(task.startDate)) updateTask(task.id, { endDate: toIsoDate(newEnd) });
     }
   }
+  function finishDrag() {
+    clearLongPress();
+    if (drag?.mode === 'link' && drag.target) {
+      const exists = dependencies.some((dependency) => dependency.from === drag.id && dependency.to === drag.target);
+      if (!exists) setDependencies([...dependencies, { from: drag.id, to: drag.target, type: 'FS' }]);
+    }
+    setDrag(null);
+    setLinkPoint(null);
+  }
 
   let y = 90;
+  const taskLayout = new Map<string, { x: number; y: number; width: number; height: number }>();
   return (
     <section className="page">
       <PageHeader title="Linha de balanço" subtitle="Visualização e edição do cronograma." />
+      <div className="line-toolbar">
+        <label><input type="checkbox" checked={editMode} onChange={(e) => setEditMode(e.target.checked)} /> modo edição</label>
+        <label><input type="checkbox" checked={dependencyMode} onChange={(e) => setDependencyMode(e.target.checked)} /> dependências por arraste vertical</label>
+        <label><input type="checkbox" checked={showDeps} onChange={(e) => setShowDeps(e.target.checked)} /> mostrar dependências</label>
+        <label><input type="checkbox" checked={snapWeek} onChange={(e) => setSnapWeek(e.target.checked)} /> encaixar por semana</label>
+      </div>
+      {drag?.mode === 'link' && <div className="link-mode-banner show">Modo vínculo: arraste até a sucessora</div>}
       <div className="line-shell">
         <aside className="settings-panel">
           <h3>Configurações</h3>
@@ -213,9 +274,11 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
           {groups.map((g) => <label key={g}>{g}<select value={groupLines[g] ?? 3} onChange={(e) => setGroupLines({ ...groupLines, [g]: Number(e.target.value) })}><option value={1}>1 linha</option><option value={2}>2 linhas</option><option value={3}>3 linhas</option><option value={4}>4 linhas</option></select></label>)}
           <h4>Linha por família</h4>
           {families.map((f) => <label key={f}>{f}<select value={familyLane[f] ?? 1} onChange={(e) => setFamilyLane({ ...familyLane, [f]: Number(e.target.value) })}><option value={1}>Linha 1</option><option value={2}>Linha 2</option><option value={3}>Linha 3</option><option value={4}>Linha 4</option></select></label>)}
+          <h4>Dependências criadas</h4>
+          <div className="dep-list">{dependencies.length ? dependencies.map((d) => <div key={`${d.from}-${d.to}`}>{tasks.find((t) => t.id === d.from)?.packageName} → {tasks.find((t) => t.id === d.to)?.packageName} ({d.type}) <button className="dep-remove" onClick={() => setDependencies(dependencies.filter((item) => item !== d))}>×</button></div>) : 'Nenhuma dependência.'}</div>
         </aside>
         <div className="chart-scroll">
-          <svg ref={svgRef} width={width} height={height} onPointerMove={onMove} onPointerUp={() => setDrag(null)}>
+          <svg ref={svgRef} width={width} height={height} onPointerMove={onMove} onPointerUp={finishDrag} onPointerCancel={finishDrag}>
             <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
             {Array.from({ length: 75 }).map((_, i) => {
               const d = addDays(projectStart, i * 7);
@@ -236,9 +299,26 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
                 const x = xFor(parseDate(t.startDate));
                 const barW = Math.max(10, (diffDays(parseDate(t.startDate), parseDate(t.endDate)) + 1) * zoomPx[zoom]);
                 const barY = currentY + 8 + (lane - 1) * 26;
-                return <g key={t.id}><rect x={x} y={barY} width={barW} height={18} rx={4} fill={t.color} onPointerDown={(e) => setDrag({ id: t.id, mode: 'move', startX: pointerX(e), start: t.startDate, end: t.endDate })} /><rect x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => { e.stopPropagation(); setDrag({ id: t.id, mode: 'resize', startX: pointerX(e), start: t.startDate, end: t.endDate }); }} /><text x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">{t.packageName}</text><rect x={x} y={barY + 14} width={barW * t.progress / 100} height={4} fill="#fff" opacity={0.55} /></g>;
+                taskLayout.set(t.id, { x, y: barY, width: barW, height: 18 });
+                return <g key={t.id} data-task-id={t.id}><rect className={`task-bar ${drag?.target === t.id ? 'target-highlight' : ''}`} x={x} y={barY} width={barW} height={18} rx={4} fill={t.color} onPointerDown={(e) => beginDrag(e, t, 'pending')} /><rect className="resize-handle" x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => beginDrag(e, t, 'resize')} /><text pointerEvents="none" x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">{t.packageName}</text><rect pointerEvents="none" x={x} y={barY + 14} width={barW * t.progress / 100} height={4} fill="#fff" opacity={0.55} /></g>;
               })}</g>;
             })}
+            {showDeps && dependencies.map((dependency) => {
+              const from = taskLayout.get(dependency.from);
+              const to = taskLayout.get(dependency.to);
+              if (!from || !to) return null;
+              const startX = from.x + from.width;
+              const startY = from.y + from.height / 2;
+              const endX = to.x;
+              const endY = to.y + to.height / 2;
+              const middleX = Math.max(startX + 18, (startX + endX) / 2);
+              return <path className="dependency-path" key={`${dependency.from}-${dependency.to}`} d={`M ${startX} ${startY} C ${middleX} ${startY}, ${middleX} ${endY}, ${endX} ${endY}`} />;
+            })}
+            {drag?.mode === 'link' && linkPoint && (() => {
+              const from = taskLayout.get(drag.id);
+              if (!from) return null;
+              return <path className="dependency-preview" d={`M ${from.x + from.width} ${from.y + from.height / 2} C ${from.x + from.width + 40} ${from.y + from.height / 2}, ${linkPoint.x - 40} ${linkPoint.y}, ${linkPoint.x} ${linkPoint.y}`} />;
+            })()}
           </svg>
         </div>
       </div>
