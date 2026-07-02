@@ -33,7 +33,7 @@ const pages: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
 
 const projectStart = parseDate('2025-08-01');
 const chartEnd = parseDate('2026-12-01');
-const zoomPx: Record<number, number> = { 1: 2.2, 2: 3.2, 3: 4.8, 4: 7.2, 5: 10.5 };
+const zoomPx: Record<number, number> = { 1: 4.8, 2: 6.5, 3: 8.5, 4: 11, 5: 14, 6: 18, 7: 24 };
 
 function App() {
   const [collapsed, setCollapsed] = useState(true);
@@ -158,7 +158,7 @@ function Schedule({ tasks }: { tasks: Task[] }) {
 }
 
 function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
-  const [zoom, setZoom] = useState(3);
+  const [zoom, setZoom] = useState(1);
   const [editMode, setEditMode] = useState(true);
   const [dependencyMode, setDependencyMode] = useState(true);
   const [showDeps, setShowDeps] = useState(true);
@@ -166,7 +166,8 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
   const [dependencies, setDependencies] = useState<ScheduleDependency[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [dateFormat, setDateFormat] = useState<'numeric' | 'short'>('numeric');
+  const [monthFormat, setMonthFormat] = useState<'index' | 'numeric'>('index');
+  const [weekFormat, setWeekFormat] = useState<'short' | 'numeric' | 'day'>('numeric');
   const [groupLines, setGroupLines] = useState<Record<string, number>>({ 'TORRE-PAVIMENTOS': 3, FACHADA: 3 });
   const [familyLane, setFamilyLane] = useState<Record<string, number>>({ ESTRUTURA: 1, ALVENARIA: 1, INSTALAÇÕES: 2, REVESTIMENTO: 3, FACHADA: 2, ESQUADRIAS: 3 });
   const [drag, setDrag] = useState<null | { id: string; mode: 'pending' | 'move' | 'resize' | 'link'; startX: number; startY: number; start: string; end: string; target?: string }>(null);
@@ -322,15 +323,14 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
         <aside className={`chart-drawer settings-drawer ${settingsOpen ? 'open' : ''}`}>
           <button className="drawer-close" onClick={() => setSettingsOpen(false)}>×</button>
           <h3>Configurações</h3>
-          <label>Zoom<input type="range" min={1} max={5} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} /></label>
+          <label>Zoom<input type="range" min={1} max={7} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} /></label>
           <h4>Linhas por lote-mãe</h4>
           {groups.map((g) => <label key={g}>{g}<select value={groupLines[g] ?? 3} onChange={(e) => setGroupLines({ ...groupLines, [g]: Number(e.target.value) })}><option value={1}>1 linha</option><option value={2}>2 linhas</option><option value={3}>3 linhas</option><option value={4}>4 linhas</option></select></label>)}
           <h4>Linha por família</h4>
           {families.map((f) => <label key={f}>{f}<select value={familyLane[f] ?? 1} onChange={(e) => setFamilyLane({ ...familyLane, [f]: Number(e.target.value) })}><option value={1}>Linha 1</option><option value={2}>Linha 2</option><option value={3}>Linha 3</option><option value={4}>Linha 4</option></select></label>)}
           <h4>Cabeçalho de datas</h4>
-          <label>Formato<select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as 'numeric' | 'short')}><option value="numeric">DD/MM</option><option value="short">DD MMM</option></select></label>
-          <h4>Dependências criadas</h4>
-          <div className="dep-list">{dependencies.length ? dependencies.map((d) => <div key={`${d.from}-${d.to}`}>{tasks.find((t) => t.id === d.from)?.packageName} → {tasks.find((t) => t.id === d.to)?.packageName} ({d.type}) <button className="dep-remove" onClick={() => setDependencies(dependencies.filter((item) => item !== d))}>×</button></div>) : 'Nenhuma dependência.'}</div>
+          <label>Nível superior<select value={monthFormat} onChange={(e) => setMonthFormat(e.target.value as 'index' | 'numeric')}><option value="index">M1, M2… desde o início</option><option value="numeric">MM/AA</option></select></label>
+          <label>Segundo nível<select value={weekFormat} onChange={(e) => setWeekFormat(e.target.value as 'short' | 'numeric' | 'day')}><option value="short">DD/MMM</option><option value="numeric">DD/MM</option><option value="day">Somente DD</option></select></label>
         </aside>
         <div className="chart-scroll">
           <div className="lot-labels" style={{ height }}>
@@ -348,12 +348,16 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
               const d = addDays(projectStart, i * 7);
               const weekEnd = addDays(d, 6);
               const x = xFor(d);
-              const format = (date: Date) => date.toLocaleDateString('pt-BR', dateFormat === 'numeric' ? { day: '2-digit', month: '2-digit' } : { day: '2-digit', month: 'short' });
+              const format = (date: Date) => {
+                if (weekFormat === 'day') return date.toLocaleDateString('pt-BR', { day: '2-digit' });
+                return date.toLocaleDateString('pt-BR', weekFormat === 'numeric' ? { day: '2-digit', month: '2-digit' } : { day: '2-digit', month: 'short' });
+              };
               return <g key={i}><line x1={x} x2={x} y1={38} y2={height} stroke="#d9dde6" /><text x={x + 3} y={59} fontSize={10}>{format(d)}–{format(weekEnd)}</text></g>;
             })}
             {Array.from({ length: 18 }).map((_, i) => {
               const date = new Date(projectStart.getFullYear(), projectStart.getMonth() + i, 1);
-              return <g key={`month-${i}`}><line x1={xFor(date)} x2={xFor(date)} y1={0} y2={height} stroke="#aeb4c2" /><text x={xFor(date) + 4} y={24} fontSize={12} fontWeight={700}>{date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</text></g>;
+              const label = monthFormat === 'index' ? `M${i + 1}` : date.toLocaleDateString('pt-BR', { month: '2-digit', year: '2-digit' });
+              return <g key={`month-${i}`}><line x1={xFor(date)} x2={xFor(date)} y1={0} y2={height} stroke="#aeb4c2" /><text x={xFor(date) + 4} y={24} fontSize={12} fontWeight={700}>{label}</text></g>;
             })}
             {['2025-09-01', '2026-01-12', '2026-06-10'].map((date, i) => {
               const x = xFor(parseDate(date));
@@ -392,7 +396,7 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
         </div>
         <aside className={`chart-drawer task-drawer ${selectedTask ? 'open' : ''}`}>
           <button className="drawer-close" onClick={() => setSelectedTask(null)}>×</button>
-          {selectedTask && <><h3>{selectedTask.packageName}</h3><dl><dt>Lote-mãe</dt><dd>{selectedTask.lotMother}</dd><dt>Lote</dt><dd>{selectedTask.lot}</dd><dt>Família</dt><dd>{selectedTask.packageFamily}</dd><dt>Início</dt><dd>{selectedTask.startDate}</dd><dt>Fim</dt><dd>{selectedTask.endDate}</dd><dt>Duração</dt><dd>{diffDays(parseDate(selectedTask.startDate), parseDate(selectedTask.endDate)) + 1} dias</dd><dt>Progresso</dt><dd>{selectedTask.progress}%</dd><dt>Quantidade</dt><dd>{selectedTask.quantity ?? '—'} {selectedTask.unit ?? ''}</dd><dt>Custo</dt><dd>{selectedTask.cost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) ?? '—'}</dd><dt>Microserviços</dt><dd>{microservices[selectedTask.packageFamily] ?? 'Não cadastrados'}</dd></dl></>}
+          {selectedTask && <><h3>{selectedTask.packageName}</h3><dl><dt>Lote-mãe</dt><dd>{selectedTask.lotMother}</dd><dt>Lote</dt><dd>{selectedTask.lot}</dd><dt>Família</dt><dd>{selectedTask.packageFamily}</dd><dt>Início</dt><dd>{selectedTask.startDate}</dd><dt>Fim</dt><dd>{selectedTask.endDate}</dd><dt>Duração</dt><dd>{diffDays(parseDate(selectedTask.startDate), parseDate(selectedTask.endDate)) + 1} dias</dd><dt>Progresso</dt><dd>{selectedTask.progress}%</dd><dt>Quantidade</dt><dd>{selectedTask.quantity ?? '—'} {selectedTask.unit ?? ''}</dd><dt>Custo</dt><dd>{selectedTask.cost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) ?? '—'}</dd><dt>Microserviços</dt><dd>{microservices[selectedTask.packageFamily] ?? 'Não cadastrados'}</dd></dl><h4>Dependências FS</h4><div className="dep-list">{dependencies.filter((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id).map((dependency) => <div key={`${dependency.from}-${dependency.to}`}><span>{tasks.find((task) => task.id === dependency.from)?.packageName} → {tasks.find((task) => task.id === dependency.to)?.packageName}</span><button className="dep-remove" onClick={() => setDependencies(dependencies.filter((item) => item !== dependency))}>×</button></div>)}{!dependencies.some((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id) && 'Nenhuma dependência.'}</div></>}
         </aside>
       </div>
     </section>
