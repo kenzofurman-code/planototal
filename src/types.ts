@@ -1,5 +1,7 @@
 export type Page =
   | 'projects'
+  | 'globalCalendar'
+  | 'workCalendar'
   | 'dashboard'
   | 'schedule'
   | 'line'
@@ -39,6 +41,15 @@ export type ScheduleDependency = {
   from: string;
   to: string;
   type: 'FS';
+};
+
+export type CalendarEvent = {
+  id: string;
+  projectId?: string;
+  date: string;
+  title: string;
+  kind: 'holiday' | 'routine' | 'important';
+  color: string;
 };
 
 export type ProcurementCard = {

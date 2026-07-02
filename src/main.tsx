@@ -5,6 +5,8 @@ import {
   BarChart3,
   Building2,
   CalendarRange,
+  ChevronLeft,
+  ChevronRight,
   CheckSquare,
   FileSpreadsheet,
   Home,
@@ -16,11 +18,12 @@ import {
 import { projects, procurement, tasks as initialTasks } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { isSupabaseConfigured } from './lib/supabase';
-import type { Page, Project, ScheduleDependency, Task } from './types';
+import type { CalendarEvent, Page, Project, ScheduleDependency, Task } from './types';
 import './styles.css';
 
 const pages: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: 'projects', label: 'Projetos', icon: <Home /> },
+  { key: 'workCalendar', label: 'Calendário da obra', icon: <CalendarRange /> },
   { key: 'dashboard', label: 'Dashboard', icon: <BarChart3 /> },
   { key: 'schedule', label: 'Cronograma', icon: <FileSpreadsheet /> },
   { key: 'line', label: 'Linha de balanço', icon: <Building2 /> },
@@ -40,6 +43,7 @@ function App() {
   const [page, setPage] = useState<Page>('projects');
   const [project, setProject] = useState<Project>(projects[0]);
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
 
   return (
     <div className="app">
@@ -62,7 +66,9 @@ function App() {
           <b className="pill">{isSupabaseConfigured ? 'Supabase conectado' : 'Modo demo local'}</b>
         </header>
 
-        {page === 'projects' && <Projects selected={project} onSelect={(p) => { setProject(p); setPage('dashboard'); }} />}
+        {page === 'projects' && <Projects selected={project} onCalendar={() => setPage('globalCalendar')} onSelect={(p) => { setProject(p); setPage('dashboard'); }} />}
+        {page === 'globalCalendar' && <AnnualCalendar title="Calendário geral" subtitle="Feriados nacionais e datas compartilhadas entre todas as obras." events={calendarEvents.filter((event) => !event.projectId)} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId), ...events])} />}
+        {page === 'workCalendar' && <AnnualCalendar title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id)} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId !== project.id), ...events.map((event) => ({ ...event, projectId: project.id }))])} />}
         {page === 'dashboard' && <Dashboard tasks={tasks} />}
         {page === 'schedule' && <Schedule tasks={tasks} />}
         {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} />}
@@ -88,10 +94,11 @@ function PageHeader({ title, subtitle, children }: { title: string; subtitle: st
   );
 }
 
-function Projects({ selected, onSelect }: { selected: Project; onSelect: (p: Project) => void }) {
+function Projects({ selected, onSelect, onCalendar }: { selected: Project; onSelect: (p: Project) => void; onCalendar: () => void }) {
   return (
     <section className="page">
       <PageHeader title="Projetos" subtitle="Selecione uma obra para abrir o planejamento integrado.">
+        <button onClick={onCalendar}><CalendarRange size={17} /> Calendário</button>
         <button className="primary">Novo projeto</button>
       </PageHeader>
       <div className="project-grid">
@@ -110,6 +117,71 @@ function Projects({ selected, onSelect }: { selected: Project; onSelect: (p: Pro
       </div>
     </section>
   );
+}
+
+function AnnualCalendar({ title, subtitle, events, onChange }: { title: string; subtitle: string; events: CalendarEvent[]; onChange: (events: CalendarEvent[]) => void }) {
+  const [year, setYear] = useState(new Date().getFullYear());
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [draft, setDraft] = useState({ date: `${year}-01-01`, title: '', kind: 'holiday' as CalendarEvent['kind'], color: '#ef4444' });
+  const weekdays = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+
+  function openDate(date?: string) {
+    setDraft({ date: date ?? `${year}-01-01`, title: '', kind: 'holiday', color: '#ef4444' });
+    setDrawerOpen(true);
+  }
+  function saveEvent(event: React.FormEvent) {
+    event.preventDefault();
+    if (!draft.title.trim()) return;
+    onChange([...events, { id: crypto.randomUUID(), ...draft }]);
+    setDrawerOpen(false);
+  }
+
+  return <section className="page calendar-page">
+    <PageHeader title={title} subtitle={subtitle}>
+      <button onClick={() => openDate()}>Cadastrar data</button>
+    </PageHeader>
+    <div className="calendar-year-nav">
+      <button aria-label="Ano anterior" onClick={() => setYear(year - 1)}><ChevronLeft /></button>
+      <h2>{year}</h2>
+      <button aria-label="Próximo ano" onClick={() => setYear(year + 1)}><ChevronRight /></button>
+    </div>
+    <div className="year-calendar">
+      {Array.from({ length: 12 }).map((_, month) => {
+        const firstDay = new Date(year, month, 1).getDay();
+        const days = new Date(year, month + 1, 0).getDate();
+        return <article className="calendar-month" key={month}>
+          <h3>{new Date(year, month, 1).toLocaleDateString('pt-BR', { month: 'long' })}</h3>
+          <div className="calendar-weekdays">{weekdays.map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
+          <div className="calendar-days">
+            {Array.from({ length: firstDay }).map((_, index) => <span className="calendar-day empty" key={`empty-${index}`} />)}
+            {Array.from({ length: days }).map((_, index) => {
+              const day = index + 1;
+              const date = toIsoDate(new Date(year, month, day));
+              const dayEvents = events.filter((item) => item.date === date);
+              const weekend = [0, 6].includes(new Date(year, month, day).getDay());
+              return <button className={`calendar-day ${weekend ? 'weekend' : 'workday'}`} key={day} onClick={() => openDate(date)}>
+                <b>{day}</b>
+                {dayEvents.map((item) => <i key={item.id} title={item.title} style={{ background: item.color }} />)}
+              </button>;
+            })}
+          </div>
+        </article>;
+      })}
+    </div>
+    <aside className={`calendar-drawer ${drawerOpen ? 'open' : ''}`}>
+      <button className="drawer-close" onClick={() => setDrawerOpen(false)}>×</button>
+      <h3>Nova marcação</h3>
+      <form onSubmit={saveEvent}>
+        <label>Data<input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} /></label>
+        <label>Descrição<input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Nome do feriado ou rotina" /></label>
+        <label>Tipo<select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as CalendarEvent['kind'] })}><option value="holiday">Feriado</option><option value="routine">Rotina</option><option value="important">Data importante</option></select></label>
+        <label>Cor<input type="color" value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} /></label>
+        <button className="primary" type="submit">Salvar marcação</button>
+      </form>
+      <h4>Marcações deste calendário</h4>
+      <div className="calendar-event-list">{events.filter((item) => item.date.startsWith(String(year))).map((item) => <div key={item.id}><i style={{ background: item.color }} /><span><b>{item.title}</b><small>{parseDate(item.date).toLocaleDateString('pt-BR')}</small></span><button onClick={() => onChange(events.filter((event) => event.id !== item.id))}>×</button></div>)}</div>
+    </aside>
+  </section>;
 }
 
 function Dashboard({ tasks }: { tasks: Task[] }) {
