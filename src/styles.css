@@ -56,12 +56,34 @@ th { background: #f8fafc; color: #475569; }
 .settings-panel label { display: grid; gap: 4px; font-size: 12px; color: #475569; margin-bottom: 10px; }
 .chart-scroll { position: absolute; inset: 0; overflow: auto; }
 .chart-settings-button { position: absolute; z-index: 12; top: 8px; right: 8px; display: grid; place-items: center; padding: 7px; box-shadow: 0 4px 12px rgba(15,23,42,.14); }
-.chart-drawer { position: absolute; z-index: 20; top: 0; right: 0; width: min(370px, 92%); height: 100%; padding: 18px; overflow: auto; background: #fff; border-left: 1px solid #d1d5db; box-shadow: -10px 0 30px rgba(15,23,42,.18); transform: translateX(105%); transition: transform .2s ease; }
+.chart-drawer { position: absolute; z-index: 20; top: 0; right: 0; width: min(390px, 94%); height: 100%; overflow: auto; background: #f8fafc; border-left: 1px solid #dbe1ea; box-shadow: -12px 0 32px rgba(15,23,42,.18); transform: translateX(105%); transition: transform .22s ease; }
 .chart-drawer.open { transform: translateX(0); }
-.drawer-close { float: right; border: 0; padding: 2px 8px; font-size: 24px; }
-.task-drawer dl { display: grid; grid-template-columns: 110px 1fr; gap: 10px; font-size: 13px; }
+.chart-drawer-head { position: sticky; z-index: 2; top: 0; display: flex; justify-content: space-between; align-items: flex-start; padding: 18px 20px; color: #fff; background: #17162f; }
+.chart-drawer-head h3 { margin: 3px 0; font-size: 19px; }
+.chart-drawer-head small, .chart-drawer-head span { color: #c7d2fe; }
+.chart-drawer-body { padding: 18px; }
+.drawer-close { border: 0; padding: 0 7px; color: inherit; background: transparent; font-size: 25px; }
+.task-drawer dl { display: grid; grid-template-columns: 105px 1fr; gap: 0; overflow: hidden; margin: 14px 0; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; font-size: 13px; }
 .task-drawer dt { color: #64748b; }
-.task-drawer dd { margin: 0; font-weight: 600; }
+.task-drawer dt, .task-drawer dd { margin: 0; padding: 10px 12px; border-bottom: 1px solid #eef2f7; }
+.task-drawer dd { font-weight: 600; }
+.task-progress { display: grid; grid-template-columns: 1fr auto; gap: 8px; padding: 14px; border-radius: 12px; background: #fff; border: 1px solid #e2e8f0; }
+.task-progress i { grid-column: 1 / -1; height: 7px; overflow: hidden; border-radius: 999px; background: #e2e8f0; }
+.task-progress i b { display: block; height: 100%; }
+.drawer-section { margin-top: 14px; padding: 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+.drawer-section h4 { margin: 0 0 9px; }
+.drawer-section p { margin: 0; color: #475569; font-size: 13px; }
+.version-panel { margin-top: 20px; padding-top: 16px; border-top: 1px solid #dbe1ea; }
+.version-panel-title { display: flex; justify-content: space-between; align-items: center; }
+.version-panel-title h4 { margin: 2px 0 12px; font-size: 16px; }
+.version-panel-title button { width: 38px; height: 38px; padding: 0; border: 0; border-radius: 50%; color: #fff; background: #4f46e5; font-size: 24px; }
+.version-card { display: grid; gap: 5px; margin: 10px 0; padding: 13px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+.version-card small { color: #64748b; }
+.version-kind { width: fit-content; padding: 3px 7px; border-radius: 999px; color: #3730a3; background: #eef2ff; font-size: 10px; font-weight: 700; text-transform: uppercase; }
+.version-kind.baseline { color: #166534; background: #dcfce7; }
+.version-kind.planned { color: #9a3412; background: #ffedd5; }
+.version-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.version-actions button { font-size: 11px; }
 .lot-labels { position: sticky; z-index: 8; left: 0; float: left; width: 220px; pointer-events: none; }
 .lot-label-header, .lot-label { position: absolute; left: 0; width: 220px; padding: 0 10px; display: flex; align-items: center; border-right: 1px solid #cfd3df; border-bottom: 1px solid #e5e7eb; background: rgba(255,255,255,.94); backdrop-filter: blur(3px); font-size: 12px; }
 .lot-label-header { position: sticky; top: 0; height: 90px; z-index: 2; font-weight: 700; background: #fafafa; }

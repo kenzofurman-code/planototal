@@ -72,7 +72,7 @@ function App() {
         {page === 'workCalendar' && <AnnualCalendar projects={projectList} projectId={project.id} title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id))))} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId !== project.id && event.projectId), ...calendarEvents.filter((event) => !event.projectId), ...events.filter((event) => event.projectId === project.id)])} />}
         {page === 'dashboard' && <Dashboard tasks={tasks} />}
         {page === 'schedule' && <Schedule tasks={tasks} />}
-        {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} />}
+        {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'procurement' && <Procurement />}
         {page === 'medium' && <MediumPlan />}
         {page === 'short' && <ShortTerm />}
@@ -259,8 +259,8 @@ function Schedule({ tasks }: { tasks: Task[] }) {
   );
 }
 
-function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
-  const [zoom, setZoom] = useState(1);
+function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (tasks: Task[]) => void; holidays: CalendarEvent[] }) {
+  const [zoom, setZoom] = useState(3);
   const [editMode, setEditMode] = useState(true);
   const [dependencyMode, setDependencyMode] = useState(true);
   const [showDeps, setShowDeps] = useState(true);
@@ -268,8 +268,12 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
   const [dependencies, setDependencies] = useState<ScheduleDependency[]>([]);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [monthFormat, setMonthFormat] = useState<'index' | 'numeric'>('index');
-  const [weekFormat, setWeekFormat] = useState<'short' | 'numeric' | 'day'>('numeric');
+  const [monthFormat, setMonthFormat] = useState<'index' | 'numeric'>('numeric');
+  const [weekFormat, setWeekFormat] = useState<'short' | 'numeric' | 'day'>('day');
+  const [versions, setVersions] = useState<Array<{ id: string; name: string; createdAt: string; kind: 'scenario' | 'baseline' | 'planned'; tasks: Task[] }>>([
+    { id: 'v00', name: 'Cronograma inicial · V00', createdAt: new Date().toISOString(), kind: 'scenario', tasks: initialTasks.map((task) => ({ ...task })) },
+  ]);
+  const [selectedVersionId, setSelectedVersionId] = useState('v00');
   const [groupLines, setGroupLines] = useState<Record<string, number>>({ 'TORRE-PAVIMENTOS': 3, FACHADA: 3 });
   const [familyLane, setFamilyLane] = useState<Record<string, number>>({ ESTRUTURA: 1, ALVENARIA: 1, INSTALAÇÕES: 2, REVESTIMENTO: 3, FACHADA: 2, ESQUADRIAS: 3 });
   const [drag, setDrag] = useState<null | { id: string; mode: 'pending' | 'move' | 'resize' | 'link'; startX: number; startY: number; start: string; end: string; target?: string }>(null);
@@ -394,6 +398,11 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
     setDrag(null);
     setLinkPoint(null);
   }
+  function closeDrawersOnEmpty(event: React.PointerEvent<SVGSVGElement>) {
+    if ((event.target as Element).closest('[data-task-id]')) return;
+    setSelectedTask(null);
+    setSettingsOpen(false);
+  }
 
   let y = 90;
   const taskLayout = new Map<string, { x: number; y: number; width: number; height: number }>();
@@ -410,6 +419,26 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
     INSTALAÇÕES: 'Infraestrutura · Passagem · Testes',
     REVESTIMENTO: 'Preparação · Aplicação · Acabamento',
   };
+  const selectedVersion = versions.find((version) => version.id === selectedVersionId);
+  function saveVersion(kind: 'scenario' | 'baseline' | 'planned') {
+    const labels = { scenario: 'Cenário', baseline: 'Linha de base', planned: 'Previsto' };
+    const next = { id: crypto.randomUUID(), name: `${labels[kind]} · V${String(versions.length).padStart(2, '0')}`, createdAt: new Date().toISOString(), kind, tasks: tasks.map((task) => ({ ...task })) };
+    setVersions([...versions, next]);
+    setSelectedVersionId(next.id);
+  }
+  function openVersion() {
+    if (selectedVersion) setTasks(selectedVersion.tasks.map((task) => ({ ...task })));
+  }
+  function changeVersionKind(kind: 'baseline' | 'planned') {
+    if (!selectedVersion) return;
+    setVersions(versions.map((version) => version.id === selectedVersion.id ? { ...version, kind } : version));
+  }
+  function deleteVersion() {
+    if (!selectedVersion || versions.length === 1) return;
+    const remaining = versions.filter((version) => version.id !== selectedVersion.id);
+    setVersions(remaining);
+    setSelectedVersionId(remaining[0].id);
+  }
   return (
     <section className="page">
       <PageHeader title="Linha de balanço" subtitle="Visualização e edição do cronograma." />
@@ -421,10 +450,10 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
       </div>
       {drag?.mode === 'link' && <div className="link-mode-banner show">Modo vínculo: arraste até a sucessora</div>}
       <div className="line-shell">
-        <button className="chart-settings-button" title="Configurações do cronograma" onClick={() => setSettingsOpen(true)}><Settings size={18} /></button>
-        <aside className={`chart-drawer settings-drawer ${settingsOpen ? 'open' : ''}`}>
-          <button className="drawer-close" onClick={() => setSettingsOpen(false)}>×</button>
-          <h3>Configurações</h3>
+        <button className="chart-settings-button" title="Configurações do cronograma" onPointerDown={(event) => event.stopPropagation()} onClick={() => { setSelectedTask(null); setSettingsOpen(true); }}><Settings size={18} /></button>
+        <aside className={`chart-drawer settings-drawer settings-panel ${settingsOpen ? 'open' : ''}`} onPointerDown={(event) => event.stopPropagation()}>
+          <div className="chart-drawer-head"><div><small>Linha de balanço</small><h3>Configurações</h3></div><button className="drawer-close" onClick={() => setSettingsOpen(false)}>×</button></div>
+          <div className="chart-drawer-body">
           <label>Zoom<input type="range" min={1} max={7} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} /></label>
           <h4>Linhas por lote-mãe</h4>
           {groups.map((g) => <label key={g}>{g}<select value={groupLines[g] ?? 3} onChange={(e) => setGroupLines({ ...groupLines, [g]: Number(e.target.value) })}><option value={1}>1 linha</option><option value={2}>2 linhas</option><option value={3}>3 linhas</option><option value={4}>4 linhas</option></select></label>)}
@@ -433,14 +462,29 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
           <h4>Cabeçalho de datas</h4>
           <label>Nível superior<select value={monthFormat} onChange={(e) => setMonthFormat(e.target.value as 'index' | 'numeric')}><option value="index">M1, M2… desde o início</option><option value="numeric">MM/AA</option></select></label>
           <label>Segundo nível<select value={weekFormat} onChange={(e) => setWeekFormat(e.target.value as 'short' | 'numeric' | 'day')}><option value="short">DD/MMM</option><option value="numeric">DD/MM</option><option value="day">Somente DD</option></select></label>
+          <div className="version-panel">
+            <div className="version-panel-title"><div><small>Cronograma</small><h4>Histórico de versões</h4></div><button title="Criar cenário" onClick={() => saveVersion('scenario')}>＋</button></div>
+            <label>Versão<select value={selectedVersionId} onChange={(e) => setSelectedVersionId(e.target.value)}>{versions.map((version) => <option key={version.id} value={version.id}>{version.name}</option>)}</select></label>
+            {selectedVersion && <div className="version-card"><span className={`version-kind ${selectedVersion.kind}`}>{selectedVersion.kind === 'baseline' ? 'Linha de base' : selectedVersion.kind === 'planned' ? 'Previsto' : 'Simulação'}</span><strong>{selectedVersion.name}</strong><small>{new Date(selectedVersion.createdAt).toLocaleString('pt-BR')}</small></div>}
+            <div className="version-actions"><button onClick={openVersion}>Abrir versão</button><button onClick={() => changeVersionKind('baseline')}>Salvar como linha de base</button><button onClick={() => changeVersionKind('planned')}>Salvar como previsto</button><button className="danger" disabled={versions.length === 1} onClick={deleteVersion}>Excluir</button></div>
+          </div>
+          </div>
         </aside>
         <div className="chart-scroll">
           <div className="lot-labels" style={{ height }}>
             <div className="lot-label-header">Lotes</div>
             {labelRows.map((row) => <div key={row.key} className={`lot-label ${row.type}`} style={{ top: row.top, height: row.height }}>{row.label}</div>)}
           </div>
-          <svg ref={svgRef} width={width} height={height} onPointerMove={onMove} onPointerUp={finishDrag} onPointerCancel={finishDrag}>
+          <svg ref={svgRef} width={width} height={height} onPointerDown={closeDrawersOnEmpty} onPointerMove={onMove} onPointerUp={finishDrag} onPointerCancel={finishDrag}>
             <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
+            {Array.from({ length: diffDays(projectStart, chartEnd) + 1 }).map((_, index) => {
+              const date = addDays(projectStart, index);
+              const iso = toIsoDate(date);
+              const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+              const holiday = holidays.find((event) => event.date === iso);
+              if (!isWeekend && !holiday) return null;
+              return <rect key={`off-${iso}`} x={xFor(date)} y={0} width={zoomPx[zoom]} height={height} fill={holiday ? '#e2e8f0' : '#f1f5f9'}><title>{holiday?.title ?? 'Final de semana'}</title></rect>;
+            })}
             {Array.from({ length: diffDays(projectStart, chartEnd) + 1 }).map((_, i) => {
               const date = addDays(projectStart, i);
               const x = xFor(date);
@@ -496,9 +540,8 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
             })()}
           </svg>
         </div>
-        <aside className={`chart-drawer task-drawer ${selectedTask ? 'open' : ''}`}>
-          <button className="drawer-close" onClick={() => setSelectedTask(null)}>×</button>
-          {selectedTask && <><h3>{selectedTask.packageName}</h3><dl><dt>Lote-mãe</dt><dd>{selectedTask.lotMother}</dd><dt>Lote</dt><dd>{selectedTask.lot}</dd><dt>Família</dt><dd>{selectedTask.packageFamily}</dd><dt>Início</dt><dd>{selectedTask.startDate}</dd><dt>Fim</dt><dd>{selectedTask.endDate}</dd><dt>Duração</dt><dd>{diffDays(parseDate(selectedTask.startDate), parseDate(selectedTask.endDate)) + 1} dias</dd><dt>Progresso</dt><dd>{selectedTask.progress}%</dd><dt>Quantidade</dt><dd>{selectedTask.quantity ?? '—'} {selectedTask.unit ?? ''}</dd><dt>Custo</dt><dd>{selectedTask.cost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) ?? '—'}</dd><dt>Microserviços</dt><dd>{microservices[selectedTask.packageFamily] ?? 'Não cadastrados'}</dd></dl><h4>Dependências FS</h4><div className="dep-list">{dependencies.filter((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id).map((dependency) => <div key={`${dependency.from}-${dependency.to}`}><span>{tasks.find((task) => task.id === dependency.from)?.packageName} → {tasks.find((task) => task.id === dependency.to)?.packageName}</span><button className="dep-remove" onClick={() => setDependencies(dependencies.filter((item) => item !== dependency))}>×</button></div>)}{!dependencies.some((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id) && 'Nenhuma dependência.'}</div></>}
+        <aside className={`chart-drawer task-drawer ${selectedTask ? 'open' : ''}`} onPointerDown={(event) => event.stopPropagation()}>
+          {selectedTask && <><div className="chart-drawer-head"><div><small>{selectedTask.packageFamily}</small><h3>{selectedTask.packageName}</h3><span>{selectedTask.lot}</span></div><button className="drawer-close" onClick={() => setSelectedTask(null)}>×</button></div><div className="chart-drawer-body"><div className="task-progress"><span>Progresso da atividade</span><strong>{selectedTask.progress}%</strong><i><b style={{ width: `${selectedTask.progress}%`, background: selectedTask.color }} /></i></div><dl><dt>Lote-mãe</dt><dd>{selectedTask.lotMother}</dd><dt>Lote</dt><dd>{selectedTask.lot}</dd><dt>Início</dt><dd>{parseDate(selectedTask.startDate).toLocaleDateString('pt-BR')}</dd><dt>Fim</dt><dd>{parseDate(selectedTask.endDate).toLocaleDateString('pt-BR')}</dd><dt>Duração</dt><dd>{diffDays(parseDate(selectedTask.startDate), parseDate(selectedTask.endDate)) + 1} dias</dd><dt>Quantidade</dt><dd>{selectedTask.quantity ?? '—'} {selectedTask.unit ?? ''}</dd><dt>Custo</dt><dd>{selectedTask.cost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) ?? '—'}</dd></dl><div className="drawer-section"><h4>Microserviços</h4><p>{microservices[selectedTask.packageFamily] ?? 'Não cadastrados'}</p></div><div className="drawer-section"><h4>Dependências FS</h4><div className="dep-list">{dependencies.filter((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id).map((dependency) => <div key={`${dependency.from}-${dependency.to}`}><span>{tasks.find((task) => task.id === dependency.from)?.packageName} → {tasks.find((task) => task.id === dependency.to)?.packageName}</span><button className="dep-remove" onClick={() => setDependencies(dependencies.filter((item) => item !== dependency))}>×</button></div>)}{!dependencies.some((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id) && 'Nenhuma dependência.'}</div></div></div></>}
         </aside>
       </div>
     </section>
