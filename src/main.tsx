@@ -164,6 +164,9 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
   const [showDeps, setShowDeps] = useState(true);
   const [snapWeek, setSnapWeek] = useState(false);
   const [dependencies, setDependencies] = useState<ScheduleDependency[]>([]);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [dateFormat, setDateFormat] = useState<'numeric' | 'short'>('numeric');
   const [groupLines, setGroupLines] = useState<Record<string, number>>({ 'TORRE-PAVIMENTOS': 3, FACHADA: 3 });
   const [familyLane, setFamilyLane] = useState<Record<string, number>>({ ESTRUTURA: 1, ALVENARIA: 1, INSTALAÇÕES: 2, REVESTIMENTO: 3, FACHADA: 2, ESQUADRIAS: 3 });
   const [drag, setDrag] = useState<null | { id: string; mode: 'pending' | 'move' | 'resize' | 'link'; startX: number; startY: number; start: string; end: string; target?: string }>(null);
@@ -192,7 +195,26 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
   function xFor(d: Date) { return diffDays(projectStart, d) * zoomPx[zoom]; }
   function pointerX(event: React.PointerEvent) { return event.clientX - (svgRef.current?.getBoundingClientRect().left ?? 0); }
   function pointerY(event: React.PointerEvent) { return event.clientY - (svgRef.current?.getBoundingClientRect().top ?? 0); }
-  function updateTask(id: string, patch: Partial<Task>) { setTasks(tasks.map((t) => t.id === id ? { ...t, ...patch } : t)); }
+  function updateTask(id: string, patch: Partial<Task>) {
+    const next = tasks.map((task) => task.id === id ? { ...task, ...patch } : { ...task });
+    const propagate = (fromId: string, visited = new Set<string>()) => {
+      if (visited.has(fromId)) return;
+      visited.add(fromId);
+      const predecessor = next.find((task) => task.id === fromId);
+      if (!predecessor) return;
+      dependencies.filter((dependency) => dependency.from === fromId).forEach((dependency) => {
+        const successor = next.find((task) => task.id === dependency.to);
+        if (!successor) return;
+        const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
+        const requiredStart = addDays(parseDate(predecessor.endDate), 1);
+        successor.startDate = toIsoDate(requiredStart);
+        successor.endDate = toIsoDate(addDays(requiredStart, duration));
+        propagate(successor.id, visited);
+      });
+    };
+    propagate(id);
+    setTasks(next);
+  }
   function snapDate(date: Date) {
     return snapWeek ? addDays(projectStart, Math.round(diffDays(projectStart, date) / 7) * 7) : date;
   }
@@ -248,7 +270,23 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
     clearLongPress();
     if (drag?.mode === 'link' && drag.target) {
       const exists = dependencies.some((dependency) => dependency.from === drag.id && dependency.to === drag.target);
-      if (!exists) setDependencies([...dependencies, { from: drag.id, to: drag.target, type: 'FS' }]);
+      const reaches = (from: string, target: string, visited = new Set<string>()): boolean => {
+        if (from === target) return true;
+        if (visited.has(from)) return false;
+        visited.add(from);
+        return dependencies.filter((dependency) => dependency.from === from).some((dependency) => reaches(dependency.to, target, visited));
+      };
+      if (!exists && !reaches(drag.target, drag.id)) {
+        const nextDependencies: ScheduleDependency[] = [...dependencies, { from: drag.id, to: drag.target, type: 'FS' }];
+        setDependencies(nextDependencies);
+        const predecessor = tasks.find((task) => task.id === drag.id);
+        const successor = tasks.find((task) => task.id === drag.target);
+        if (predecessor && successor) {
+          const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
+          const start = addDays(parseDate(predecessor.endDate), 1);
+          setTasks(tasks.map((task) => task.id === successor.id ? { ...task, startDate: toIsoDate(start), endDate: toIsoDate(addDays(start, duration)) } : task));
+        }
+      }
     }
     setDrag(null);
     setLinkPoint(null);
@@ -256,6 +294,19 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
 
   let y = 90;
   const taskLayout = new Map<string, { x: number; y: number; width: number; height: number }>();
+  let labelY = 90;
+  const labelRows = rows.map((row) => {
+    const top = labelY;
+    labelY += row.height;
+    return { ...row, top };
+  });
+  const dayNames = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
+  const microservices: Record<string, string> = {
+    ALVENARIA: 'Marcação 20% · Elevação 80%',
+    ESTRUTURA: 'Forma · Armação · Concretagem',
+    INSTALAÇÕES: 'Infraestrutura · Passagem · Testes',
+    REVESTIMENTO: 'Preparação · Aplicação · Acabamento',
+  };
   return (
     <section className="page">
       <PageHeader title="Linha de balanço" subtitle="Visualização e edição do cronograma." />
@@ -267,24 +318,42 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
       </div>
       {drag?.mode === 'link' && <div className="link-mode-banner show">Modo vínculo: arraste até a sucessora</div>}
       <div className="line-shell">
-        <aside className="settings-panel">
+        <button className="chart-settings-button" title="Configurações do cronograma" onClick={() => setSettingsOpen(true)}><Settings size={18} /></button>
+        <aside className={`chart-drawer settings-drawer ${settingsOpen ? 'open' : ''}`}>
+          <button className="drawer-close" onClick={() => setSettingsOpen(false)}>×</button>
           <h3>Configurações</h3>
           <label>Zoom<input type="range" min={1} max={5} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} /></label>
           <h4>Linhas por lote-mãe</h4>
           {groups.map((g) => <label key={g}>{g}<select value={groupLines[g] ?? 3} onChange={(e) => setGroupLines({ ...groupLines, [g]: Number(e.target.value) })}><option value={1}>1 linha</option><option value={2}>2 linhas</option><option value={3}>3 linhas</option><option value={4}>4 linhas</option></select></label>)}
           <h4>Linha por família</h4>
           {families.map((f) => <label key={f}>{f}<select value={familyLane[f] ?? 1} onChange={(e) => setFamilyLane({ ...familyLane, [f]: Number(e.target.value) })}><option value={1}>Linha 1</option><option value={2}>Linha 2</option><option value={3}>Linha 3</option><option value={4}>Linha 4</option></select></label>)}
+          <h4>Cabeçalho de datas</h4>
+          <label>Formato<select value={dateFormat} onChange={(e) => setDateFormat(e.target.value as 'numeric' | 'short')}><option value="numeric">DD/MM</option><option value="short">DD MMM</option></select></label>
           <h4>Dependências criadas</h4>
           <div className="dep-list">{dependencies.length ? dependencies.map((d) => <div key={`${d.from}-${d.to}`}>{tasks.find((t) => t.id === d.from)?.packageName} → {tasks.find((t) => t.id === d.to)?.packageName} ({d.type}) <button className="dep-remove" onClick={() => setDependencies(dependencies.filter((item) => item !== d))}>×</button></div>) : 'Nenhuma dependência.'}</div>
         </aside>
         <div className="chart-scroll">
+          <div className="lot-labels" style={{ height }}>
+            <div className="lot-label-header">Lotes</div>
+            {labelRows.map((row) => <div key={row.key} className={`lot-label ${row.type}`} style={{ top: row.top, height: row.height }}>{row.label}</div>)}
+          </div>
           <svg ref={svgRef} width={width} height={height} onPointerMove={onMove} onPointerUp={finishDrag} onPointerCancel={finishDrag}>
             <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
+            {Array.from({ length: diffDays(projectStart, chartEnd) + 1 }).map((_, i) => {
+              const date = addDays(projectStart, i);
+              const x = xFor(date);
+              return <g key={`day-${i}`}><line x1={x} x2={x} y1={66} y2={height} stroke={date.getDay() === 0 ? '#cbd5e1' : '#eef0f4'} /><text x={x + 2} y={84} fontSize={9} fill="#64748b">{dayNames[date.getDay()]}</text></g>;
+            })}
             {Array.from({ length: 75 }).map((_, i) => {
               const d = addDays(projectStart, i * 7);
+              const weekEnd = addDays(d, 6);
               const x = xFor(d);
-              const show = zoom >= 4 || i % (zoom === 3 ? 2 : 4) === 0;
-              return <g key={i}><line x1={x} x2={x} y1={90} y2={height} stroke="#e5e7eb" />{show && <text x={x + 4} y={64} fontSize={11}>S{i + 1} · {d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</text>}</g>;
+              const format = (date: Date) => date.toLocaleDateString('pt-BR', dateFormat === 'numeric' ? { day: '2-digit', month: '2-digit' } : { day: '2-digit', month: 'short' });
+              return <g key={i}><line x1={x} x2={x} y1={38} y2={height} stroke="#d9dde6" /><text x={x + 3} y={59} fontSize={10}>{format(d)}–{format(weekEnd)}</text></g>;
+            })}
+            {Array.from({ length: 18 }).map((_, i) => {
+              const date = new Date(projectStart.getFullYear(), projectStart.getMonth() + i, 1);
+              return <g key={`month-${i}`}><line x1={xFor(date)} x2={xFor(date)} y1={0} y2={height} stroke="#aeb4c2" /><text x={xFor(date) + 4} y={24} fontSize={12} fontWeight={700}>{date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}</text></g>;
             })}
             {['2025-09-01', '2026-01-12', '2026-06-10'].map((date, i) => {
               const x = xFor(parseDate(date));
@@ -293,14 +362,14 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
             {rows.map((row) => {
               const currentY = y;
               y += row.height;
-              if (row.type === 'group') return <g key={row.key}><rect x={0} y={currentY} width={width} height={row.height} fill="#eef2ff" /><text x={10} y={currentY + 20} fontSize={12} fontWeight={700}>{row.label}</text></g>;
-              return <g key={row.key}><rect x={0} y={currentY} width={width} height={row.height} fill="#fff" /><line x1={0} x2={width} y1={currentY + row.height} y2={currentY + row.height} stroke="#e5e7eb" /><text x={10} y={currentY + 20} fontSize={12}>{row.label}</text>{row.tasks.map((t) => {
+              if (row.type === 'group') return <g key={row.key}><rect x={0} y={currentY} width={width} height={row.height} fill="#eef2ff" opacity=".65" /></g>;
+              return <g key={row.key}><line x1={0} x2={width} y1={currentY + row.height} y2={currentY + row.height} stroke="#e5e7eb" />{row.tasks.map((t) => {
                 const lane = familyLane[t.packageFamily] ?? 1;
                 const x = xFor(parseDate(t.startDate));
                 const barW = Math.max(10, (diffDays(parseDate(t.startDate), parseDate(t.endDate)) + 1) * zoomPx[zoom]);
                 const barY = currentY + 8 + (lane - 1) * 26;
                 taskLayout.set(t.id, { x, y: barY, width: barW, height: 18 });
-                return <g key={t.id} data-task-id={t.id}><rect className={`task-bar ${drag?.target === t.id ? 'target-highlight' : ''}`} x={x} y={barY} width={barW} height={18} rx={4} fill={t.color} onPointerDown={(e) => beginDrag(e, t, 'pending')} /><rect className="resize-handle" x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => beginDrag(e, t, 'resize')} /><text pointerEvents="none" x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">{t.packageName}</text><rect pointerEvents="none" x={x} y={barY + 14} width={barW * t.progress / 100} height={4} fill="#fff" opacity={0.55} /></g>;
+                return <g key={t.id} data-task-id={t.id} onClick={() => setSelectedTask(t)}><title>{t.packageName} · {microservices[t.packageFamily] ?? 'Microserviços não cadastrados'}</title><rect className={`task-bar ${drag?.target === t.id ? 'target-highlight' : ''}`} x={x} y={barY} width={barW} height={18} rx={4} fill={t.color} onPointerDown={(e) => beginDrag(e, t, 'pending')} /><rect className="resize-handle" x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => beginDrag(e, t, 'resize')} /><text pointerEvents="none" x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">{t.packageName}</text><rect pointerEvents="none" x={x} y={barY + 14} width={barW * t.progress / 100} height={4} fill="#fff" opacity={0.55} /></g>;
               })}</g>;
             })}
             {showDeps && dependencies.map((dependency) => {
@@ -321,6 +390,10 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
             })()}
           </svg>
         </div>
+        <aside className={`chart-drawer task-drawer ${selectedTask ? 'open' : ''}`}>
+          <button className="drawer-close" onClick={() => setSelectedTask(null)}>×</button>
+          {selectedTask && <><h3>{selectedTask.packageName}</h3><dl><dt>Lote-mãe</dt><dd>{selectedTask.lotMother}</dd><dt>Lote</dt><dd>{selectedTask.lot}</dd><dt>Família</dt><dd>{selectedTask.packageFamily}</dd><dt>Início</dt><dd>{selectedTask.startDate}</dd><dt>Fim</dt><dd>{selectedTask.endDate}</dd><dt>Duração</dt><dd>{diffDays(parseDate(selectedTask.startDate), parseDate(selectedTask.endDate)) + 1} dias</dd><dt>Progresso</dt><dd>{selectedTask.progress}%</dd><dt>Quantidade</dt><dd>{selectedTask.quantity ?? '—'} {selectedTask.unit ?? ''}</dd><dt>Custo</dt><dd>{selectedTask.cost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) ?? '—'}</dd><dt>Microserviços</dt><dd>{microservices[selectedTask.packageFamily] ?? 'Não cadastrados'}</dd></dl></>}
+        </aside>
       </div>
     </section>
   );
