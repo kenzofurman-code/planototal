@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import * as XLSX from 'xlsx';
 import {
@@ -161,8 +161,12 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
   const [zoom, setZoom] = useState(3);
   const [groupLines, setGroupLines] = useState<Record<string, number>>({ 'TORRE-PAVIMENTOS': 3, FACHADA: 3 });
   const [familyLane, setFamilyLane] = useState<Record<string, number>>({ ESTRUTURA: 1, ALVENARIA: 1, INSTALAÇÕES: 2, REVESTIMENTO: 3, FACHADA: 2, ESQUADRIAS: 3 });
-  const [drag, setDrag] = useState<null | { id: string; mode: 'move' | 'resize'; startX: number; start: string; end: string }>(null);
+  const [drag, setDrag] = useState<null | { id: string; mode: 'move' | 'resize' | 'link'; startX: number; start: string; end: string; target?: string }>(null);
+  const [dependencies, setDependencies] = useState<Array<{ from: string; to: string }>>([]);
+  const [longPressTimer, setLongPressTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const [history, setHistory] = useState<Array<any>>([]);
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const LONG_PRESS_MS = 520;
 
   const groups = Array.from(new Set(tasks.map((t) => t.lotMother)));
   const families = Array.from(new Set(tasks.map((t) => t.packageFamily)));
@@ -195,27 +199,61 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
       const duration = diffDays(parseDate(drag.start), parseDate(drag.end));
       const newStart = addDays(parseDate(drag.start), delta);
       updateTask(task.id, { startDate: toIsoDate(newStart), endDate: toIsoDate(addDays(newStart, duration)) });
-    } else {
+    } else if (drag.mode === 'resize') {
       const newEnd = addDays(projectStart, Math.round(pointerX(event) / zoomPx[zoom]));
       if (newEnd >= parseDate(task.startDate)) updateTask(task.id, { endDate: toIsoDate(newEnd) });
     }
   }
 
+  function onPointerDown(e: React.PointerEvent, taskId: string, mode: 'move' | 'resize') {
+    if (mode === 'move') {
+      const timer = setTimeout(() => {
+        setDrag({ id: taskId, mode: 'link', startX: pointerX(e), start: '', end: '', target: undefined });
+      }, LONG_PRESS_MS);
+      setLongPressTimer(timer);
+    }
+    setDrag({ id: taskId, mode, startX: pointerX(e), start: tasks.find(t => t.id === taskId)?.startDate ?? '', end: tasks.find(t => t.id === taskId)?.endDate ?? '' });
+  }
+
+  function onPointerUp() {
+    if (longPressTimer) clearTimeout(longPressTimer);
+    if (drag?.mode === 'link' && drag.target && drag.target !== drag.id) {
+      const exists = dependencies.some(d => d.from === drag.id && d.to === drag.target);
+      if (!exists) {
+        setDependencies([...dependencies, { from: drag.id, to: drag.target }]);
+        setHistory([...history, { kind: 'dep', from: drag.id, to: drag.target }]);
+      }
+    } else if ((drag?.mode === 'move' || drag?.mode === 'resize') && drag) {
+      const task = tasks.find(t => t.id === drag.id);
+      if (task && (task.startDate !== drag.start || task.endDate !== drag.end)) {
+        setHistory([...history, { kind: 'date', id: drag.id, start: drag.start, end: drag.end }]);
+      }
+    }
+    setDrag(null);
+  }
+
   let y = 90;
+  const taskLayout = new Map<string, { x: number; y: number; w: number; h: number }>();
+
   return (
     <section className="page">
-      <PageHeader title="Linha de balanço" subtitle="Visualização e edição do cronograma." />
+      <PageHeader title="Linha de balanço" subtitle="Visualização e edição do cronograma. Toque longo = vínculo." />
       <div className="line-shell">
         <aside className="settings-panel">
-          <h3>Configurações</h3>
+          <h3>Configurações v6</h3>
           <label>Zoom<input type="range" min={1} max={5} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} /></label>
+          <button onClick={() => setHistory(history.slice(0, -1))}>↶ Desfazer</button>
           <h4>Linhas por lote-mãe</h4>
           {groups.map((g) => <label key={g}>{g}<select value={groupLines[g] ?? 3} onChange={(e) => setGroupLines({ ...groupLines, [g]: Number(e.target.value) })}><option value={1}>1 linha</option><option value={2}>2 linhas</option><option value={3}>3 linhas</option><option value={4}>4 linhas</option></select></label>)}
           <h4>Linha por família</h4>
           {families.map((f) => <label key={f}>{f}<select value={familyLane[f] ?? 1} onChange={(e) => setFamilyLane({ ...familyLane, [f]: Number(e.target.value) })}><option value={1}>Linha 1</option><option value={2}>Linha 2</option><option value={3}>Linha 3</option><option value={4}>Linha 4</option></select></label>)}
+          <h4>Dependências ({dependencies.length})</h4>
+          {dependencies.map((d, i) => <div key={i} style={{ fontSize: '11px', padding: '4px', background: '#f0f0f0', margin: '2px 0', borderRadius: '4px' }}>
+            <span>{tasks.find(t => t.id === d.from)?.packageName || d.from} → {tasks.find(t => t.id === d.to)?.packageName || d.to}</span>
+          </div>)}
         </aside>
         <div className="chart-scroll">
-          <svg ref={svgRef} width={width} height={height} onPointerMove={onMove} onPointerUp={() => setDrag(null)}>
+          <svg ref={svgRef} width={width} height={height} onPointerMove={onMove} onPointerUp={onPointerUp}>
             <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
             {Array.from({ length: 75 }).map((_, i) => {
               const d = addDays(projectStart, i * 7);
@@ -236,9 +274,23 @@ function LineBalance({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Tas
                 const x = xFor(parseDate(t.startDate));
                 const barW = Math.max(10, (diffDays(parseDate(t.startDate), parseDate(t.endDate)) + 1) * zoomPx[zoom]);
                 const barY = currentY + 8 + (lane - 1) * 26;
-                return <g key={t.id}><rect x={x} y={barY} width={barW} height={18} rx={4} fill={t.color} onPointerDown={(e) => setDrag({ id: t.id, mode: 'move', startX: pointerX(e), start: t.startDate, end: t.endDate })} /><rect x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => { e.stopPropagation(); setDrag({ id: t.id, mode: 'resize', startX: pointerX(e), start: t.startDate, end: t.endDate }); }} /><text x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">{t.packageName}</text><rect x={x} y={barY + 14} width={barW * t.progress / 100} height={4} fill="#fff" opacity={0.55} /></g>;
+                taskLayout.set(t.id, { x, y: barY, w: barW, h: 18 });
+                return <g key={t.id}><rect x={x} y={barY} width={barW} height={18} rx={4} fill={t.color} onPointerDown={(e) => onPointerDown(e, t.id, 'move')} style={{ cursor: 'grab' }} /><rect x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => { e.stopPropagation(); onPointerDown(e, t.id, 'resize'); }} style={{ cursor: 'ew-resize' }} /><text x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">{t.packageName}</text><rect x={x} y={barY + 14} width={barW * t.progress / 100} height={4} fill="#fff" opacity={0.55} /></g>;
               })}</g>;
             })}
+            {dependencies.map((dep, i) => {
+              const from = taskLayout.get(dep.from);
+              const to = taskLayout.get(dep.to);
+              if (!from || !to) return null;
+              const mx = Math.max(from.x + from.w + 18, (from.x + from.w + to.x) / 2);
+              const path = `M ${from.x + from.w} ${from.y + from.h / 2} C ${mx} ${from.y + from.h / 2}, ${mx} ${to.y + to.h / 2}, ${to.x} ${to.y + to.h / 2}`;
+              return <path key={i} d={path} fill="none" stroke="#999" strokeWidth="1.5" markerEnd="url(#arrowhead)" />;
+            })}
+            <defs>
+              <marker id="arrowhead" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+                <polygon points="0 0, 10 3, 0 6" fill="#999" />
+              </marker>
+            </defs>
           </svg>
         </div>
       </div>
