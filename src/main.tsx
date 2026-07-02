@@ -1,23 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import * as XLSX from 'xlsx';
-import {
-  BarChart3,
-  Building2,
-  CalendarRange,
-  ChevronLeft,
-  ChevronRight,
-  CheckSquare,
-  FileSpreadsheet,
-  Home,
-  KanbanSquare,
-  LineChart,
-  Link2,
-  ArrowLeftRight,
-  Search,
-  Menu,
-  Settings,
-} from 'lucide-react';
+import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2 } from 'lucide-react';
 import { projects, procurement, tasks as initialTasks } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { isSupabaseConfigured } from './lib/supabase';
@@ -35,12 +19,20 @@ const pages: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: 'medium', label: 'Médio prazo', icon: <CalendarRange /> },
   { key: 'short', label: 'Curto prazo', icon: <CheckSquare /> },
   { key: 'financial', label: 'Físico-financeiro', icon: <LineChart /> },
-  { key: 'settings', label: 'Configurações', icon: <Settings /> },
+  { key: 'settings', label: 'Configurações', icon: <Settings /> }
 ];
 
 const projectStart = parseDate('2025-08-01');
 const chartEnd = parseDate('2026-12-01');
-const zoomPx: Record<number, number> = { 1: 4.8, 2: 6.5, 3: 8.5, 4: 11, 5: 14, 6: 18, 7: 24 };
+const zoomPx: Record<number, number> = {
+  1: 4.8,
+  2: 6.5,
+  3: 8.5,
+  4: 11,
+  5: 14,
+  6: 18,
+  7: 24
+};
 
 function App() {
   const [collapsed, setCollapsed] = useState(true);
@@ -53,7 +45,9 @@ function App() {
   return (
     <div className="app">
       <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
-        <button className="menu-button" onClick={() => setCollapsed(!collapsed)}><Menu /></button>
+        <button className="menu-button" onClick={() => setCollapsed(!collapsed)}>
+          <Menu />
+        </button>
         {pages.map((item) => (
           <button key={item.key} className={page === item.key ? 'active' : ''} onClick={() => setPage(item.key)} title={item.label}>
             {item.icon}
@@ -71,7 +65,21 @@ function App() {
           <b className="pill">{isSupabaseConfigured ? 'Supabase conectado' : 'Modo demo local'}</b>
         </header>
 
-        {page === 'projects' && <Projects projects={projectList} selected={project} onUpdate={(updated) => { setProjectList(projectList.map((item) => item.id === updated.id ? updated : item)); if (project.id === updated.id) setProject(updated); }} onCalendar={() => setPage('globalCalendar')} onSelect={(p) => { setProject(p); setPage('dashboard'); }} />}
+        {page === 'projects' && (
+          <Projects
+            projects={projectList}
+            selected={project}
+            onUpdate={(updated) => {
+              setProjectList(projectList.map((item) => (item.id === updated.id ? updated : item)));
+              if (project.id === updated.id) setProject(updated);
+            }}
+            onCalendar={() => setPage('globalCalendar')}
+            onSelect={(p) => {
+              setProject(p);
+              setPage('dashboard');
+            }}
+          />
+        )}
         {page === 'globalCalendar' && <AnnualCalendar projects={projectList} title="Calendário geral" subtitle="Feriados nacionais e datas compartilhadas entre todas as obras." events={calendarEvents.filter((event) => !event.projectId)} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId), ...events])} />}
         {page === 'workCalendar' && <AnnualCalendar projects={projectList} projectId={project.id} title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id))))} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId !== project.id && event.projectId), ...calendarEvents.filter((event) => !event.projectId), ...events.filter((event) => event.projectId === project.id)])} />}
         {page === 'dashboard' && <Dashboard tasks={tasks} />}
@@ -107,12 +115,14 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }:
     { city: 'Rio de Janeiro', state: 'RJ', ibge: '3304557' },
     { city: 'Belo Horizonte', state: 'MG', ibge: '3106200' },
     { city: 'Florianópolis', state: 'SC', ibge: '4205407' },
-    { city: 'Porto Alegre', state: 'RS', ibge: '4314902' },
+    { city: 'Porto Alegre', state: 'RS', ibge: '4314902' }
   ];
   return (
     <section className="page">
       <PageHeader title="Projetos" subtitle="Selecione uma obra para abrir o planejamento integrado.">
-        <button onClick={onCalendar}><CalendarRange size={17} /> Calendário</button>
+        <button onClick={onCalendar}>
+          <CalendarRange size={17} /> Calendário
+        </button>
         <button className="primary">Novo projeto</button>
       </PageHeader>
       <div className="project-grid">
@@ -123,27 +133,102 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }:
               <span className="pill">{p.status}</span>
               <h2>{p.name}</h2>
               <p>{p.address}</p>
-              <small>{p.area.toLocaleString('pt-BR')} m² · {p.startDate} até {p.plannedEndDate}</small>
+              <small>
+                {p.area.toLocaleString('pt-BR')} m² · {p.startDate} até {p.plannedEndDate}
+              </small>
               <button onClick={() => onSelect(p)}>Selecionar</button>
-              <button onClick={() => setEditing({ ...p, city: p.city ?? p.address.split(' - ')[0], state: p.state ?? p.address.split(' - ')[1] })}>Editar projeto</button>
+              <button
+                onClick={() =>
+                  setEditing({
+                    ...p,
+                    city: p.city ?? p.address.split(' - ')[0],
+                    state: p.state ?? p.address.split(' - ')[1]
+                  })
+                }
+              >
+                Editar projeto
+              </button>
             </div>
           </article>
         ))}
       </div>
       <aside className={`calendar-drawer ${editing ? 'open' : ''}`}>
-        <button className="drawer-close" onClick={() => setEditing(null)}>×</button>
-        {editing && <form onSubmit={(event) => { event.preventDefault(); onUpdate({ ...editing, address: `${editing.city ?? ''} - ${editing.state ?? ''}` }); setEditing(null); }}>
-          <h3>Editar projeto</h3>
-          <label>Nome<input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
-          <label>Cidade<input list="project-cities" value={editing.city ?? ''} onChange={(e) => { const match = cityOptions.find((item) => item.city === e.target.value); setEditing({ ...editing, city: e.target.value, state: match?.state ?? editing.state, ibgeCode: match?.ibge ?? editing.ibgeCode }); }} /></label>
-          <datalist id="project-cities">{cityOptions.map((item) => <option key={item.ibge} value={item.city}>{item.state}</option>)}</datalist>
-          <label>UF<input maxLength={2} value={editing.state ?? ''} onChange={(e) => setEditing({ ...editing, state: e.target.value.toUpperCase() })} /></label>
-          <label>Código IBGE<input value={editing.ibgeCode ?? ''} onChange={(e) => setEditing({ ...editing, ibgeCode: e.target.value })} /></label>
-          <label>Área (m²)<input type="number" value={editing.area} onChange={(e) => setEditing({ ...editing, area: Number(e.target.value) })} /></label>
-          <label>Início<input type="date" value={editing.startDate} onChange={(e) => setEditing({ ...editing, startDate: e.target.value })} /></label>
-          <label>Término previsto<input type="date" value={editing.plannedEndDate} onChange={(e) => setEditing({ ...editing, plannedEndDate: e.target.value })} /></label>
-          <button className="primary" type="submit">Salvar projeto</button>
-        </form>}
+        <button className="drawer-close" onClick={() => setEditing(null)}>
+          ×
+        </button>
+        {editing && (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              onUpdate({
+                ...editing,
+                address: `${editing.city ?? ''} - ${editing.state ?? ''}`
+              });
+              setEditing(null);
+            }}
+          >
+            <h3>Editar projeto</h3>
+            <label>
+              Nome
+              <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
+            </label>
+            <label>
+              Cidade
+              <input
+                list="project-cities"
+                value={editing.city ?? ''}
+                onChange={(e) => {
+                  const match = cityOptions.find((item) => item.city === e.target.value);
+                  setEditing({
+                    ...editing,
+                    city: e.target.value,
+                    state: match?.state ?? editing.state,
+                    ibgeCode: match?.ibge ?? editing.ibgeCode
+                  });
+                }}
+              />
+            </label>
+            <datalist id="project-cities">
+              {cityOptions.map((item) => (
+                <option key={item.ibge} value={item.city}>
+                  {item.state}
+                </option>
+              ))}
+            </datalist>
+            <label>
+              UF
+              <input
+                maxLength={2}
+                value={editing.state ?? ''}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    state: e.target.value.toUpperCase()
+                  })
+                }
+              />
+            </label>
+            <label>
+              Código IBGE
+              <input value={editing.ibgeCode ?? ''} onChange={(e) => setEditing({ ...editing, ibgeCode: e.target.value })} />
+            </label>
+            <label>
+              Área (m²)
+              <input type="number" value={editing.area} onChange={(e) => setEditing({ ...editing, area: Number(e.target.value) })} />
+            </label>
+            <label>
+              Início
+              <input type="date" value={editing.startDate} onChange={(e) => setEditing({ ...editing, startDate: e.target.value })} />
+            </label>
+            <label>
+              Término previsto
+              <input type="date" value={editing.plannedEndDate} onChange={(e) => setEditing({ ...editing, plannedEndDate: e.target.value })} />
+            </label>
+            <button className="primary" type="submit">
+              Salvar projeto
+            </button>
+          </form>
+        )}
       </aside>
     </section>
   );
@@ -152,11 +237,25 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }:
 function AnnualCalendar({ title, subtitle, events, onChange, projects: projectOptions, projectId }: { title: string; subtitle: string; events: CalendarEvent[]; onChange: (events: CalendarEvent[]) => void; projects: Project[]; projectId?: string }) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [draft, setDraft] = useState({ date: `${year}-01-01`, title: '', kind: 'holiday' as CalendarEvent['kind'], color: '#ef4444', appliesToAll: true, projectIds: [] as string[] });
+  const [draft, setDraft] = useState({
+    date: `${year}-01-01`,
+    title: '',
+    kind: 'holiday' as CalendarEvent['kind'],
+    color: '#ef4444',
+    appliesToAll: true,
+    projectIds: [] as string[]
+  });
   const weekdays = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 
   function openDate(date?: string) {
-    setDraft({ date: date ?? `${year}-01-01`, title: '', kind: 'holiday', color: '#ef4444', appliesToAll: true, projectIds: [] });
+    setDraft({
+      date: date ?? `${year}-01-01`,
+      title: '',
+      kind: 'holiday',
+      color: '#ef4444',
+      appliesToAll: true,
+      projectIds: []
+    });
     setDrawerOpen(true);
   }
   function saveEvent(event: React.FormEvent) {
@@ -166,56 +265,150 @@ function AnnualCalendar({ title, subtitle, events, onChange, projects: projectOp
     setDrawerOpen(false);
   }
 
-  return <section className="page calendar-page">
-    <PageHeader title={title} subtitle={subtitle}>
-      <button onClick={() => openDate()}>Cadastrar data</button>
-    </PageHeader>
-    <div className="calendar-year-nav">
-      <button aria-label="Ano anterior" onClick={() => setYear(year - 1)}><ChevronLeft /></button>
-      <h2>{year}</h2>
-      <button aria-label="Próximo ano" onClick={() => setYear(year + 1)}><ChevronRight /></button>
-    </div>
-    <div className="year-calendar">
-      {Array.from({ length: 12 }).map((_, month) => {
-        const firstDay = new Date(year, month, 1).getDay();
-        const days = new Date(year, month + 1, 0).getDate();
-        return <article className="calendar-month" key={month}>
-          <h3>{new Date(year, month, 1).toLocaleDateString('pt-BR', { month: 'long' })}</h3>
-          <div className="calendar-weekdays">{weekdays.map((day, index) => <span key={`${day}-${index}`}>{day}</span>)}</div>
-          <div className="calendar-days">
-            {Array.from({ length: firstDay }).map((_, index) => <span className="calendar-day empty" key={`empty-${index}`} />)}
-            {Array.from({ length: days }).map((_, index) => {
-              const day = index + 1;
-              const date = toIsoDate(new Date(year, month, day));
-              const dayEvents = events.filter((item) => item.date === date);
-              const weekend = [0, 6].includes(new Date(year, month, day).getDay());
-              return <button className={`calendar-day ${weekend ? 'weekend' : 'workday'}`} key={day} onClick={() => openDate(date)}>
-                <b>{day}</b>
-                {dayEvents.map((item) => {
-                  const scope = item.projectId ? projectOptions.find((project) => project.id === item.projectId)?.name : item.appliesToAll ? 'Todas as obras' : projectOptions.filter((project) => item.projectIds?.includes(project.id)).map((project) => project.name).join(', ');
-                  return <i key={item.id} title={`${item.title} · ${scope || 'Calendário geral'}`} style={{ background: item.color }} />;
+  return (
+    <section className="page calendar-page">
+      <PageHeader title={title} subtitle={subtitle}>
+        <button onClick={() => openDate()}>Cadastrar data</button>
+      </PageHeader>
+      <div className="calendar-year-nav">
+        <button aria-label="Ano anterior" onClick={() => setYear(year - 1)}>
+          <ChevronLeft />
+        </button>
+        <h2>{year}</h2>
+        <button aria-label="Próximo ano" onClick={() => setYear(year + 1)}>
+          <ChevronRight />
+        </button>
+      </div>
+      <div className="year-calendar">
+        {Array.from({ length: 12 }).map((_, month) => {
+          const firstDay = new Date(year, month, 1).getDay();
+          const days = new Date(year, month + 1, 0).getDate();
+          return (
+            <article className="calendar-month" key={month}>
+              <h3>
+                {new Date(year, month, 1).toLocaleDateString('pt-BR', {
+                  month: 'long'
                 })}
-              </button>;
-            })}
-          </div>
-        </article>;
-      })}
-    </div>
-    <aside className={`calendar-drawer ${drawerOpen ? 'open' : ''}`}>
-      <button className="drawer-close" onClick={() => setDrawerOpen(false)}>×</button>
-      <h3>Nova marcação</h3>
-      <form onSubmit={saveEvent}>
-        <label>Data<input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} /></label>
-        <label>Descrição<input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Nome do feriado ou rotina" /></label>
-        <label>Tipo<select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as CalendarEvent['kind'] })}><option value="holiday">Feriado</option><option value="routine">Rotina</option><option value="important">Data importante</option></select></label>
-        <label>Cor<input type="color" value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} /></label>
-        {!projectId && <><label className="calendar-check"><input type="checkbox" checked={draft.appliesToAll} onChange={(e) => setDraft({ ...draft, appliesToAll: e.target.checked })} /> Aplicar a todas as obras</label>{!draft.appliesToAll && <fieldset><legend>Obras aplicáveis</legend>{projectOptions.map((project) => <label className="calendar-check" key={project.id}><input type="checkbox" checked={draft.projectIds.includes(project.id)} onChange={(e) => setDraft({ ...draft, projectIds: e.target.checked ? [...draft.projectIds, project.id] : draft.projectIds.filter((id) => id !== project.id) })} /> {project.name}</label>)}</fieldset>}</>}
-        <button className="primary" type="submit">Salvar marcação</button>
-      </form>
-      <h4>Marcações deste calendário</h4>
-      <div className="calendar-event-list">{events.filter((item) => item.date.startsWith(String(year))).map((item) => <div key={item.id}><i style={{ background: item.color }} /><span><b>{item.title}</b><small>{parseDate(item.date).toLocaleDateString('pt-BR')}</small></span><button onClick={() => onChange(events.filter((event) => event.id !== item.id))}>×</button></div>)}</div>
-    </aside>
-  </section>;
+              </h3>
+              <div className="calendar-weekdays">
+                {weekdays.map((day, index) => (
+                  <span key={`${day}-${index}`}>{day}</span>
+                ))}
+              </div>
+              <div className="calendar-days">
+                {Array.from({ length: firstDay }).map((_, index) => (
+                  <span className="calendar-day empty" key={`empty-${index}`} />
+                ))}
+                {Array.from({ length: days }).map((_, index) => {
+                  const day = index + 1;
+                  const date = toIsoDate(new Date(year, month, day));
+                  const dayEvents = events.filter((item) => item.date === date);
+                  const weekend = [0, 6].includes(new Date(year, month, day).getDay());
+                  return (
+                    <button className={`calendar-day ${weekend ? 'weekend' : 'workday'}`} key={day} onClick={() => openDate(date)}>
+                      <b>{day}</b>
+                      {dayEvents.map((item) => {
+                        const scope = item.projectId
+                          ? projectOptions.find((project) => project.id === item.projectId)?.name
+                          : item.appliesToAll
+                            ? 'Todas as obras'
+                            : projectOptions
+                                .filter((project) => item.projectIds?.includes(project.id))
+                                .map((project) => project.name)
+                                .join(', ');
+                        return <i key={item.id} title={`${item.title} · ${scope || 'Calendário geral'}`} style={{ background: item.color }} />;
+                      })}
+                    </button>
+                  );
+                })}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      <aside className={`calendar-drawer ${drawerOpen ? 'open' : ''}`}>
+        <button className="drawer-close" onClick={() => setDrawerOpen(false)}>
+          ×
+        </button>
+        <h3>Nova marcação</h3>
+        <form onSubmit={saveEvent}>
+          <label>
+            Data
+            <input type="date" value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
+          </label>
+          <label>
+            Descrição
+            <input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Nome do feriado ou rotina" />
+          </label>
+          <label>
+            Tipo
+            <select
+              value={draft.kind}
+              onChange={(e) =>
+                setDraft({
+                  ...draft,
+                  kind: e.target.value as CalendarEvent['kind']
+                })
+              }
+            >
+              <option value="holiday">Feriado</option>
+              <option value="routine">Rotina</option>
+              <option value="important">Data importante</option>
+            </select>
+          </label>
+          <label>
+            Cor
+            <input type="color" value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} />
+          </label>
+          {!projectId && (
+            <>
+              <label className="calendar-check">
+                <input type="checkbox" checked={draft.appliesToAll} onChange={(e) => setDraft({ ...draft, appliesToAll: e.target.checked })} /> Aplicar a todas as obras
+              </label>
+              {!draft.appliesToAll && (
+                <fieldset>
+                  <legend>Obras aplicáveis</legend>
+                  {projectOptions.map((project) => (
+                    <label className="calendar-check" key={project.id}>
+                      <input
+                        type="checkbox"
+                        checked={draft.projectIds.includes(project.id)}
+                        onChange={(e) =>
+                          setDraft({
+                            ...draft,
+                            projectIds: e.target.checked ? [...draft.projectIds, project.id] : draft.projectIds.filter((id) => id !== project.id)
+                          })
+                        }
+                      />{' '}
+                      {project.name}
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+            </>
+          )}
+          <button className="primary" type="submit">
+            Salvar marcação
+          </button>
+        </form>
+        <h4>Marcações deste calendário</h4>
+        <div className="calendar-event-list">
+          {events
+            .filter((item) => item.date.startsWith(String(year)))
+            .map((item) => (
+              <div key={item.id}>
+                <i style={{ background: item.color }} />
+                <span>
+                  <b>{item.title}</b>
+                  <small>{parseDate(item.date).toLocaleDateString('pt-BR')}</small>
+                </span>
+                <button onClick={() => onChange(events.filter((event) => event.id !== item.id))}>×</button>
+              </div>
+            ))}
+        </div>
+      </aside>
+    </section>
+  );
 }
 
 function Dashboard({ tasks }: { tasks: Task[] }) {
@@ -236,35 +429,108 @@ function Dashboard({ tasks }: { tasks: Task[] }) {
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
-  return <div className="metric"><span>{label}</span><strong>{value}</strong></div>;
+  return (
+    <div className="metric">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
 }
 
 type ImportField = 'id' | 'packageName' | 'service' | 'lot' | 'lotMother' | 'startDate' | 'endDate' | 'duration' | 'cost' | 'predecessors' | 'successors' | 'responsible' | 'progress';
-const importFields: Array<{ key: ImportField; label: string; required: boolean; aliases: string[] }> = [
+const importFields: Array<{
+  key: ImportField;
+  label: string;
+  required: boolean;
+  aliases: string[];
+}> = [
   { key: 'id', label: 'ID', required: true, aliases: ['id'] },
-  { key: 'packageName', label: 'Pacote de trabalho', required: true, aliases: ['pacote de trabalho/tarefas', 'pacote de trabalho'] },
-  { key: 'service', label: 'Serviço', required: true, aliases: ['serviço', 'servico'] },
+  {
+    key: 'packageName',
+    label: 'Pacote de trabalho',
+    required: true,
+    aliases: ['pacote de trabalho/tarefas', 'pacote de trabalho']
+  },
+  {
+    key: 'service',
+    label: 'Serviço',
+    required: true,
+    aliases: ['serviço', 'servico']
+  },
   { key: 'lot', label: 'Lote', required: true, aliases: ['lote'] },
-  { key: 'lotMother', label: 'Lote mãe', required: true, aliases: ['lote mãe', 'grupo de replicação'] },
-  { key: 'startDate', label: 'Data de início', required: true, aliases: ['data de início', 'data de inicio'] },
-  { key: 'endDate', label: 'Data de término', required: true, aliases: ['data de término', 'data de termino'] },
-  { key: 'duration', label: 'Duração', required: true, aliases: ['duração', 'duracao'] },
-  { key: 'cost', label: 'Custo vinculado importado', required: false, aliases: ['custo vinculado atual'] },
-  { key: 'predecessors', label: 'Predecessoras', required: false, aliases: ['predecessoras'] },
-  { key: 'successors', label: 'Sucessoras', required: false, aliases: ['sucessoras'] },
-  { key: 'responsible', label: 'Responsáveis', required: false, aliases: ['responsáveis', 'responsaveis'] },
-  { key: 'progress', label: 'Realizado', required: true, aliases: ['realizado'] },
+  {
+    key: 'lotMother',
+    label: 'Lote mãe',
+    required: true,
+    aliases: ['lote mãe', 'grupo de replicação']
+  },
+  {
+    key: 'startDate',
+    label: 'Data de início',
+    required: true,
+    aliases: ['data de início', 'data de inicio']
+  },
+  {
+    key: 'endDate',
+    label: 'Data de término',
+    required: true,
+    aliases: ['data de término', 'data de termino']
+  },
+  {
+    key: 'duration',
+    label: 'Duração',
+    required: true,
+    aliases: ['duração', 'duracao']
+  },
+  {
+    key: 'cost',
+    label: 'Custo vinculado importado',
+    required: false,
+    aliases: ['custo vinculado atual']
+  },
+  {
+    key: 'predecessors',
+    label: 'Predecessoras',
+    required: false,
+    aliases: ['predecessoras']
+  },
+  {
+    key: 'successors',
+    label: 'Sucessoras',
+    required: false,
+    aliases: ['sucessoras']
+  },
+  {
+    key: 'responsible',
+    label: 'Responsáveis',
+    required: false,
+    aliases: ['responsáveis', 'responsaveis']
+  },
+  {
+    key: 'progress',
+    label: 'Realizado',
+    required: true,
+    aliases: ['realizado']
+  }
 ];
 
 function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
-  const [importData, setImportData] = useState<{ fileName: string; rows: unknown[][]; headerRow: number } | null>(null);
+  const [importData, setImportData] = useState<{
+    fileName: string;
+    rows: unknown[][];
+    headerRow: number;
+  } | null>(null);
   const [mapping, setMapping] = useState<Partial<Record<ImportField, number>>>({});
 
   async function readFile(file: File) {
     const buffer = await file.arrayBuffer();
     const workbook = XLSX.read(buffer, { cellDates: true });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: false });
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+      header: 1,
+      defval: '',
+      raw: false
+    });
     const headerRow = 4;
     setImportData({ fileName: file.name, rows, headerRow });
     setMapping(detectMapping(rows[headerRow - 1] ?? []));
@@ -287,23 +553,47 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
     if (!importData) return;
     const missing = importFields.filter((field) => field.required && mapping[field.key] === undefined);
     if (missing.length) return;
-    const value = (row: unknown[], key: ImportField) => mapping[key] === undefined ? '' : row[mapping[key]!];
+    const value = (row: unknown[], key: ImportField) => (mapping[key] === undefined ? '' : row[mapping[key]!]);
     const parseImportedDate = (input: unknown) => {
       const text = String(input ?? '').trim();
       const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
       return match ? `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` : text.slice(0, 10);
     };
-    const splitIds = (input: unknown) => String(input ?? '').split(/[;,]/).map((item) => item.trim()).filter((item) => item && item !== '-');
-    const parsed = importData.rows.slice(importData.headerRow).map((row, index): Task | null => {
-      const id = String(value(row, 'id')).trim();
-      const startDate = parseImportedDate(value(row, 'startDate'));
-      const endDate = parseImportedDate(value(row, 'endDate'));
-      if (!id || !startDate || !endDate) return null;
-      const rawCost = String(value(row, 'cost')).replace(/[^\d,.-]/g, '');
-      const costText = rawCost.includes(',') ? rawCost.replace(/\./g, '').replace(',', '.') : rawCost;
-      const service = String(value(row, 'service')).trim();
-      return { id, packageName: String(value(row, 'packageName')).trim() || `Atividade ${index + 1}`, packageFamily: String(value(row, 'packageName')).trim().split(' ')[0] || 'OUTROS', service, services: service && service !== '-' ? [service] : [], lot: String(value(row, 'lot')).trim() || 'Sem lote', lotMother: String(value(row, 'lotMother')).trim() || 'SEM GRUPO', startDate, endDate, duration: Number(value(row, 'duration')) || undefined, cost: Number(costText) || undefined, predecessors: splitIds(value(row, 'predecessors')), successors: splitIds(value(row, 'successors')), responsible: String(value(row, 'responsible')).trim(), progress: Math.min(100, Math.max(0, Number(String(value(row, 'progress')).replace(',', '.')) || 0)), color: '#4f46e5' };
-    }).filter((task): task is Task => task !== null);
+    const splitIds = (input: unknown) =>
+      String(input ?? '')
+        .split(/[;,]/)
+        .map((item) => item.trim())
+        .filter((item) => item && item !== '-');
+    const parsed = importData.rows
+      .slice(importData.headerRow)
+      .map((row, index): Task | null => {
+        const id = String(value(row, 'id')).trim();
+        const startDate = parseImportedDate(value(row, 'startDate'));
+        const endDate = parseImportedDate(value(row, 'endDate'));
+        if (!id || !startDate || !endDate) return null;
+        const rawCost = String(value(row, 'cost')).replace(/[^\d,.-]/g, '');
+        const costText = rawCost.includes(',') ? rawCost.replace(/\./g, '').replace(',', '.') : rawCost;
+        const service = String(value(row, 'service')).trim();
+        return {
+          id,
+          packageName: String(value(row, 'packageName')).trim() || `Atividade ${index + 1}`,
+          packageFamily: String(value(row, 'packageName')).trim().split(' ')[0] || 'OUTROS',
+          service,
+          services: service && service !== '-' ? [service] : [],
+          lot: String(value(row, 'lot')).trim() || 'Sem lote',
+          lotMother: String(value(row, 'lotMother')).trim() || 'SEM GRUPO',
+          startDate,
+          endDate,
+          duration: Number(value(row, 'duration')) || undefined,
+          cost: Number(costText) || undefined,
+          predecessors: splitIds(value(row, 'predecessors')),
+          successors: splitIds(value(row, 'successors')),
+          responsible: String(value(row, 'responsible')).trim(),
+          progress: Math.min(100, Math.max(0, Number(String(value(row, 'progress')).replace(',', '.')) || 0)),
+          color: '#4f46e5'
+        };
+      })
+      .filter((task): task is Task => task !== null);
     const parents: Task[] = [];
     let currentParent: Task | null = null;
     parsed.forEach((task) => {
@@ -324,7 +614,10 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
       const key = `${task.lotMother}||${task.lot}||${task.packageName}`.toLocaleLowerCase('pt-BR');
       const existing = consolidated.get(key);
       if (!existing) {
-        consolidated.set(key, { ...task, services: [...(task.services ?? [])] });
+        consolidated.set(key, {
+          ...task,
+          services: [...(task.services ?? [])]
+        });
         return;
       }
       existing.services = Array.from(new Set([...(existing.services ?? []), ...(task.services ?? [])]));
@@ -341,7 +634,11 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
       const groupPackages = packageIndexes.get(task.lotMother)!;
       if (!groupPackages.has(task.packageName)) groupPackages.set(task.packageName, groupPackages.size);
       const index = groupPackages.get(task.packageName)!;
-      return { ...task, color: palette[index % palette.length], lane: (index % 3) + 1 };
+      return {
+        ...task,
+        color: palette[index % palette.length],
+        lane: (index % 3) + 1
+      };
     });
     setTasks(imported);
     setImportData(null);
@@ -350,18 +647,92 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
   return (
     <section className="page">
       <PageHeader title="Cronograma / Importação / Versões" subtitle="Importação, tabela e linha de base.">
-        <label className="file-button">Importar XLSX/CSV<input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])} /></label>
+        <label className="file-button">
+          Importar XLSX/CSV
+          <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])} />
+        </label>
         <button>Criar cópia</button>
         <button>Linha de base</button>
       </PageHeader>
       <div className="card table-wrap">
         <table>
-          <thead><tr><th>Lote-mãe</th><th>Lote</th><th>Pacote</th><th>Início</th><th>Fim</th><th>Avanço</th></tr></thead>
-          <tbody>{tasks.map((t) => <tr key={t.id}><td>{t.lotMother}</td><td>{t.lot}</td><td>{t.packageName}</td><td>{t.startDate}</td><td>{t.endDate}</td><td>{t.progress}%</td></tr>)}</tbody>
+          <thead>
+            <tr>
+              <th>Lote-mãe</th>
+              <th>Lote</th>
+              <th>Pacote</th>
+              <th>Início</th>
+              <th>Fim</th>
+              <th>Avanço</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.map((t) => (
+              <tr key={t.id}>
+                <td>{t.lotMother}</td>
+                <td>{t.lot}</td>
+                <td>{t.packageName}</td>
+                <td>{t.startDate}</td>
+                <td>{t.endDate}</td>
+                <td>{t.progress}%</td>
+              </tr>
+            ))}
+          </tbody>
         </table>
       </div>
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>
-        {importData && <><div className="chart-drawer-head"><div><small>Importar cronograma</small><h3>Associar colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="chart-drawer-body"><label className="import-header-row">Linha dos cabeçalhos<input type="number" min={1} value={importData.headerRow} onChange={(e) => updateHeaderRow(Number(e.target.value))} /></label><p className="import-help">Confirme onde está cada informação. Campos com * são indispensáveis.</p><div className="mapping-grid">{importFields.map((field) => <label key={field.key}>{field.label}{field.required ? ' *' : ''}<select value={mapping[field.key] ?? ''} onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value === '' ? undefined : Number(e.target.value) })}><option value="">Não importar</option>{(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => <option value={index} key={index}>{XLSX.utils.encode_col(index)} · {String(header) || '(sem título)'}</option>)}</select></label>)}</div><div className="import-summary"><strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong><span>{importFields.filter((field) => field.required && mapping[field.key] === undefined).length ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para importar.'}</span></div><button className="primary import-confirm" disabled={importFields.some((field) => field.required && mapping[field.key] === undefined)} onClick={importSchedule}>Importar cronograma</button></div></>}
+        {importData && (
+          <>
+            <div className="chart-drawer-head">
+              <div>
+                <small>Importar cronograma</small>
+                <h3>Associar colunas</h3>
+                <span>{importData.fileName}</span>
+              </div>
+              <button className="drawer-close" onClick={() => setImportData(null)}>
+                ×
+              </button>
+            </div>
+            <div className="chart-drawer-body">
+              <label className="import-header-row">
+                Linha dos cabeçalhos
+                <input type="number" min={1} value={importData.headerRow} onChange={(e) => updateHeaderRow(Number(e.target.value))} />
+              </label>
+              <p className="import-help">Confirme onde está cada informação. Campos com * são indispensáveis.</p>
+              <div className="mapping-grid">
+                {importFields.map((field) => (
+                  <label key={field.key}>
+                    {field.label}
+                    {field.required ? ' *' : ''}
+                    <select
+                      value={mapping[field.key] ?? ''}
+                      onChange={(e) =>
+                        setMapping({
+                          ...mapping,
+                          [field.key]: e.target.value === '' ? undefined : Number(e.target.value)
+                        })
+                      }
+                    >
+                      <option value="">Não importar</option>
+                      {(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => (
+                        <option value={index} key={index}>
+                          {XLSX.utils.encode_col(index)} · {String(header) || '(sem título)'}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+              <div className="import-summary">
+                <strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong>
+                <span>{importFields.filter((field) => field.required && mapping[field.key] === undefined).length ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para importar.'}</span>
+              </div>
+              <button className="primary import-confirm" disabled={importFields.some((field) => field.required && mapping[field.key] === undefined)} onClick={importSchedule}>
+                Importar cronograma
+              </button>
+            </div>
+          </>
+        )}
       </aside>
     </section>
   );
@@ -373,23 +744,67 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   const [dependencyMode, setDependencyMode] = useState(true);
   const [showDeps, setShowDeps] = useState(true);
   const [snapWeek, setSnapWeek] = useState(false);
-  const [dependencies, setDependencies] = useState<ScheduleDependency[]>(() => tasks.flatMap((task) => (task.predecessors ?? []).map((from) => ({ from, to: task.id, type: 'FS' as const }))));
+  const [dependencies, setDependencies] = useState<ScheduleDependency[]>(() =>
+    tasks.flatMap((task) =>
+      (task.predecessors ?? []).map((from) => ({
+        from,
+        to: task.id,
+        type: 'FS' as const
+      }))
+    )
+  );
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [monthFormat, setMonthFormat] = useState<'index' | 'numeric'>('numeric');
   const [weekFormat, setWeekFormat] = useState<'short' | 'numeric' | 'day'>('day');
-  const [versions, setVersions] = useState<Array<{ id: string; name: string; createdAt: string; kind: 'scenario' | 'baseline' | 'planned'; tasks: Task[] }>>([
-    { id: 'v00', name: 'Cronograma inicial · V00', createdAt: new Date().toISOString(), kind: 'scenario', tasks: initialTasks.map((task) => ({ ...task })) },
+  const [versions, setVersions] = useState<
+    Array<{
+      id: string;
+      name: string;
+      createdAt: string;
+      kind: 'scenario' | 'baseline' | 'planned';
+      tasks: Task[];
+    }>
+  >([
+    {
+      id: 'v00',
+      name: 'Cronograma inicial · V00',
+      createdAt: new Date().toISOString(),
+      kind: 'scenario',
+      tasks: initialTasks.map((task) => ({ ...task }))
+    }
   ]);
   const [selectedVersionId, setSelectedVersionId] = useState('v00');
-  const [groupLines, setGroupLines] = useState<Record<string, number>>({ 'TORRE-PAVIMENTOS': 3, FACHADA: 3 });
-  const [familyLane, setFamilyLane] = useState<Record<string, number>>({ ESTRUTURA: 1, ALVENARIA: 1, INSTALAÇÕES: 2, REVESTIMENTO: 3, FACHADA: 2, ESQUADRIAS: 3 });
+  const [groupLines, setGroupLines] = useState<Record<string, number>>({
+    'TORRE-PAVIMENTOS': 3,
+    FACHADA: 3
+  });
+  const [familyLane, setFamilyLane] = useState<Record<string, number>>({
+    ESTRUTURA: 1,
+    ALVENARIA: 1,
+    INSTALAÇÕES: 2,
+    REVESTIMENTO: 3,
+    FACHADA: 2,
+    ESQUADRIAS: 3
+  });
   const [packageLanes, setPackageLanes] = useState<Record<string, number>>({});
   const [packageColors, setPackageColors] = useState<Record<string, string>>(() => Object.fromEntries(tasks.map((task) => [`${task.lotMother}||${task.packageName}`, task.color])));
   const [groupOrder, setGroupOrder] = useState<string[]>(() => Array.from(new Set(tasks.map((task) => task.lotMother))));
-  const [lotOrder, setLotOrder] = useState<Record<string, string[]>>(() => Object.fromEntries(Array.from(new Set(tasks.map((task) => task.lotMother))).map((group) => [group, Array.from(new Set(tasks.filter((task) => task.lotMother === group).map((task) => task.lot))) ])));
-  const [ordering, setOrdering] = useState<{ type: 'group' | 'lot'; key: string; group?: string } | null>(null);
-  const [drag, setDrag] = useState<null | { id: string; mode: 'pending' | 'move' | 'resize' | 'link'; startX: number; startY: number; start: string; end: string; target?: string }>(null);
+  const [lotOrder, setLotOrder] = useState<Record<string, string[]>>(() => Object.fromEntries(Array.from(new Set(tasks.map((task) => task.lotMother))).map((group) => [group, Array.from(new Set(tasks.filter((task) => task.lotMother === group).map((task) => task.lot)))])));
+  const [ordering, setOrdering] = useState<{
+    type: 'group' | 'lot';
+    key: string;
+    group?: string;
+  } | null>(null);
+  const [drag, setDrag] = useState<null | {
+    id: string;
+    mode: 'pending' | 'move' | 'resize' | 'link';
+    startX: number;
+    startY: number;
+    start: string;
+    end: string;
+    target?: string;
+  }>(null);
   const [linkPoint, setLinkPoint] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const longPressRef = useRef<number | null>(null);
@@ -397,19 +812,41 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   const taskGroups = Array.from(new Set(tasks.map((t) => t.lotMother)));
   const groups = [...groupOrder.filter((group) => taskGroups.includes(group)), ...taskGroups.filter((group) => !groupOrder.includes(group))];
   const families = Array.from(new Set(tasks.map((t) => t.packageFamily)));
-  const packagesByGroup = groups.flatMap((group) => Array.from(new Set(tasks.filter((task) => task.lotMother === group).map((task) => task.packageName))).map((packageName, index) => {
-    const key = `${group}||${packageName}`;
-    return { key, group, packageName, defaultLane: (index % (groupLines[group] ?? 3)) + 1, color: tasks.find((task) => task.lotMother === group && task.packageName === packageName)?.color ?? '#4f46e5' };
-  }));
+  const packagesByGroup = groups.flatMap((group) =>
+    Array.from(new Set(tasks.filter((task) => task.lotMother === group).map((task) => task.packageName))).map((packageName, index) => {
+      const key = `${group}||${packageName}`;
+      return {
+        key,
+        group,
+        packageName,
+        defaultLane: (index % (groupLines[group] ?? 3)) + 1,
+        color: tasks.find((task) => task.lotMother === group && task.packageName === packageName)?.color ?? '#4f46e5'
+      };
+    })
+  );
 
   const rows = useMemo(() => {
-    const result: Array<{ type: 'group' | 'lot'; key: string; label: string; tasks: Task[]; height: number; group?: string }> = [];
+    const result: Array<{
+      type: 'group' | 'lot';
+      key: string;
+      label: string;
+      tasks: Task[];
+      height: number;
+      group?: string;
+    }> = [];
     for (const g of groups) {
       result.push({ type: 'group', key: g, label: g, tasks: [], height: 30 });
       const taskLots = Array.from(new Set(tasks.filter((t) => t.lotMother === g).map((t) => t.lot)));
       const lots = [...(lotOrder[g] ?? []).filter((lot) => taskLots.includes(lot)), ...taskLots.filter((lot) => !(lotOrder[g] ?? []).includes(lot))];
       for (const lot of lots) {
-        result.push({ type: 'lot', key: `${g}-${lot}`, label: lot, tasks: tasks.filter((t) => t.lotMother === g && t.lot === lot), height: 12 + (groupLines[g] ?? 3) * 26, group: g });
+        result.push({
+          type: 'lot',
+          key: `${g}-${lot}`,
+          label: lot,
+          tasks: tasks.filter((t) => t.lotMother === g && t.lot === lot),
+          height: 12 + (groupLines[g] ?? 3) * 26,
+          group: g
+        });
       }
     }
     return result;
@@ -418,25 +855,33 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   const width = Math.max(1300, diffDays(projectStart, chartEnd) * zoomPx[zoom] + 160);
   const height = 90 + rows.reduce((s, r) => s + r.height, 0) + 40;
 
-  function xFor(d: Date) { return diffDays(projectStart, d) * zoomPx[zoom]; }
-  function pointerX(event: React.PointerEvent) { return event.clientX - (svgRef.current?.getBoundingClientRect().left ?? 0); }
-  function pointerY(event: React.PointerEvent) { return event.clientY - (svgRef.current?.getBoundingClientRect().top ?? 0); }
+  function xFor(d: Date) {
+    return diffDays(projectStart, d) * zoomPx[zoom];
+  }
+  function pointerX(event: React.PointerEvent) {
+    return event.clientX - (svgRef.current?.getBoundingClientRect().left ?? 0);
+  }
+  function pointerY(event: React.PointerEvent) {
+    return event.clientY - (svgRef.current?.getBoundingClientRect().top ?? 0);
+  }
   function updateTask(id: string, patch: Partial<Task>) {
-    const next = tasks.map((task) => task.id === id ? { ...task, ...patch } : { ...task });
+    const next = tasks.map((task) => (task.id === id ? { ...task, ...patch } : { ...task }));
     const propagate = (fromId: string, visited = new Set<string>()) => {
       if (visited.has(fromId)) return;
       visited.add(fromId);
       const predecessor = next.find((task) => task.id === fromId);
       if (!predecessor) return;
-      dependencies.filter((dependency) => dependency.from === fromId).forEach((dependency) => {
-        const successor = next.find((task) => task.id === dependency.to);
-        if (!successor) return;
-        const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
-        const requiredStart = addDays(parseDate(predecessor.endDate), 1);
-        successor.startDate = toIsoDate(requiredStart);
-        successor.endDate = toIsoDate(addDays(requiredStart, duration));
-        propagate(successor.id, visited);
-      });
+      dependencies
+        .filter((dependency) => dependency.from === fromId)
+        .forEach((dependency) => {
+          const successor = next.find((task) => task.id === dependency.to);
+          if (!successor) return;
+          const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
+          const requiredStart = addDays(parseDate(predecessor.endDate), 1);
+          successor.startDate = toIsoDate(requiredStart);
+          successor.endDate = toIsoDate(addDays(requiredStart, duration));
+          propagate(successor.id, visited);
+        });
     };
     propagate(id);
     setTasks(next);
@@ -453,11 +898,18 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    setDrag({ id: task.id, mode, startX: pointerX(event), startY: pointerY(event), start: task.startDate, end: task.endDate });
+    setDrag({
+      id: task.id,
+      mode,
+      startX: pointerX(event),
+      startY: pointerY(event),
+      start: task.startDate,
+      end: task.endDate
+    });
     if (mode === 'pending' && dependencyMode) {
       clearLongPress();
       longPressRef.current = window.setTimeout(() => {
-        setDrag((current) => current?.id === task.id && current.mode === 'pending' ? { ...current, mode: 'link' } : current);
+        setDrag((current) => (current?.id === task.id && current.mode === 'pending' ? { ...current, mode: 'link' } : current));
       }, 500);
     }
   }
@@ -475,9 +927,11 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
       return;
     }
     if (drag.mode === 'link') {
-      const target = document.elementsFromPoint(event.clientX, event.clientY)
-        .map((element) => element.closest('[data-task-id]')?.getAttribute('data-task-id'))
-        .find((id) => id && id !== drag.id) ?? undefined;
+      const target =
+        document
+          .elementsFromPoint(event.clientX, event.clientY)
+          .map((element) => element.closest('[data-task-id]')?.getAttribute('data-task-id'))
+          .find((id) => id && id !== drag.id) ?? undefined;
       setDrag({ ...drag, target });
       setLinkPoint({ x: pointerX(event), y: pointerY(event) });
       return;
@@ -486,7 +940,10 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
       const delta = Math.round(dx / zoomPx[zoom]);
       const duration = diffDays(parseDate(drag.start), parseDate(drag.end));
       const newStart = snapDate(addDays(parseDate(drag.start), delta));
-      updateTask(task.id, { startDate: toIsoDate(newStart), endDate: toIsoDate(addDays(newStart, duration)) });
+      updateTask(task.id, {
+        startDate: toIsoDate(newStart),
+        endDate: toIsoDate(addDays(newStart, duration))
+      });
     } else {
       const newEnd = snapDate(addDays(projectStart, Math.round(pointerX(event) / zoomPx[zoom])));
       if (newEnd >= parseDate(task.startDate)) updateTask(task.id, { endDate: toIsoDate(newEnd) });
@@ -510,7 +967,17 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
         if (predecessor && successor) {
           const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
           const start = addDays(parseDate(predecessor.endDate), 1);
-          setTasks(tasks.map((task) => task.id === successor.id ? { ...task, startDate: toIsoDate(start), endDate: toIsoDate(addDays(start, duration)) } : task));
+          setTasks(
+            tasks.map((task) =>
+              task.id === successor.id
+                ? {
+                    ...task,
+                    startDate: toIsoDate(start),
+                    endDate: toIsoDate(addDays(start, duration))
+                  }
+                : task
+            )
+          );
         }
       }
     }
@@ -536,12 +1003,22 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
     ALVENARIA: 'Marcação 20% · Elevação 80%',
     ESTRUTURA: 'Forma · Armação · Concretagem',
     INSTALAÇÕES: 'Infraestrutura · Passagem · Testes',
-    REVESTIMENTO: 'Preparação · Aplicação · Acabamento',
+    REVESTIMENTO: 'Preparação · Aplicação · Acabamento'
   };
   const selectedVersion = versions.find((version) => version.id === selectedVersionId);
   function saveVersion(kind: 'scenario' | 'baseline' | 'planned') {
-    const labels = { scenario: 'Cenário', baseline: 'Linha de base', planned: 'Previsto' };
-    const next = { id: crypto.randomUUID(), name: `${labels[kind]} · V${String(versions.length).padStart(2, '0')}`, createdAt: new Date().toISOString(), kind, tasks: tasks.map((task) => ({ ...task })) };
+    const labels = {
+      scenario: 'Cenário',
+      baseline: 'Linha de base',
+      planned: 'Previsto'
+    };
+    const next = {
+      id: crypto.randomUUID(),
+      name: `${labels[kind]} · V${String(versions.length).padStart(2, '0')}`,
+      createdAt: new Date().toISOString(),
+      kind,
+      tasks: tasks.map((task) => ({ ...task }))
+    };
     setVersions([...versions, next]);
     setSelectedVersionId(next.id);
   }
@@ -550,7 +1027,7 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   }
   function changeVersionKind(kind: 'baseline' | 'planned') {
     if (!selectedVersion) return;
-    setVersions(versions.map((version) => version.id === selectedVersion.id ? { ...version, kind } : version));
+    setVersions(versions.map((version) => (version.id === selectedVersion.id ? { ...version, kind } : version)));
   }
   function deleteVersion() {
     if (!selectedVersion || versions.length === 1) return;
@@ -570,7 +1047,9 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
     } else if (ordering.group && ordering.group === target.group) {
       const taskLots = Array.from(new Set(tasks.filter((task) => task.lotMother === ordering.group).map((task) => task.lot)));
       const current = [...(lotOrder[ordering.group] ?? taskLots)];
-      taskLots.forEach((lot) => { if (!current.includes(lot)) current.push(lot); });
+      taskLots.forEach((lot) => {
+        if (!current.includes(lot)) current.push(lot);
+      });
       const from = current.indexOf(ordering.key);
       const to = current.indexOf(target.key);
       current.splice(from, 1);
@@ -583,42 +1062,208 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
     <section className="page">
       <PageHeader title="Linha de balanço" subtitle="Visualização e edição do cronograma." />
       <div className="line-toolbar">
-        <label><input type="checkbox" checked={editMode} onChange={(e) => setEditMode(e.target.checked)} /> modo edição</label>
-        <label><input type="checkbox" checked={dependencyMode} onChange={(e) => setDependencyMode(e.target.checked)} /> dependências por arraste vertical</label>
-        <label><input type="checkbox" checked={showDeps} onChange={(e) => setShowDeps(e.target.checked)} /> mostrar dependências</label>
-        <label><input type="checkbox" checked={snapWeek} onChange={(e) => setSnapWeek(e.target.checked)} /> encaixar por semana</label>
+        <label>
+          <input type="checkbox" checked={editMode} onChange={(e) => setEditMode(e.target.checked)} /> modo edição
+        </label>
+        <label>
+          <input type="checkbox" checked={dependencyMode} onChange={(e) => setDependencyMode(e.target.checked)} /> dependências por arraste vertical
+        </label>
+        <label>
+          <input type="checkbox" checked={showDeps} onChange={(e) => setShowDeps(e.target.checked)} /> mostrar dependências
+        </label>
+        <label>
+          <input type="checkbox" checked={snapWeek} onChange={(e) => setSnapWeek(e.target.checked)} /> encaixar por semana
+        </label>
       </div>
       {drag?.mode === 'link' && <div className="link-mode-banner show">Modo vínculo: arraste até a sucessora</div>}
       <div className="line-shell">
-        <button className="chart-settings-button" title="Configurações do cronograma" onPointerDown={(event) => event.stopPropagation()} onClick={() => { setSelectedTask(null); setSettingsOpen(true); }}><Settings size={18} /></button>
+        <button
+          className="chart-settings-button"
+          title="Configurações do cronograma"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={() => {
+            setSelectedTask(null);
+            setSettingsOpen(true);
+          }}
+        >
+          <Settings size={18} />
+        </button>
         <aside className={`chart-drawer settings-drawer settings-panel ${settingsOpen ? 'open' : ''}`} onPointerDown={(event) => event.stopPropagation()}>
-          <div className="chart-drawer-head"><div><small>Linha de balanço</small><h3>Configurações</h3></div><button className="drawer-close" onClick={() => setSettingsOpen(false)}>×</button></div>
-          <div className="chart-drawer-body">
-          <label>Zoom<input type="range" min={1} max={7} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} /></label>
-          <h4>Linhas por lote-mãe</h4>
-          {groups.map((g) => <label key={g}>{g}<select value={groupLines[g] ?? 3} onChange={(e) => setGroupLines({ ...groupLines, [g]: Number(e.target.value) })}><option value={1}>1 linha</option><option value={2}>2 linhas</option><option value={3}>3 linhas</option><option value={4}>4 linhas</option></select></label>)}
-          <h4>Linha por família</h4>
-          {families.map((f) => <label key={f}>{f}<select value={familyLane[f] ?? 1} onChange={(e) => setFamilyLane({ ...familyLane, [f]: Number(e.target.value) })}><option value={1}>Linha 1</option><option value={2}>Linha 2</option><option value={3}>Linha 3</option><option value={4}>Linha 4</option></select></label>)}
-          <h4>Cor e linha por pacote</h4>
-          <div className="package-config-list">{packagesByGroup.map((item) => {
-            const maxLines = groupLines[item.group] ?? 3;
-            return <div className="package-config-row" key={item.key}><input title="Cor do pacote" type="color" value={packageColors[item.key] ?? item.color} onChange={(e) => setPackageColors({ ...packageColors, [item.key]: e.target.value })} /><span title={`${item.group} · ${item.packageName}`}>{item.packageName}</span><select value={Math.min(packageLanes[item.key] ?? item.defaultLane, maxLines)} onChange={(e) => setPackageLanes({ ...packageLanes, [item.key]: Number(e.target.value) })}>{Array.from({ length: maxLines }).map((_, index) => <option value={index + 1} key={index + 1}>Linha {index + 1}</option>)}</select></div>;
-          })}</div>
-          <h4>Cabeçalho de datas</h4>
-          <label>Nível superior<select value={monthFormat} onChange={(e) => setMonthFormat(e.target.value as 'index' | 'numeric')}><option value="index">M1, M2… desde o início</option><option value="numeric">MM/AA</option></select></label>
-          <label>Segundo nível<select value={weekFormat} onChange={(e) => setWeekFormat(e.target.value as 'short' | 'numeric' | 'day')}><option value="short">DD/MMM</option><option value="numeric">DD/MM</option><option value="day">Somente DD</option></select></label>
-          <div className="version-panel">
-            <div className="version-panel-title"><div><small>Cronograma</small><h4>Histórico de versões</h4></div><button title="Criar cenário" onClick={() => saveVersion('scenario')}>＋</button></div>
-            <label>Versão<select value={selectedVersionId} onChange={(e) => setSelectedVersionId(e.target.value)}>{versions.map((version) => <option key={version.id} value={version.id}>{version.name}</option>)}</select></label>
-            {selectedVersion && <div className="version-card"><span className={`version-kind ${selectedVersion.kind}`}>{selectedVersion.kind === 'baseline' ? 'Linha de base' : selectedVersion.kind === 'planned' ? 'Previsto' : 'Simulação'}</span><strong>{selectedVersion.name}</strong><small>{new Date(selectedVersion.createdAt).toLocaleString('pt-BR')}</small></div>}
-            <div className="version-actions"><button onClick={openVersion}>Abrir versão</button><button onClick={() => changeVersionKind('baseline')}>Salvar como linha de base</button><button onClick={() => changeVersionKind('planned')}>Salvar como previsto</button><button className="danger" disabled={versions.length === 1} onClick={deleteVersion}>Excluir</button></div>
+          <div className="chart-drawer-head">
+            <div>
+              <small>Linha de balanço</small>
+              <h3>Configurações</h3>
+            </div>
+            <button className="drawer-close" onClick={() => setSettingsOpen(false)}>
+              ×
+            </button>
           </div>
+          <div className="chart-drawer-body">
+            <label>
+              Zoom
+              <input type="range" min={1} max={7} value={zoom} onChange={(e) => setZoom(Number(e.target.value))} />
+            </label>
+            <h4>Linhas por lote-mãe</h4>
+            {groups.map((g) => (
+              <label key={g}>
+                {g}
+                <select
+                  value={groupLines[g] ?? 3}
+                  onChange={(e) =>
+                    setGroupLines({
+                      ...groupLines,
+                      [g]: Number(e.target.value)
+                    })
+                  }
+                >
+                  <option value={1}>1 linha</option>
+                  <option value={2}>2 linhas</option>
+                  <option value={3}>3 linhas</option>
+                  <option value={4}>4 linhas</option>
+                </select>
+              </label>
+            ))}
+            <h4>Linha por família</h4>
+            {families.map((f) => (
+              <label key={f}>
+                {f}
+                <select
+                  value={familyLane[f] ?? 1}
+                  onChange={(e) =>
+                    setFamilyLane({
+                      ...familyLane,
+                      [f]: Number(e.target.value)
+                    })
+                  }
+                >
+                  <option value={1}>Linha 1</option>
+                  <option value={2}>Linha 2</option>
+                  <option value={3}>Linha 3</option>
+                  <option value={4}>Linha 4</option>
+                </select>
+              </label>
+            ))}
+            <h4>Cor e linha por pacote</h4>
+            <div className="package-config-list">
+              {packagesByGroup.map((item) => {
+                const maxLines = groupLines[item.group] ?? 3;
+                return (
+                  <div className="package-config-row" key={item.key}>
+                    <input
+                      title="Cor do pacote"
+                      type="color"
+                      value={packageColors[item.key] ?? item.color}
+                      onChange={(e) =>
+                        setPackageColors({
+                          ...packageColors,
+                          [item.key]: e.target.value
+                        })
+                      }
+                    />
+                    <span title={`${item.group} · ${item.packageName}`}>{item.packageName}</span>
+                    <select
+                      value={Math.min(packageLanes[item.key] ?? item.defaultLane, maxLines)}
+                      onChange={(e) =>
+                        setPackageLanes({
+                          ...packageLanes,
+                          [item.key]: Number(e.target.value)
+                        })
+                      }
+                    >
+                      {Array.from({ length: maxLines }).map((_, index) => (
+                        <option value={index + 1} key={index + 1}>
+                          Linha {index + 1}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+            <h4>Cabeçalho de datas</h4>
+            <label>
+              Nível superior
+              <select value={monthFormat} onChange={(e) => setMonthFormat(e.target.value as 'index' | 'numeric')}>
+                <option value="index">M1, M2… desde o início</option>
+                <option value="numeric">MM/AA</option>
+              </select>
+            </label>
+            <label>
+              Segundo nível
+              <select value={weekFormat} onChange={(e) => setWeekFormat(e.target.value as 'short' | 'numeric' | 'day')}>
+                <option value="short">DD/MMM</option>
+                <option value="numeric">DD/MM</option>
+                <option value="day">Somente DD</option>
+              </select>
+            </label>
+            <div className="version-panel">
+              <div className="version-panel-title">
+                <div>
+                  <small>Cronograma</small>
+                  <h4>Histórico de versões</h4>
+                </div>
+                <button title="Criar cenário" onClick={() => saveVersion('scenario')}>
+                  ＋
+                </button>
+              </div>
+              <label>
+                Versão
+                <select value={selectedVersionId} onChange={(e) => setSelectedVersionId(e.target.value)}>
+                  {versions.map((version) => (
+                    <option key={version.id} value={version.id}>
+                      {version.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {selectedVersion && (
+                <div className="version-card">
+                  <span className={`version-kind ${selectedVersion.kind}`}>{selectedVersion.kind === 'baseline' ? 'Linha de base' : selectedVersion.kind === 'planned' ? 'Previsto' : 'Simulação'}</span>
+                  <strong>{selectedVersion.name}</strong>
+                  <small>{new Date(selectedVersion.createdAt).toLocaleString('pt-BR')}</small>
+                </div>
+              )}
+              <div className="version-actions">
+                <button onClick={openVersion}>Abrir versão</button>
+                <button onClick={() => changeVersionKind('baseline')}>Salvar como linha de base</button>
+                <button onClick={() => changeVersionKind('planned')}>Salvar como previsto</button>
+                <button className="danger" disabled={versions.length === 1} onClick={deleteVersion}>
+                  Excluir
+                </button>
+              </div>
+            </div>
           </div>
         </aside>
         <div className="chart-scroll">
           <div className="lot-labels" style={{ height }}>
             <div className="lot-label-header">Lotes</div>
-            {labelRows.map((row) => <div key={row.key} draggable className={`lot-label ${row.type} ${ordering?.key === row.key ? 'ordering' : ''}`} style={{ top: row.top, height: row.height }} onDragStart={() => setOrdering({ type: row.type, key: row.type === 'lot' ? row.label : row.key, group: row.group })} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderRow({ type: row.type, key: row.type === 'lot' ? row.label : row.key, group: row.group })} onDragEnd={() => setOrdering(null)}><span className="drag-grip">⠿</span>{row.label}</div>)}
+            {labelRows.map((row) => (
+              <div
+                key={row.key}
+                draggable
+                className={`lot-label ${row.type} ${ordering?.key === row.key ? 'ordering' : ''}`}
+                style={{ top: row.top, height: row.height }}
+                onDragStart={() =>
+                  setOrdering({
+                    type: row.type,
+                    key: row.type === 'lot' ? row.label : row.key,
+                    group: row.group
+                  })
+                }
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() =>
+                  reorderRow({
+                    type: row.type,
+                    key: row.type === 'lot' ? row.label : row.key,
+                    group: row.group
+                  })
+                }
+                onDragEnd={() => setOrdering(null)}
+              >
+                <span className="drag-grip">⠿</span>
+                {row.label}
+              </div>
+            ))}
           </div>
           <svg ref={svgRef} width={width} height={height} onPointerDown={closeDrawersOnEmpty} onPointerMove={onMove} onPointerUp={finishDrag} onPointerCancel={finishDrag}>
             <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
@@ -628,12 +1273,23 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
               const isWeekend = date.getDay() === 0 || date.getDay() === 6;
               const holiday = holidays.find((event) => event.date === iso);
               if (!isWeekend && !holiday) return null;
-              return <rect key={`off-${iso}`} x={xFor(date)} y={0} width={zoomPx[zoom]} height={height} fill={holiday ? '#e2e8f0' : '#f1f5f9'}><title>{holiday?.title ?? 'Final de semana'}</title></rect>;
+              return (
+                <rect key={`off-${iso}`} x={xFor(date)} y={0} width={zoomPx[zoom]} height={height} fill={holiday ? '#e2e8f0' : '#f1f5f9'}>
+                  <title>{holiday?.title ?? 'Final de semana'}</title>
+                </rect>
+              );
             })}
             {Array.from({ length: diffDays(projectStart, chartEnd) + 1 }).map((_, i) => {
               const date = addDays(projectStart, i);
               const x = xFor(date);
-              return <g key={`day-${i}`}><line x1={x} x2={x} y1={66} y2={height} stroke={date.getDay() === 0 ? '#cbd5e1' : '#eef0f4'} /><text x={x + 2} y={84} fontSize={9} fill="#64748b">{dayNames[date.getDay()]}</text></g>;
+              return (
+                <g key={`day-${i}`}>
+                  <line x1={x} x2={x} y1={66} y2={height} stroke={date.getDay() === 0 ? '#cbd5e1' : '#eef0f4'} />
+                  <text x={x + 2} y={84} fontSize={9} fill="#64748b">
+                    {dayNames[date.getDay()]}
+                  </text>
+                </g>
+              );
             })}
             {Array.from({ length: 75 }).map((_, i) => {
               const d = addDays(projectStart, i * 7);
@@ -643,54 +1299,191 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
                 if (weekFormat === 'day') return date.toLocaleDateString('pt-BR', { day: '2-digit' });
                 return date.toLocaleDateString('pt-BR', weekFormat === 'numeric' ? { day: '2-digit', month: '2-digit' } : { day: '2-digit', month: 'short' });
               };
-              return <g key={i}><line x1={x} x2={x} y1={38} y2={height} stroke="#d9dde6" /><text x={x + 3} y={59} fontSize={10}>{format(d)}–{format(weekEnd)}</text></g>;
+              return (
+                <g key={i}>
+                  <line x1={x} x2={x} y1={38} y2={height} stroke="#d9dde6" />
+                  <text x={x + 3} y={59} fontSize={10}>
+                    {format(d)}–{format(weekEnd)}
+                  </text>
+                </g>
+              );
             })}
             {Array.from({ length: 18 }).map((_, i) => {
               const date = new Date(projectStart.getFullYear(), projectStart.getMonth() + i, 1);
-              const label = monthFormat === 'index' ? `M${i + 1}` : date.toLocaleDateString('pt-BR', { month: '2-digit', year: '2-digit' });
-              return <g key={`month-${i}`}><line x1={xFor(date)} x2={xFor(date)} y1={0} y2={height} stroke="#aeb4c2" /><text x={xFor(date) + 4} y={24} fontSize={12} fontWeight={700}>{label}</text></g>;
+              const label =
+                monthFormat === 'index'
+                  ? `M${i + 1}`
+                  : date.toLocaleDateString('pt-BR', {
+                      month: '2-digit',
+                      year: '2-digit'
+                    });
+              return (
+                <g key={`month-${i}`}>
+                  <line x1={xFor(date)} x2={xFor(date)} y1={0} y2={height} stroke="#aeb4c2" />
+                  <text x={xFor(date) + 4} y={24} fontSize={12} fontWeight={700}>
+                    {label}
+                  </text>
+                </g>
+              );
             })}
             {['2025-09-01', '2026-01-12', '2026-06-10'].map((date, i) => {
               const x = xFor(parseDate(date));
-              return <g key={date}><line x1={x} x2={x} y1={90} y2={height} stroke="#b91c1c" strokeDasharray="4 4" /><text x={x + 8} y={150} transform={`rotate(-90 ${x + 8} 150)`} fontSize={11} fill="#b91c1c">{['INÍCIO', 'ACAB.', 'ESQ.'][i]}</text></g>;
+              return (
+                <g key={date}>
+                  <line x1={x} x2={x} y1={90} y2={height} stroke="#b91c1c" strokeDasharray="4 4" />
+                  <text x={x + 8} y={150} transform={`rotate(-90 ${x + 8} 150)`} fontSize={11} fill="#b91c1c">
+                    {['INÍCIO', 'ACAB.', 'ESQ.'][i]}
+                  </text>
+                </g>
+              );
             })}
             {rows.map((row) => {
               const currentY = y;
               y += row.height;
-              if (row.type === 'group') return <g key={row.key}><rect x={0} y={currentY} width={width} height={row.height} fill="#eef2ff" opacity=".65" /></g>;
-              return <g key={row.key}><line x1={0} x2={width} y1={currentY + row.height} y2={currentY + row.height} stroke="#e5e7eb" />{row.tasks.map((t) => {
-                const packageKey = `${t.lotMother}||${t.packageName}`;
-                const packageSetting = packagesByGroup.find((item) => item.key === packageKey);
-                const lane = Math.min(groupLines[t.lotMother] ?? 3, packageLanes[packageKey] ?? t.lane ?? packageSetting?.defaultLane ?? familyLane[t.packageFamily] ?? 1);
-                const x = xFor(parseDate(t.startDate));
-                const barW = Math.max(10, (diffDays(parseDate(t.startDate), parseDate(t.endDate)) + 1) * zoomPx[zoom]);
-                const barY = currentY + 8 + (lane - 1) * 26;
-                taskLayout.set(t.id, { x, y: barY, width: barW, height: 18 });
-                const serviceText = t.services?.length ? t.services.join(' · ') : microservices[t.packageFamily] ?? 'Serviços não cadastrados';
-                const taskColor = packageColors[packageKey] ?? t.color;
-                return <g key={t.id} data-task-id={t.id} onClick={() => setSelectedTask(t)}><title>{t.packageName} · {serviceText}</title><rect className={`task-bar ${drag?.target === t.id ? 'target-highlight' : ''}`} x={x} y={barY} width={barW} height={18} rx={4} fill={taskColor} onPointerDown={(e) => beginDrag(e, t, 'pending')} /><rect className="resize-handle" x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => beginDrag(e, t, 'resize')} /><text pointerEvents="none" x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">{t.packageName}</text><rect pointerEvents="none" x={x} y={barY + 14} width={barW * t.progress / 100} height={4} fill="#fff" opacity={0.55} /></g>;
-              })}</g>;
+              if (row.type === 'group')
+                return (
+                  <g key={row.key}>
+                    <rect x={0} y={currentY} width={width} height={row.height} fill="#eef2ff" opacity=".65" />
+                  </g>
+                );
+              return (
+                <g key={row.key}>
+                  <line x1={0} x2={width} y1={currentY + row.height} y2={currentY + row.height} stroke="#e5e7eb" />
+                  {row.tasks.map((t) => {
+                    const packageKey = `${t.lotMother}||${t.packageName}`;
+                    const packageSetting = packagesByGroup.find((item) => item.key === packageKey);
+                    const lane = Math.min(groupLines[t.lotMother] ?? 3, packageLanes[packageKey] ?? t.lane ?? packageSetting?.defaultLane ?? familyLane[t.packageFamily] ?? 1);
+                    const x = xFor(parseDate(t.startDate));
+                    const barW = Math.max(10, (diffDays(parseDate(t.startDate), parseDate(t.endDate)) + 1) * zoomPx[zoom]);
+                    const barY = currentY + 8 + (lane - 1) * 26;
+                    taskLayout.set(t.id, {
+                      x,
+                      y: barY,
+                      width: barW,
+                      height: 18
+                    });
+                    const serviceText = t.services?.length ? t.services.join(' · ') : (microservices[t.packageFamily] ?? 'Serviços não cadastrados');
+                    const taskColor = packageColors[packageKey] ?? t.color;
+                    return (
+                      <g key={t.id} data-task-id={t.id} onClick={() => setSelectedTask(t)}>
+                        <title>
+                          {t.packageName} · {serviceText}
+                        </title>
+                        <rect className={`task-bar ${drag?.target === t.id ? 'target-highlight' : ''}`} x={x} y={barY} width={barW} height={18} rx={4} fill={taskColor} onPointerDown={(e) => beginDrag(e, t, 'pending')} />
+                        <rect className="resize-handle" x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => beginDrag(e, t, 'resize')} />
+                        <text pointerEvents="none" x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">
+                          {t.packageName}
+                        </text>
+                        <rect pointerEvents="none" x={x} y={barY + 14} width={(barW * t.progress) / 100} height={4} fill="#fff" opacity={0.55} />
+                      </g>
+                    );
+                  })}
+                </g>
+              );
             })}
-            {showDeps && dependencies.map((dependency) => {
-              const from = taskLayout.get(dependency.from);
-              const to = taskLayout.get(dependency.to);
-              if (!from || !to) return null;
-              const startX = from.x + from.width;
-              const startY = from.y + from.height / 2;
-              const endX = to.x;
-              const endY = to.y + to.height / 2;
-              const middleX = Math.max(startX + 18, (startX + endX) / 2);
-              return <path className="dependency-path" key={`${dependency.from}-${dependency.to}`} d={`M ${startX} ${startY} C ${middleX} ${startY}, ${middleX} ${endY}, ${endX} ${endY}`} />;
-            })}
-            {drag?.mode === 'link' && linkPoint && (() => {
-              const from = taskLayout.get(drag.id);
-              if (!from) return null;
-              return <path className="dependency-preview" d={`M ${from.x + from.width} ${from.y + from.height / 2} C ${from.x + from.width + 40} ${from.y + from.height / 2}, ${linkPoint.x - 40} ${linkPoint.y}, ${linkPoint.x} ${linkPoint.y}`} />;
-            })()}
+            {showDeps &&
+              dependencies.map((dependency) => {
+                const from = taskLayout.get(dependency.from);
+                const to = taskLayout.get(dependency.to);
+                if (!from || !to) return null;
+                const startX = from.x + from.width;
+                const startY = from.y + from.height / 2;
+                const endX = to.x;
+                const endY = to.y + to.height / 2;
+                const middleX = Math.max(startX + 18, (startX + endX) / 2);
+                return <path className="dependency-path" key={`${dependency.from}-${dependency.to}`} d={`M ${startX} ${startY} C ${middleX} ${startY}, ${middleX} ${endY}, ${endX} ${endY}`} />;
+              })}
+            {drag?.mode === 'link' &&
+              linkPoint &&
+              (() => {
+                const from = taskLayout.get(drag.id);
+                if (!from) return null;
+                return <path className="dependency-preview" d={`M ${from.x + from.width} ${from.y + from.height / 2} C ${from.x + from.width + 40} ${from.y + from.height / 2}, ${linkPoint.x - 40} ${linkPoint.y}, ${linkPoint.x} ${linkPoint.y}`} />;
+              })()}
           </svg>
         </div>
         <aside className={`chart-drawer task-drawer ${selectedTask ? 'open' : ''}`} onPointerDown={(event) => event.stopPropagation()}>
-          {selectedTask && <><div className="chart-drawer-head"><div><small>{selectedTask.packageFamily}</small><h3>{selectedTask.packageName}</h3><span>{selectedTask.lot}</span></div><button className="drawer-close" onClick={() => setSelectedTask(null)}>×</button></div><div className="chart-drawer-body"><div className="task-progress"><span>Progresso da atividade</span><strong>{selectedTask.progress}%</strong><i><b style={{ width: `${selectedTask.progress}%`, background: selectedTask.color }} /></i></div><dl><dt>Lote-mãe</dt><dd>{selectedTask.lotMother}</dd><dt>Lote</dt><dd>{selectedTask.lot}</dd><dt>Início</dt><dd>{parseDate(selectedTask.startDate).toLocaleDateString('pt-BR')}</dd><dt>Fim</dt><dd>{parseDate(selectedTask.endDate).toLocaleDateString('pt-BR')}</dd><dt>Duração</dt><dd>{diffDays(parseDate(selectedTask.startDate), parseDate(selectedTask.endDate)) + 1} dias</dd><dt>Quantidade</dt><dd>{selectedTask.quantity ?? '—'} {selectedTask.unit ?? ''}</dd><dt>Custo</dt><dd>{selectedTask.cost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) ?? '—'}</dd></dl><div className="drawer-section"><h4>Serviços inclusos</h4>{selectedTask.services?.length ? <ul className="service-list">{selectedTask.services.map((service) => <li key={service}>{service}</li>)}</ul> : <p>{microservices[selectedTask.packageFamily] ?? 'Não cadastrados'}</p>}</div><div className="drawer-section"><h4>Dependências FS</h4><div className="dep-list">{dependencies.filter((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id).map((dependency) => <div key={`${dependency.from}-${dependency.to}`}><span>{tasks.find((task) => task.id === dependency.from)?.packageName} → {tasks.find((task) => task.id === dependency.to)?.packageName}</span><button className="dep-remove" onClick={() => setDependencies(dependencies.filter((item) => item !== dependency))}>×</button></div>)}{!dependencies.some((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id) && 'Nenhuma dependência.'}</div></div></div></>}
+          {selectedTask && (
+            <>
+              <div className="chart-drawer-head">
+                <div>
+                  <small>{selectedTask.packageFamily}</small>
+                  <h3>{selectedTask.packageName}</h3>
+                  <span>{selectedTask.lot}</span>
+                </div>
+                <button className="drawer-close" onClick={() => setSelectedTask(null)}>
+                  ×
+                </button>
+              </div>
+              <div className="chart-drawer-body">
+                <div className="task-progress">
+                  <span>Progresso da atividade</span>
+                  <strong>{selectedTask.progress}%</strong>
+                  <i>
+                    <b
+                      style={{
+                        width: `${selectedTask.progress}%`,
+                        background: selectedTask.color
+                      }}
+                    />
+                  </i>
+                </div>
+                <dl>
+                  <dt>Lote-mãe</dt>
+                  <dd>{selectedTask.lotMother}</dd>
+                  <dt>Lote</dt>
+                  <dd>{selectedTask.lot}</dd>
+                  <dt>Início</dt>
+                  <dd>{parseDate(selectedTask.startDate).toLocaleDateString('pt-BR')}</dd>
+                  <dt>Fim</dt>
+                  <dd>{parseDate(selectedTask.endDate).toLocaleDateString('pt-BR')}</dd>
+                  <dt>Duração</dt>
+                  <dd>{diffDays(parseDate(selectedTask.startDate), parseDate(selectedTask.endDate)) + 1} dias</dd>
+                  <dt>Quantidade</dt>
+                  <dd>
+                    {selectedTask.quantity ?? '—'} {selectedTask.unit ?? ''}
+                  </dd>
+                  <dt>Custo</dt>
+                  <dd>
+                    {selectedTask.cost?.toLocaleString('pt-BR', {
+                      style: 'currency',
+                      currency: 'BRL'
+                    }) ?? '—'}
+                  </dd>
+                </dl>
+                <div className="drawer-section">
+                  <h4>Serviços inclusos</h4>
+                  {selectedTask.services?.length ? (
+                    <ul className="service-list">
+                      {selectedTask.services.map((service) => (
+                        <li key={service}>{service}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p>{microservices[selectedTask.packageFamily] ?? 'Não cadastrados'}</p>
+                  )}
+                </div>
+                <div className="drawer-section">
+                  <h4>Dependências FS</h4>
+                  <div className="dep-list">
+                    {dependencies
+                      .filter((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id)
+                      .map((dependency) => (
+                        <div key={`${dependency.from}-${dependency.to}`}>
+                          <span>
+                            {tasks.find((task) => task.id === dependency.from)?.packageName} → {tasks.find((task) => task.id === dependency.to)?.packageName}
+                          </span>
+                          <button className="dep-remove" onClick={() => setDependencies(dependencies.filter((item) => item !== dependency))}>
+                            ×
+                          </button>
+                        </div>
+                      ))}
+                    {!dependencies.some((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id) && 'Nenhuma dependência.'}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
         </aside>
       </div>
     </section>
@@ -704,24 +1497,73 @@ function Procurement() {
       <PageHeader title="Compras" subtitle="Kanban com cobertura por quantidade e etapa do processo.">
         <button>Importar requisições</button>
       </PageHeader>
-      <div className="kanban">{stages.map((stage) => <div className="kanban-col" key={stage}><h3>{stage}</h3>{procurement.filter((p) => p.stage === stage).map((p) => <article className={`buy-card ${p.coverage < 100 ? 'warning' : 'ok'}`} key={p.id}><strong>{p.item}</strong><span>{p.code}</span><div className="bar"><i style={{ width: `${p.coverage}%` }} /></div><small>Cobertura {p.coverage}% · pedido {p.ordered}/{p.required} {p.unit}</small><b>{p.status}</b></article>)}</div>)}</div>
+      <div className="kanban">
+        {stages.map((stage) => (
+          <div className="kanban-col" key={stage}>
+            <h3>{stage}</h3>
+            {procurement
+              .filter((p) => p.stage === stage)
+              .map((p) => (
+                <article className={`buy-card ${p.coverage < 100 ? 'warning' : 'ok'}`} key={p.id}>
+                  <strong>{p.item}</strong>
+                  <span>{p.code}</span>
+                  <div className="bar">
+                    <i style={{ width: `${p.coverage}%` }} />
+                  </div>
+                  <small>
+                    Cobertura {p.coverage}% · pedido {p.ordered}/{p.required} {p.unit}
+                  </small>
+                  <b>{p.status}</b>
+                </article>
+              ))}
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
 
 function MediumPlan({ tasks }: { tasks: Task[] }) {
-  type Unit = { id: string; name: string; weight: number; quantity: number; startDate: string; endDate: string; responsible: string };
-  type Window = { id: string; startDate: string; endDate: string; createdAt: string; tasks: Task[] };
+  type Unit = {
+    id: string;
+    parentId?: string;
+    name: string;
+    weight: number;
+    quantity: number;
+    startDate: string;
+    endDate: string;
+    responsible: string;
+  };
+  type Window = {
+    id: string;
+    startDate: string;
+    endDate: string;
+    createdAt: string;
+    tasks: Task[];
+  };
   const [analysisStart, setAnalysisStart] = useState(() => tasks[0]?.startDate ?? toIsoDate(new Date()));
   const [windowData, setWindowData] = useState<Window | null>(null);
   const [units, setUnits] = useState<Record<string, Unit[]>>({});
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [selectedMediumTaskIds, setSelectedMediumTaskIds] = useState<string[]>([]);
   const [newUnitName, setNewUnitName] = useState('');
+  const [unitParentId, setUnitParentId] = useState<string | null>(null);
   const mediumLabelsRef = useRef<HTMLDivElement | null>(null);
   const mediumTimelineRef = useRef<HTMLDivElement | null>(null);
   const [showMediumDependencies, setShowMediumDependencies] = useState(true);
   const [mediumOrdering, setMediumOrdering] = useState<string | null>(null);
-  const [mediumDrag, setMediumDrag] = useState<null | { taskId: string; unitId: string; mode: 'move' | 'resize'; startX: number; startDate: string; endDate: string }>(null);
+  const [mediumDrag, setMediumDrag] = useState<null | {
+    taskId: string;
+    unitId: string;
+    mode: 'pending' | 'move' | 'resize' | 'link';
+    startX: number;
+    startY: number;
+    startDate: string;
+    endDate: string;
+    target?: string;
+  }>(null);
+  const [mediumLinkPoint, setMediumLinkPoint] = useState<{ x: number; y: number } | null>(null);
+  const mediumLongPressRef = useRef<number | null>(null);
   function threeMonthsAfter(value: string) {
     const date = parseDate(value);
     date.setMonth(date.getMonth() + 3);
@@ -730,38 +1572,140 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   const analysisEnd = threeMonthsAfter(analysisStart);
   const previewTasks = tasks.filter((task) => task.startDate <= analysisEnd && task.endDate >= analysisStart);
   function createWindow() {
-    const snapshot = previewTasks.map((task) => ({ ...task, services: [...(task.services ?? [])] }));
-    setWindowData({ id: crypto.randomUUID(), startDate: analysisStart, endDate: analysisEnd, createdAt: new Date().toISOString(), tasks: snapshot });
-    setUnits(Object.fromEntries(snapshot.map((task) => [task.id, [{ id: crypto.randomUUID(), name: task.lot, weight: 100, quantity: task.quantity ?? 0, startDate: task.startDate, endDate: task.endDate, responsible: task.responsible ?? '' }]])));
+    const snapshot = previewTasks.map((task) => ({
+      ...task,
+      services: [...(task.services ?? [])]
+    }));
+    setWindowData({
+      id: crypto.randomUUID(),
+      startDate: analysisStart,
+      endDate: analysisEnd,
+      createdAt: new Date().toISOString(),
+      tasks: snapshot
+    });
+    setUnits(
+      Object.fromEntries(
+        snapshot.map((task) => [
+          task.id,
+          [
+            {
+              id: crypto.randomUUID(),
+              name: task.lot,
+              weight: 100,
+              quantity: task.quantity ?? 0,
+              startDate: task.startDate,
+              endDate: task.endDate,
+              responsible: task.responsible ?? ''
+            }
+          ]
+        ])
+      )
+    );
     setSelectedTaskId(null);
+    setSelectedMediumTaskIds([]);
   }
   function addUnit(task: Task) {
     if (!newUnitName.trim()) return;
     const current = units[task.id] ?? [];
-    const next = [...current, { id: crypto.randomUUID(), name: newUnitName.trim(), weight: 0, quantity: 0, startDate: task.startDate, endDate: task.endDate, responsible: task.responsible ?? '' }];
-    const base = Math.floor(10000 / next.length) / 100;
-    const distributed = next.map((unit, index) => ({ ...unit, weight: index === next.length - 1 ? Number((100 - base * (next.length - 1)).toFixed(2)) : base }));
+    const parentId = current.some((unit) => unit.id === unitParentId) ? unitParentId! : current[0]?.id;
+    const next = [
+      ...current,
+      {
+        id: crypto.randomUUID(),
+        parentId,
+        name: newUnitName.trim(),
+        weight: 0,
+        quantity: 0,
+        startDate: task.startDate,
+        endDate: task.endDate,
+        responsible: task.responsible ?? ''
+      }
+    ];
+    const siblings = next.filter((unit) => unit.parentId === parentId);
+    const base = Math.floor(10000 / siblings.length) / 100;
+    let siblingIndex = 0;
+    const distributed = next.map((unit) =>
+      unit.parentId === parentId
+        ? {
+            ...unit,
+            weight: siblingIndex++ === siblings.length - 1 ? Number((100 - base * (siblings.length - 1)).toFixed(2)) : base
+          }
+        : unit
+    );
     setUnits({ ...units, [task.id]: distributed });
     setNewUnitName('');
   }
   function updateUnit(taskId: string, unitId: string, patch: Partial<Unit>) {
-    setUnits({ ...units, [taskId]: (units[taskId] ?? []).map((unit) => unit.id === unitId ? { ...unit, ...patch } : unit) });
+    setUnits({
+      ...units,
+      [taskId]: (units[taskId] ?? []).map((unit) => (unit.id === unitId ? { ...unit, ...patch } : unit))
+    });
   }
   function removeUnit(taskId: string, unitId: string) {
-    const remaining = (units[taskId] ?? []).filter((unit) => unit.id !== unitId);
+    const source = units[taskId] ?? [];
+    const removing = new Set([unitId]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      source.forEach((unit) => {
+        if (unit.parentId && removing.has(unit.parentId) && !removing.has(unit.id)) {
+          removing.add(unit.id);
+          changed = true;
+        }
+      });
+    }
+    const removed = source.find((unit) => unit.id === unitId);
+    const remaining = source.filter((unit) => !removing.has(unit.id));
     if (!remaining.length) return;
-    const base = Math.floor(10000 / remaining.length) / 100;
-    setUnits({ ...units, [taskId]: remaining.map((unit, index) => ({ ...unit, weight: index === remaining.length - 1 ? Number((100 - base * (remaining.length - 1)).toFixed(2)) : base })) });
+    const siblings = remaining.filter((unit) => unit.parentId === removed?.parentId);
+    const base = siblings.length ? Math.floor(10000 / siblings.length) / 100 : 100;
+    let index = 0;
+    setUnits({
+      ...units,
+      [taskId]: remaining.map((unit) =>
+        unit.parentId === removed?.parentId
+          ? {
+              ...unit,
+              weight: index++ === siblings.length - 1 ? Number((100 - base * (siblings.length - 1)).toFixed(2)) : base
+            }
+          : unit
+      )
+    });
   }
   function addManualActivity() {
     if (!windowData) return;
     const packageName = window.prompt('Nome da nova atividade');
     if (!packageName?.trim()) return;
     const lot = window.prompt('Lote/local da atividade', 'Atividade extra')?.trim() || 'Atividade extra';
-    const task: Task = { id: crypto.randomUUID(), packageName: packageName.trim(), packageFamily: 'EXTRA', lotMother: 'ATIVIDADES EXTRAS', lot, startDate: windowData.startDate, endDate: addDays(parseDate(windowData.startDate), 6).toISOString().slice(0, 10), progress: 0, color: '#7c3aed', predecessors: [] };
+    const task: Task = {
+      id: crypto.randomUUID(),
+      packageName: packageName.trim(),
+      packageFamily: 'EXTRA',
+      lotMother: 'ATIVIDADES EXTRAS',
+      lot,
+      startDate: windowData.startDate,
+      endDate: addDays(parseDate(windowData.startDate), 6).toISOString().slice(0, 10),
+      progress: 0,
+      color: '#7c3aed',
+      predecessors: []
+    };
     setWindowData({ ...windowData, tasks: [...windowData.tasks, task] });
-    setUnits({ ...units, [task.id]: [{ id: crypto.randomUUID(), name: lot, weight: 100, quantity: 0, startDate: task.startDate, endDate: task.endDate, responsible: '' }] });
+    setUnits({
+      ...units,
+      [task.id]: [
+        {
+          id: crypto.randomUUID(),
+          name: lot,
+          weight: 100,
+          quantity: 0,
+          startDate: task.startDate,
+          endDate: task.endDate,
+          responsible: ''
+        }
+      ]
+    });
     setSelectedTaskId(task.id);
+    setSelectedMediumTaskIds([task.id]);
   }
   function reorderMediumTask(targetId: string) {
     if (!windowData || !mediumOrdering || mediumOrdering === targetId) return;
@@ -776,41 +1720,495 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   function mediumPointerX(event: React.PointerEvent) {
     return event.clientX - (mediumTimelineRef.current?.getBoundingClientRect().left ?? 0);
   }
-  function beginMediumDrag(event: React.PointerEvent<HTMLElement>, taskId: string, unit: Unit, mode: 'move' | 'resize') {
+  function mediumPointerY(event: React.PointerEvent) {
+    return event.clientY - (mediumTimelineRef.current?.getBoundingClientRect().top ?? 0);
+  }
+  function clearMediumLongPress() {
+    if (mediumLongPressRef.current !== null) window.clearTimeout(mediumLongPressRef.current);
+    mediumLongPressRef.current = null;
+  }
+  function beginMediumDrag(event: React.PointerEvent<HTMLElement>, taskId: string, unit: Unit, mode: 'pending' | 'resize') {
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    setMediumDrag({ taskId, unitId: unit.id, mode, startX: mediumPointerX(event), startDate: unit.startDate, endDate: unit.endDate });
+    setMediumDrag({
+      taskId,
+      unitId: unit.id,
+      mode,
+      startX: mediumPointerX(event),
+      startY: mediumPointerY(event),
+      startDate: unit.startDate,
+      endDate: unit.endDate
+    });
+    if (mode === 'pending') {
+      clearMediumLongPress();
+      mediumLongPressRef.current = window.setTimeout(() => {
+        setMediumDrag((current) => (current?.taskId === taskId && current.mode === 'pending' ? { ...current, mode: 'link' } : current));
+      }, 500);
+    }
   }
   function moveMediumItem(event: React.PointerEvent) {
     if (!mediumDrag || !windowData) return;
-    const delta = Math.round((mediumPointerX(event) - mediumDrag.startX) / dayWidth);
+    const dx = mediumPointerX(event) - mediumDrag.startX;
+    const dy = mediumPointerY(event) - mediumDrag.startY;
+    if (mediumDrag.mode === 'pending') {
+      if (Math.abs(dx) > 7 || Math.abs(dy) > 7) clearMediumLongPress();
+      if (Math.abs(dy) > 14 && Math.abs(dy) > Math.abs(dx) + 4) setMediumDrag({ ...mediumDrag, mode: 'link' });
+      else if (Math.abs(dx) > 5) setMediumDrag({ ...mediumDrag, mode: 'move' });
+      return;
+    }
+    if (mediumDrag.mode === 'link') {
+      const target = document
+        .elementsFromPoint(event.clientX, event.clientY)
+        .map((element) => element.closest('[data-medium-task-id]')?.getAttribute('data-medium-task-id'))
+        .find((id) => id && id !== mediumDrag.taskId);
+      setMediumDrag({ ...mediumDrag, target: target ?? undefined });
+      setMediumLinkPoint({ x: mediumPointerX(event), y: mediumPointerY(event) });
+      return;
+    }
+    const delta = Math.round(dx / dayWidth);
     if (mediumDrag.mode === 'move') {
       const duration = diffDays(parseDate(mediumDrag.startDate), parseDate(mediumDrag.endDate));
       const start = addDays(parseDate(mediumDrag.startDate), delta);
-      updateUnit(mediumDrag.taskId, mediumDrag.unitId, { startDate: toIsoDate(start), endDate: toIsoDate(addDays(start, duration)) });
-    } else {
+      updateUnit(mediumDrag.taskId, mediumDrag.unitId, {
+        startDate: toIsoDate(start),
+        endDate: toIsoDate(addDays(start, duration))
+      });
+    } else if (mediumDrag.mode === 'resize') {
       const end = addDays(parseDate(mediumDrag.endDate), delta);
-      if (end >= parseDate(mediumDrag.startDate)) updateUnit(mediumDrag.taskId, mediumDrag.unitId, { endDate: toIsoDate(end) });
+      if (end >= parseDate(mediumDrag.startDate))
+        updateUnit(mediumDrag.taskId, mediumDrag.unitId, {
+          endDate: toIsoDate(end)
+        });
     }
   }
+  function finishMediumDrag() {
+    clearMediumLongPress();
+    if (mediumDrag?.mode === 'link' && mediumDrag.target && windowData) {
+      setWindowData({
+        ...windowData,
+        tasks: windowData.tasks.map((task) => task.id === mediumDrag.target && !(task.predecessors ?? []).includes(mediumDrag.taskId) ? { ...task, predecessors: [...(task.predecessors ?? []), mediumDrag.taskId] } : task)
+      });
+    }
+    setMediumDrag(null);
+    setMediumLinkPoint(null);
+  }
+  function selectMediumTask(event: React.MouseEvent, taskId: string) {
+    const next = event.ctrlKey || event.metaKey ? (selectedMediumTaskIds.includes(taskId) ? selectedMediumTaskIds.filter((id) => id !== taskId) : [...selectedMediumTaskIds, taskId]) : [taskId];
+    setSelectedMediumTaskIds(next);
+    setSelectedTaskId(next[0] ?? null);
+  }
+  function deleteSelectedMediumTasks() {
+    if (!windowData || !selectedMediumTaskIds.length) return;
+    const deleting = new Set(selectedMediumTaskIds);
+    setWindowData({
+      ...windowData,
+      tasks: windowData.tasks
+        .filter((task) => !deleting.has(task.id))
+        .map((task) => ({ ...task, predecessors: (task.predecessors ?? []).filter((id) => !deleting.has(id)), successors: (task.successors ?? []).filter((id) => !deleting.has(id)) }))
+    });
+    setUnits(Object.fromEntries(Object.entries(units).filter(([taskId]) => !deleting.has(taskId))));
+    setSelectedMediumTaskIds([]);
+    setSelectedTaskId(null);
+  }
   const selectedTask = windowData?.tasks.find((task) => task.id === selectedTaskId);
+  const activeUnitParentId = selectedTask ? ((units[selectedTask.id] ?? []).some((unit) => unit.id === unitParentId) ? unitParentId! : units[selectedTask.id]?.[0]?.id) : undefined;
+  const activeSiblingWeight = selectedTask ? (units[selectedTask.id] ?? []).filter((unit) => unit.parentId === activeUnitParentId).reduce((sum, unit) => sum + unit.weight, 0) : 0;
   const dayWidth = 13;
   const timelineWidth = windowData ? Math.max(1100, (diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1) * dayWidth) : 0;
+  function leafUnits(taskId: string) {
+    const list = units[taskId] ?? [];
+    const parents = new Set(list.map((unit) => unit.parentId).filter(Boolean));
+    return list.filter((unit) => !parents.has(unit.id));
+  }
+  function unitPath(taskId: string, unit: Unit) {
+    const list = units[taskId] ?? [];
+    const path: Unit[] = [];
+    let current: Unit | undefined = unit;
+    while (current?.parentId) {
+      path.unshift(current);
+      current = list.find((item) => item.id === current?.parentId);
+    }
+    return path;
+  }
+  const maxSublotDepth = Math.max(0, ...(windowData?.tasks.flatMap((task) => leafUnits(task.id).map((unit) => unitPath(task.id, unit).length)) ?? [0]));
+  const labelColumnWidth = 170 + maxSublotDepth * 145;
   const mediumRowLayout = new Map<string, { top: number; height: number }>();
-  let mediumRowTop = 64;
+  let mediumRowTop = 80;
   windowData?.tasks.forEach((task) => {
-    const height = Math.max(76, (units[task.id]?.length ?? 1) * 66 + 10);
+    const height = Math.max(76, leafUnits(task.id).length * 66 + 10);
     mediumRowLayout.set(task.id, { top: mediumRowTop, height });
     mediumRowTop += height;
   });
   return (
     <section className="page medium-page">
       <PageHeader title="Médio prazo" subtitle="Janela independente de três meses para abertura e detalhamento dos lotes." />
-      <div className="medium-filter card"><label>Início da análise<input type="date" value={analysisStart} onChange={(event) => setAnalysisStart(event.target.value)} /></label><div><small>Período de três meses</small><strong>{parseDate(analysisStart).toLocaleDateString('pt-BR')} a {parseDate(analysisEnd).toLocaleDateString('pt-BR')}</strong></div><div><small>Atividades encontradas</small><strong>{previewTasks.length}</strong></div>{windowData && <><label className="medium-check"><input type="checkbox" checked={showMediumDependencies} onChange={(event) => setShowMediumDependencies(event.target.checked)} /> Dependências</label><button onClick={addManualActivity}>＋ Atividade livre</button></>}<button className="primary" onClick={createWindow}>{windowData ? 'Criar nova janela' : 'Filtrar e criar janela'}</button></div>
-      {!windowData && <div className="medium-empty card"><CalendarRange size={34} /><h3>Defina o período de análise</h3><p>As atividades serão copiadas do longo prazo e permanecerão independentes de alterações posteriores na base.</p></div>}
-      {windowData && <><div className="medium-window-info"><span className="pill">Janela congelada</span><b>{windowData.tasks.length} atividades</b><small>Criada em {new Date(windowData.createdAt).toLocaleString('pt-BR')}</small></div><div className="medium-timeline-shell" onPointerDown={(event) => { if (!(event.target as Element).closest('.medium-task-card,.medium-label-row,button,input,select')) setSelectedTaskId(null); }}><div ref={mediumLabelsRef} className="medium-label-column"><div className="medium-label-head">Lote / atividade</div>{windowData.tasks.map((task) => <div draggable className={`medium-label-row ${mediumOrdering === task.id ? 'ordering' : ''}`} key={task.id} style={{ height: Math.max(76, (units[task.id]?.length ?? 1) * 66 + 10) }} onDragStart={() => setMediumOrdering(task.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderMediumTask(task.id)} onDragEnd={() => setMediumOrdering(null)}><span>⠿ {task.lotMother} · {task.lot}</span><b>{task.packageName}</b><button onClick={() => setSelectedTaskId(task.id)}>Abrir local</button></div>)}</div><div className="medium-timeline-scroll" onScroll={(event) => { if (mediumLabelsRef.current) mediumLabelsRef.current.scrollTop = event.currentTarget.scrollTop; }}><div ref={mediumTimelineRef} className="medium-timeline" style={{ width: timelineWidth }} onPointerMove={moveMediumItem} onPointerUp={() => setMediumDrag(null)} onPointerCancel={() => setMediumDrag(null)}><div className="medium-time-head">{Array.from({ length: diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1 }).map((_, index) => { const date = addDays(parseDate(windowData.startDate), index); const dayLetter = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'][date.getDay()]; return <span className={date.getDay() === 0 || date.getDay() === 6 ? 'weekend' : ''} key={index} style={{ left: index * dayWidth, width: dayWidth }}><b>{dayLetter}</b><small>{date.getDate()}</small></span>})}</div>{Array.from({ length: diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1 }).map((_, index) => { const date = addDays(parseDate(windowData.startDate), index); return date.getDay() === 0 || date.getDay() === 6 ? <i className="medium-weekend-column" key={index} style={{ left: index * dayWidth, width: dayWidth, height: mediumRowTop }} /> : null })}{showMediumDependencies && <svg className="medium-dependencies" width={timelineWidth} height={mediumRowTop}>{windowData.tasks.flatMap((task) => (task.predecessors ?? []).map((fromId) => { const fromTask = windowData.tasks.find((item) => item.id === fromId); const fromRow = fromTask && mediumRowLayout.get(fromTask.id); const toRow = mediumRowLayout.get(task.id); const fromUnit = fromTask && units[fromTask.id]?.[0]; const toUnit = units[task.id]?.[0]; if (!fromRow || !toRow || !fromUnit || !toUnit) return null; const sx = (diffDays(parseDate(windowData.startDate), parseDate(fromUnit.endDate)) + 1) * dayWidth; const sy = fromRow.top + 34; const ex = diffDays(parseDate(windowData.startDate), parseDate(toUnit.startDate)) * dayWidth; const ey = toRow.top + 34; const mx = Math.max(sx + 18, (sx + ex) / 2); return <path key={`${fromId}-${task.id}`} d={`M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ey}, ${ex} ${ey}`} /> }))}</svg>}{windowData.tasks.map((task) => <div className="medium-task-row" key={task.id} style={{ height: Math.max(76, (units[task.id]?.length ?? 1) * 66 + 10) }}>{(units[task.id] ?? []).map((unit, unitIndex) => { const x = Math.max(0, diffDays(parseDate(windowData.startDate), parseDate(unit.startDate))) * dayWidth; const width = Math.max(90, (diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1) * dayWidth); return <button className="medium-task-card" key={unit.id} style={{ left: x, top: unitIndex * 66, width, borderColor: task.color }} onPointerDown={(event) => beginMediumDrag(event, task.id, unit, 'move')} onClick={() => setSelectedTaskId(task.id)}><i style={{ background: task.color }} /><strong>{unit.name}</strong><span>{task.packageName}</span><small>{unit.weight}% · {unit.quantity || '—'} {task.unit ?? ''} · {unit.responsible || 'Sem responsável'}</small><em title="Alterar duração" onPointerDown={(event) => beginMediumDrag(event, task.id, unit, 'resize')} /></button>})}</div>)}</div></div></div></>}
-      <aside className={`calendar-drawer medium-drawer ${selectedTask ? 'open' : ''}`}>{selectedTask && <><button className="drawer-close" onClick={() => setSelectedTaskId(null)}>×</button><h3>Abrir local</h3><p><b>{selectedTask.packageName}</b><br />{selectedTask.lotMother} · {selectedTask.lot}</p><div className="medium-unit-add"><input value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Ex.: Balancim 1, Apto 101..." /><button className="primary" onClick={() => addUnit(selectedTask)}>Adicionar unidade</button></div><div className="medium-unit-list">{(units[selectedTask.id] ?? []).map((unit) => <article key={unit.id}><header><input value={unit.name} onChange={(event) => updateUnit(selectedTask.id, unit.id, { name: event.target.value })} /><button disabled={(units[selectedTask.id] ?? []).length === 1} onClick={() => removeUnit(selectedTask.id, unit.id)}>×</button></header><div><label>Peso %<input type="number" min="0" max="100" step=".01" value={unit.weight} onChange={(event) => updateUnit(selectedTask.id, unit.id, { weight: Number(event.target.value) })} /></label><label>Quantidade<input type="number" min="0" value={unit.quantity} onChange={(event) => updateUnit(selectedTask.id, unit.id, { quantity: Number(event.target.value) })} /></label><label>Início<input type="date" value={unit.startDate} onChange={(event) => updateUnit(selectedTask.id, unit.id, { startDate: event.target.value })} /></label><label>Fim<input type="date" value={unit.endDate} onChange={(event) => updateUnit(selectedTask.id, unit.id, { endDate: event.target.value })} /></label><label className="wide">Responsável<input value={unit.responsible} onChange={(event) => updateUnit(selectedTask.id, unit.id, { responsible: event.target.value })} /></label></div></article>)}</div><div className={`medium-weight-total ${Math.abs((units[selectedTask.id] ?? []).reduce((sum, unit) => sum + unit.weight, 0) - 100) < .01 ? 'ok' : 'invalid'}`}>Soma dos pesos: <b>{(units[selectedTask.id] ?? []).reduce((sum, unit) => sum + unit.weight, 0).toFixed(2)}%</b></div></>}</aside>
+      <div className="medium-filter card">
+        <label>
+          Início da análise
+          <input type="date" value={analysisStart} onChange={(event) => setAnalysisStart(event.target.value)} />
+        </label>
+        <div>
+          <small>Período de três meses</small>
+          <strong>
+            {parseDate(analysisStart).toLocaleDateString('pt-BR')} a {parseDate(analysisEnd).toLocaleDateString('pt-BR')}
+          </strong>
+        </div>
+        <div>
+          <small>Atividades encontradas</small>
+          <strong>{previewTasks.length}</strong>
+        </div>
+        {windowData && (
+          <>
+            <label className="medium-check">
+              <input type="checkbox" checked={showMediumDependencies} onChange={(event) => setShowMediumDependencies(event.target.checked)} /> Dependências
+            </label>
+            <button onClick={addManualActivity}>＋ Atividade livre</button>
+          </>
+        )}
+        <button className="primary" onClick={createWindow}>
+          {windowData ? 'Criar nova janela' : 'Filtrar e criar janela'}
+        </button>
+      </div>
+      {!windowData && (
+        <div className="medium-empty card">
+          <CalendarRange size={34} />
+          <h3>Defina o período de análise</h3>
+          <p>As atividades serão copiadas do longo prazo e permanecerão independentes de alterações posteriores na base.</p>
+        </div>
+      )}
+      {windowData && (
+        <>
+          <div className="medium-window-info">
+            <span className="pill">Janela congelada</span>
+            <b>{windowData.tasks.length} atividades</b>
+            <small>Criada em {new Date(windowData.createdAt).toLocaleString('pt-BR')}</small>
+          </div>
+          <div
+            className="medium-timeline-shell"
+            style={{
+              gridTemplateColumns: `${labelColumnWidth}px minmax(0,1fr)`
+            }}
+            onPointerDown={(event) => {
+              if (!(event.target as Element).closest('.medium-task-card,.medium-label-row,button,input,select')) {
+                setSelectedTaskId(null);
+                setSelectedMediumTaskIds([]);
+              }
+            }}
+          >
+            <div ref={mediumLabelsRef} className="medium-label-column">
+              <div
+                className="medium-label-head medium-location-grid"
+                style={{
+                  gridTemplateColumns: `170px repeat(${maxSublotDepth},145px)`
+                }}
+              >
+                <b>Lote</b>
+                {Array.from({ length: maxSublotDepth }).map((_, index) => (
+                  <b key={index}>Sublote {index + 1}</b>
+                ))}
+              </div>
+              {windowData.tasks.map((task) => (
+                <div
+                  draggable
+                  className={`medium-label-row ${mediumOrdering === task.id ? 'ordering' : ''}`}
+                  key={task.id}
+                  style={{
+                    height: Math.max(76, leafUnits(task.id).length * 66 + 10)
+                  }}
+                  onDragStart={() => setMediumOrdering(task.id)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={() => reorderMediumTask(task.id)}
+                  onDragEnd={() => setMediumOrdering(null)}
+                >
+                  {leafUnits(task.id).map((unit) => {
+                    const path = unitPath(task.id, unit);
+                    return (
+                      <div
+                        className="medium-location-grid medium-location-line"
+                        style={{
+                          gridTemplateColumns: `170px repeat(${maxSublotDepth},145px)`
+                        }}
+                        key={unit.id}
+                      >
+                        <span>⠿ {task.lot}</span>
+                        {Array.from({ length: maxSublotDepth }).map((_, index) => (
+                          <span key={index}>{path[index]?.name ?? '—'}</span>
+                        ))}
+                      </div>
+                    );
+                  })}
+                  <button onClick={(event) => selectMediumTask(event, task.id)}>Abrir lote</button>
+                </div>
+              ))}
+            </div>
+            <div
+              className="medium-timeline-scroll"
+              onScroll={(event) => {
+                if (mediumLabelsRef.current) mediumLabelsRef.current.scrollTop = event.currentTarget.scrollTop;
+              }}
+            >
+              <div ref={mediumTimelineRef} className="medium-timeline" style={{ width: timelineWidth }} onPointerMove={moveMediumItem} onPointerUp={finishMediumDrag} onPointerCancel={finishMediumDrag}>
+                <div className="medium-time-head">
+                  <div className="medium-week-head">
+                    {Array.from({ length: 14 }).map((_, index) => {
+                      const date = addDays(parseDate(windowData.startDate), index * 7);
+                      return (
+                        <span key={index} style={{ left: index * 7 * dayWidth, width: 7 * dayWidth }}>
+                          S{index + 1}-{date.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }).replace('.', '')}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {Array.from({
+                    length: diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1
+                  }).map((_, index) => {
+                    const date = addDays(parseDate(windowData.startDate), index);
+                    const dayLetter = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'][date.getDay()];
+                    return (
+                      <span className={date.getDay() === 0 || date.getDay() === 6 ? 'weekend' : ''} key={index} style={{ left: index * dayWidth, width: dayWidth }}>
+                        <b>{dayLetter}</b>
+                        <small>{date.getDate()}</small>
+                      </span>
+                    );
+                  })}
+                </div>
+                {Array.from({
+                  length: diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1
+                }).map((_, index) => {
+                  const date = addDays(parseDate(windowData.startDate), index);
+                  return date.getDay() === 0 || date.getDay() === 6 ? (
+                    <i
+                      className="medium-weekend-column"
+                      key={index}
+                      style={{
+                        left: index * dayWidth,
+                        width: dayWidth,
+                        height: mediumRowTop
+                      }}
+                    />
+                  ) : null;
+                })}
+                {showMediumDependencies && (
+                  <svg className="medium-dependencies" width={timelineWidth} height={mediumRowTop}>
+                    {windowData.tasks.flatMap((task) =>
+                      (task.predecessors ?? []).map((fromId) => {
+                        const fromTask = windowData.tasks.find((item) => item.id === fromId);
+                        const fromRow = fromTask && mediumRowLayout.get(fromTask.id);
+                        const toRow = mediumRowLayout.get(task.id);
+                        const fromUnit = fromTask && leafUnits(fromTask.id)[0];
+                        const toUnit = leafUnits(task.id)[0];
+                        if (!fromRow || !toRow || !fromUnit || !toUnit) return null;
+                        const sx = (diffDays(parseDate(windowData.startDate), parseDate(fromUnit.endDate)) + 1) * dayWidth;
+                        const sy = fromRow.top + 34;
+                        const ex = diffDays(parseDate(windowData.startDate), parseDate(toUnit.startDate)) * dayWidth;
+                        const ey = toRow.top + 34;
+                        const mx = Math.max(sx + 18, (sx + ex) / 2);
+                        return <path key={`${fromId}-${task.id}`} d={`M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ey}, ${ex} ${ey}`} />;
+                      })
+                    )}
+                  </svg>
+                )}
+                {mediumDrag?.mode === 'link' &&
+                  mediumLinkPoint &&
+                  (() => {
+                    const sourceTask = windowData.tasks.find((task) => task.id === mediumDrag.taskId);
+                    const sourceRow = sourceTask && mediumRowLayout.get(sourceTask.id);
+                    const sourceUnit = sourceTask && leafUnits(sourceTask.id)[0];
+                    if (!sourceRow || !sourceUnit) return null;
+                    const sx = (diffDays(parseDate(windowData.startDate), parseDate(sourceUnit.endDate)) + 1) * dayWidth;
+                    const sy = sourceRow.top + 34;
+                    return (
+                      <svg className="medium-dependencies medium-link-preview" width={timelineWidth} height={mediumRowTop}>
+                        <path d={`M ${sx} ${sy} C ${sx + 40} ${sy}, ${mediumLinkPoint.x - 40} ${mediumLinkPoint.y}, ${mediumLinkPoint.x} ${mediumLinkPoint.y}`} />
+                      </svg>
+                    );
+                  })()}
+                {windowData.tasks.map((task) => (
+                  <div
+                    className="medium-task-row"
+                    key={task.id}
+                    style={{
+                      height: Math.max(76, leafUnits(task.id).length * 66 + 10)
+                    }}
+                  >
+                    {leafUnits(task.id).map((unit, unitIndex) => {
+                      const x = Math.max(0, diffDays(parseDate(windowData.startDate), parseDate(unit.startDate))) * dayWidth;
+                      const width = Math.max(90, (diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1) * dayWidth);
+                      return (
+                        <button
+                          className={`medium-task-card ${selectedMediumTaskIds.includes(task.id) ? 'selected' : ''} ${mediumDrag?.target === task.id ? 'target' : ''}`}
+                          data-medium-task-id={task.id}
+                          key={unit.id}
+                          style={{
+                            left: x,
+                            top: unitIndex * 66,
+                            width,
+                            borderColor: task.color
+                          }}
+                          onPointerDown={(event) => beginMediumDrag(event, task.id, unit, 'pending')}
+                          onClick={(event) => selectMediumTask(event, task.id)}
+                        >
+                          <i style={{ background: task.color }} />
+                          <strong>{unit.name}</strong>
+                          <span>{task.packageName}</span>
+                          <small>
+                            {unit.weight}% · {unit.quantity || '—'} {task.unit ?? ''} · {unit.responsible || 'Sem responsável'}
+                          </small>
+                          <em title="Alterar duração" onPointerDown={(event) => beginMediumDrag(event, task.id, unit, 'resize')} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+      <aside className={`calendar-drawer medium-drawer ${selectedMediumTaskIds.length ? 'open' : ''}`}>
+        {selectedTask && (
+          <>
+            <div className="medium-selection-actions">
+              <button title="Excluir atividades selecionadas" onClick={deleteSelectedMediumTasks}>
+                <Trash2 size={17} />
+              </button>
+              <button
+                className="drawer-close"
+                onClick={() => {
+                  setSelectedTaskId(null);
+                  setSelectedMediumTaskIds([]);
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <div className="medium-selected-list">
+              {selectedMediumTaskIds.map((taskId) => {
+                const task = windowData?.tasks.find((item) => item.id === taskId);
+                return task ? (
+                  <button className={task.id === selectedTask.id ? 'active' : ''} key={task.id} onClick={() => setSelectedTaskId(task.id)}>
+                    <span>{task.packageName}</span>
+                    <small>{task.lot}</small>
+                  </button>
+                ) : null;
+              })}
+            </div>
+            <h3>Abrir local</h3>
+            <p>
+              <b>{selectedTask.packageName}</b>
+              <br />
+              {selectedTask.lotMother} · {selectedTask.lot}
+            </p>
+            <div className="medium-unit-add">
+              <label>
+                Abrir dentro de
+                <select value={unitParentId ?? (units[selectedTask.id] ?? [])[0]?.id ?? ''} onChange={(event) => setUnitParentId(event.target.value)}>
+                  {(units[selectedTask.id] ?? []).map((unit) => (
+                    <option value={unit.id} key={unit.id}>
+                      {unit.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <input value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Ex.: Balancim 1, Apto 101..." />
+              <button className="primary" onClick={() => addUnit(selectedTask)}>
+                Adicionar unidade
+              </button>
+            </div>
+            <div className="medium-unit-list">
+              {(units[selectedTask.id] ?? []).map((unit) => (
+                <article key={unit.id}>
+                  <header>
+                    <input
+                      value={unit.name}
+                      onChange={(event) =>
+                        updateUnit(selectedTask.id, unit.id, {
+                          name: event.target.value
+                        })
+                      }
+                    />
+                    <button className="medium-open-unit" onClick={() => setUnitParentId(unit.id)}>
+                      Abrir
+                    </button>
+                    <button disabled={(units[selectedTask.id] ?? []).length === 1} onClick={() => removeUnit(selectedTask.id, unit.id)}>
+                      ×
+                    </button>
+                  </header>
+                  <div>
+                    <label>
+                      Peso %
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step=".01"
+                        value={unit.weight}
+                        onChange={(event) =>
+                          updateUnit(selectedTask.id, unit.id, {
+                            weight: Number(event.target.value)
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Quantidade
+                      <input
+                        type="number"
+                        min="0"
+                        value={unit.quantity}
+                        onChange={(event) =>
+                          updateUnit(selectedTask.id, unit.id, {
+                            quantity: Number(event.target.value)
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Início
+                      <input
+                        type="date"
+                        value={unit.startDate}
+                        onChange={(event) =>
+                          updateUnit(selectedTask.id, unit.id, {
+                            startDate: event.target.value
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Fim
+                      <input
+                        type="date"
+                        value={unit.endDate}
+                        onChange={(event) =>
+                          updateUnit(selectedTask.id, unit.id, {
+                            endDate: event.target.value
+                          })
+                        }
+                      />
+                    </label>
+                    <label className="wide">
+                      Responsável
+                      <input
+                        value={unit.responsible}
+                        onChange={(event) =>
+                          updateUnit(selectedTask.id, unit.id, {
+                            responsible: event.target.value
+                          })
+                        }
+                      />
+                    </label>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <div className={`medium-weight-total ${activeSiblingWeight === 0 || Math.abs(activeSiblingWeight - 100) < 0.01 ? 'ok' : 'invalid'}`}>
+              Soma dos pesos neste nível: <b>{activeSiblingWeight ? activeSiblingWeight.toFixed(2) : '100.00'}%</b>
+            </div>
+          </>
+        )}
+      </aside>
     </section>
   );
 }
@@ -828,18 +2226,27 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
   useEffect(() => {
     let active = true;
     setPersistenceReady(false);
-    void loadShortTermState(projectId).then((state) => {
-      if (!active) return;
-      if (state) {
-        setWeekly(state.weekly ?? []);
-        setTeams(state.teams?.length ? state.teams : ['Equipe própria', 'Empreiteiro A']);
-        setReasons(state.reasons?.length ? state.reasons : ['Clima', 'Material', 'Mão de obra', 'Projeto', 'Liberação']);
-        setHistory(state.history ?? []);
-      }
-      setSyncStatus(isSupabaseConfigured ? 'saved' : 'local');
-      setPersistenceReady(true);
-    }).catch(() => { if (active) { setSyncStatus('error'); setPersistenceReady(true); } });
-    return () => { active = false; };
+    void loadShortTermState(projectId)
+      .then((state) => {
+        if (!active) return;
+        if (state) {
+          setWeekly(state.weekly ?? []);
+          setTeams(state.teams?.length ? state.teams : ['Equipe própria', 'Empreiteiro A']);
+          setReasons(state.reasons?.length ? state.reasons : ['Clima', 'Material', 'Mão de obra', 'Projeto', 'Liberação']);
+          setHistory(state.history ?? []);
+        }
+        setSyncStatus(isSupabaseConfigured ? 'saved' : 'local');
+        setPersistenceReady(true);
+      })
+      .catch(() => {
+        if (active) {
+          setSyncStatus('error');
+          setPersistenceReady(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
   }, [projectId]);
   useEffect(() => {
     if (!persistenceReady || !isSupabaseConfigured) return;
@@ -854,39 +2261,323 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
   const weekEnd = toIsoDate(addDays(parseDate(weekStart), 6));
   const candidates = tasks.filter((task) => task.startDate <= weekEnd && task.endDate >= weekStart);
   const currentWeekly = weekly.filter((item) => item.weekStart === weekStart);
-  const weeklyTasks = currentWeekly.map((item) => ({ item, task: tasks.find((task) => task.id === item.taskId) })).filter((entry): entry is { item: ShortTermWeeklyItem; task: Task } => Boolean(entry.task));
+  const weeklyTasks = currentWeekly
+    .map((item) => ({
+      item,
+      task: tasks.find((task) => task.id === item.taskId)
+    }))
+    .filter((entry): entry is { item: ShortTermWeeklyItem; task: Task } => Boolean(entry.task));
   const completed = weeklyTasks.filter(({ item }) => item.measured >= item.planned).length;
-  const ppc = weeklyTasks.length ? completed / weeklyTasks.length * 100 : 0;
+  const ppc = weeklyTasks.length ? (completed / weeklyTasks.length) * 100 : 0;
   const measuredAverage = weeklyTasks.length ? weeklyTasks.reduce((sum, entry) => sum + entry.item.measured, 0) / weeklyTasks.length : 0;
   function addTask(task: Task) {
     if (currentWeekly.some((item) => item.taskId === task.id)) return;
-    setWeekly([...weekly, { id: crypto.randomUUID(), taskId: task.id, weekStart, planned: 100, measured: 0, team: teams[0] ?? '', reason: '', notes: '' }]);
+    setWeekly([
+      ...weekly,
+      {
+        id: crypto.randomUUID(),
+        taskId: task.id,
+        weekStart,
+        planned: 100,
+        measured: 0,
+        team: teams[0] ?? '',
+        reason: '',
+        notes: ''
+      }
+    ]);
   }
   function updateWeekly(id: string, patch: Partial<ShortTermWeeklyItem>) {
-    setWeekly(weekly.map((item) => item.id === id ? { ...item, ...patch } : item));
+    setWeekly(weekly.map((item) => (item.id === id ? { ...item, ...patch } : item)));
   }
   function finalizeWeek() {
     setHistory([...history.filter((item) => item.week !== weekStart), { week: weekStart, ppc, planned: weeklyTasks.length, completed }]);
   }
-  const tabLabels: Array<[ShortTab, string]> = [['dashboard', 'Painel'], ['planning', 'Planejamento semanal'], ['matrix', 'Matriz geral'], ['ppc', 'Detalhamento PPC'], ['history', 'Histórico andamento'], ['config', 'Configurações']];
-  return <section className="page short-term">
-    <PageHeader title="Curto prazo" subtitle="Planejamento semanal, medição física e acompanhamento da obra."><span className={`sync-pill ${syncStatus}`}>{syncStatus === 'saved' ? 'Supabase sincronizado' : syncStatus === 'saving' ? 'Salvando…' : syncStatus === 'error' ? 'Falha na sincronização' : 'Modo local'}</span></PageHeader>
-    <nav className="short-tabs">{tabLabels.map(([value, label]) => <button className={tab === value ? 'active' : ''} onClick={() => setTab(value)} key={value}>{label}</button>)}</nav>
-    {tab === 'dashboard' && <><div className="metric-grid"><Metric label="PPC da semana" value={`${ppc.toFixed(1)}%`} /><Metric label="Atividades planejadas" value={String(weeklyTasks.length)} /><Metric label="Concluídas" value={String(completed)} /><Metric label="Avanço médio" value={`${measuredAverage.toFixed(1)}%`} /></div><div className="short-dashboard-grid"><div className="card"><h3>Resumo da semana</h3><div className="ppc-ring" style={{ '--ppc': `${ppc * 3.6}deg` } as React.CSSProperties}><strong>{ppc.toFixed(0)}%</strong><span>PPC</span></div></div><div className="card"><h3>Pendências por motivo</h3>{reasons.map((reason) => <div className="reason-row" key={reason}><span>{reason}</span><b>{currentWeekly.filter((item) => item.reason === reason).length}</b></div>)}</div></div></>}
-    {tab === 'planning' && <><div className="weekly-toolbar card"><label>Início da semana<input type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} /></label><span>{parseDate(weekStart).toLocaleDateString('pt-BR')} a {parseDate(weekEnd).toLocaleDateString('pt-BR')}</span><button className="primary" onClick={finalizeWeek}>Finalizar semana</button></div><div className="short-planning-grid"><div className="card candidate-list"><h3>Atividades do cronograma</h3><small>{candidates.length} atividades no período</small>{candidates.map((task) => <button key={task.id} disabled={currentWeekly.some((item) => item.taskId === task.id)} onClick={() => addTask(task)}><span><b>{task.packageName}</b><small>{task.lotMother} · {task.lot}</small></span><i>＋</i></button>)}</div><div className="card weekly-list"><h3>Plano semanal</h3>{weeklyTasks.map(({ item, task }) => <article key={item.id}><header><div><b>{task.packageName}</b><small>{task.lotMother} · {task.lot}</small></div><button onClick={() => setWeekly(weekly.filter((entry) => entry.id !== item.id))}>×</button></header><div className="weekly-fields"><label>Meta %<input type="number" min="0" max="100" value={item.planned} onChange={(event) => updateWeekly(item.id, { planned: Number(event.target.value) })} /></label><label>Realizado %<input type="number" min="0" max="100" value={item.measured} onChange={(event) => updateWeekly(item.id, { measured: Number(event.target.value) })} /></label><label>Equipe<select value={item.team} onChange={(event) => updateWeekly(item.id, { team: event.target.value })}>{teams.map((team) => <option key={team}>{team}</option>)}</select></label><label>Motivo<select value={item.reason} onChange={(event) => updateWeekly(item.id, { reason: event.target.value })}><option value="">Sem restrição</option>{reasons.map((reason) => <option key={reason}>{reason}</option>)}</select></label></div><textarea placeholder="Observações da semana" value={item.notes} onChange={(event) => updateWeekly(item.id, { notes: event.target.value })} /></article>)}</div></div></>}
-    {tab === 'matrix' && <div className="card table-wrap"><table><thead><tr><th>Lote-mãe</th><th>Lote</th><th>Pacote</th><th>Planejado</th><th>Realizado</th><th>Situação</th></tr></thead><tbody>{weeklyTasks.map(({ item, task }) => <tr key={item.id}><td>{task.lotMother}</td><td>{task.lot}</td><td>{task.packageName}</td><td>{item.planned}%</td><td>{item.measured}%</td><td><span className={`short-status ${item.measured >= item.planned ? 'ok' : 'late'}`}>{item.measured >= item.planned ? 'Concluída' : 'Pendente'}</span></td></tr>)}</tbody></table></div>}
-    {tab === 'ppc' && <div className="short-team-grid">{teams.map((team) => { const teamItems = weeklyTasks.filter(({ item }) => item.team === team); const teamDone = teamItems.filter(({ item }) => item.measured >= item.planned).length; const teamPpc = teamItems.length ? teamDone / teamItems.length * 100 : 0; return <article className="card" key={team}><small>EQUIPE / EMPREITEIRO</small><h3>{team}</h3><strong>{teamPpc.toFixed(1)}%</strong><span>{teamDone}/{teamItems.length} atividades concluídas</span></article>})}</div>}
-    {tab === 'history' && <div className="card table-wrap"><table><thead><tr><th>Semana</th><th>Planejadas</th><th>Concluídas</th><th>PPC</th></tr></thead><tbody>{history.map((item) => <tr key={item.week}><td>{parseDate(item.week).toLocaleDateString('pt-BR')}</td><td>{item.planned}</td><td>{item.completed}</td><td><b>{item.ppc.toFixed(1)}%</b></td></tr>)}</tbody></table>{!history.length && <p>Nenhuma semana finalizada.</p>}</div>}
-    {tab === 'config' && <div className="short-config-grid"><div className="card"><h3>Equipes</h3>{teams.map((team) => <div className="config-chip" key={team}><span>{team}</span><button onClick={() => setTeams(teams.filter((item) => item !== team))}>×</button></div>)}<button onClick={() => { const name = window.prompt('Nome da equipe'); if (name?.trim()) setTeams([...teams, name.trim()]); }}>Adicionar equipe</button></div><div className="card"><h3>Motivos de atraso</h3>{reasons.map((reason) => <div className="config-chip" key={reason}><span>{reason}</span><button onClick={() => setReasons(reasons.filter((item) => item !== reason))}>×</button></div>)}<button onClick={() => { const name = window.prompt('Novo motivo'); if (name?.trim()) setReasons([...reasons, name.trim()]); }}>Adicionar motivo</button></div></div>}
-  </section>;
+  const tabLabels: Array<[ShortTab, string]> = [
+    ['dashboard', 'Painel'],
+    ['planning', 'Planejamento semanal'],
+    ['matrix', 'Matriz geral'],
+    ['ppc', 'Detalhamento PPC'],
+    ['history', 'Histórico andamento'],
+    ['config', 'Configurações']
+  ];
+  return (
+    <section className="page short-term">
+      <PageHeader title="Curto prazo" subtitle="Planejamento semanal, medição física e acompanhamento da obra.">
+        <span className={`sync-pill ${syncStatus}`}>{syncStatus === 'saved' ? 'Supabase sincronizado' : syncStatus === 'saving' ? 'Salvando…' : syncStatus === 'error' ? 'Falha na sincronização' : 'Modo local'}</span>
+      </PageHeader>
+      <nav className="short-tabs">
+        {tabLabels.map(([value, label]) => (
+          <button className={tab === value ? 'active' : ''} onClick={() => setTab(value)} key={value}>
+            {label}
+          </button>
+        ))}
+      </nav>
+      {tab === 'dashboard' && (
+        <>
+          <div className="metric-grid">
+            <Metric label="PPC da semana" value={`${ppc.toFixed(1)}%`} />
+            <Metric label="Atividades planejadas" value={String(weeklyTasks.length)} />
+            <Metric label="Concluídas" value={String(completed)} />
+            <Metric label="Avanço médio" value={`${measuredAverage.toFixed(1)}%`} />
+          </div>
+          <div className="short-dashboard-grid">
+            <div className="card">
+              <h3>Resumo da semana</h3>
+              <div className="ppc-ring" style={{ '--ppc': `${ppc * 3.6}deg` } as React.CSSProperties}>
+                <strong>{ppc.toFixed(0)}%</strong>
+                <span>PPC</span>
+              </div>
+            </div>
+            <div className="card">
+              <h3>Pendências por motivo</h3>
+              {reasons.map((reason) => (
+                <div className="reason-row" key={reason}>
+                  <span>{reason}</span>
+                  <b>{currentWeekly.filter((item) => item.reason === reason).length}</b>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+      {tab === 'planning' && (
+        <>
+          <div className="weekly-toolbar card">
+            <label>
+              Início da semana
+              <input type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} />
+            </label>
+            <span>
+              {parseDate(weekStart).toLocaleDateString('pt-BR')} a {parseDate(weekEnd).toLocaleDateString('pt-BR')}
+            </span>
+            <button className="primary" onClick={finalizeWeek}>
+              Finalizar semana
+            </button>
+          </div>
+          <div className="short-planning-grid">
+            <div className="card candidate-list">
+              <h3>Atividades do cronograma</h3>
+              <small>{candidates.length} atividades no período</small>
+              {candidates.map((task) => (
+                <button key={task.id} disabled={currentWeekly.some((item) => item.taskId === task.id)} onClick={() => addTask(task)}>
+                  <span>
+                    <b>{task.packageName}</b>
+                    <small>
+                      {task.lotMother} · {task.lot}
+                    </small>
+                  </span>
+                  <i>＋</i>
+                </button>
+              ))}
+            </div>
+            <div className="card weekly-list">
+              <h3>Plano semanal</h3>
+              {weeklyTasks.map(({ item, task }) => (
+                <article key={item.id}>
+                  <header>
+                    <div>
+                      <b>{task.packageName}</b>
+                      <small>
+                        {task.lotMother} · {task.lot}
+                      </small>
+                    </div>
+                    <button onClick={() => setWeekly(weekly.filter((entry) => entry.id !== item.id))}>×</button>
+                  </header>
+                  <div className="weekly-fields">
+                    <label>
+                      Meta %
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={item.planned}
+                        onChange={(event) =>
+                          updateWeekly(item.id, {
+                            planned: Number(event.target.value)
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Realizado %
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={item.measured}
+                        onChange={(event) =>
+                          updateWeekly(item.id, {
+                            measured: Number(event.target.value)
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      Equipe
+                      <select value={item.team} onChange={(event) => updateWeekly(item.id, { team: event.target.value })}>
+                        {teams.map((team) => (
+                          <option key={team}>{team}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      Motivo
+                      <select value={item.reason} onChange={(event) => updateWeekly(item.id, { reason: event.target.value })}>
+                        <option value="">Sem restrição</option>
+                        {reasons.map((reason) => (
+                          <option key={reason}>{reason}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <textarea placeholder="Observações da semana" value={item.notes} onChange={(event) => updateWeekly(item.id, { notes: event.target.value })} />
+                </article>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+      {tab === 'matrix' && (
+        <div className="card table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Lote-mãe</th>
+                <th>Lote</th>
+                <th>Pacote</th>
+                <th>Planejado</th>
+                <th>Realizado</th>
+                <th>Situação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {weeklyTasks.map(({ item, task }) => (
+                <tr key={item.id}>
+                  <td>{task.lotMother}</td>
+                  <td>{task.lot}</td>
+                  <td>{task.packageName}</td>
+                  <td>{item.planned}%</td>
+                  <td>{item.measured}%</td>
+                  <td>
+                    <span className={`short-status ${item.measured >= item.planned ? 'ok' : 'late'}`}>{item.measured >= item.planned ? 'Concluída' : 'Pendente'}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {tab === 'ppc' && (
+        <div className="short-team-grid">
+          {teams.map((team) => {
+            const teamItems = weeklyTasks.filter(({ item }) => item.team === team);
+            const teamDone = teamItems.filter(({ item }) => item.measured >= item.planned).length;
+            const teamPpc = teamItems.length ? (teamDone / teamItems.length) * 100 : 0;
+            return (
+              <article className="card" key={team}>
+                <small>EQUIPE / EMPREITEIRO</small>
+                <h3>{team}</h3>
+                <strong>{teamPpc.toFixed(1)}%</strong>
+                <span>
+                  {teamDone}/{teamItems.length} atividades concluídas
+                </span>
+              </article>
+            );
+          })}
+        </div>
+      )}
+      {tab === 'history' && (
+        <div className="card table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Semana</th>
+                <th>Planejadas</th>
+                <th>Concluídas</th>
+                <th>PPC</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((item) => (
+                <tr key={item.week}>
+                  <td>{parseDate(item.week).toLocaleDateString('pt-BR')}</td>
+                  <td>{item.planned}</td>
+                  <td>{item.completed}</td>
+                  <td>
+                    <b>{item.ppc.toFixed(1)}%</b>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!history.length && <p>Nenhuma semana finalizada.</p>}
+        </div>
+      )}
+      {tab === 'config' && (
+        <div className="short-config-grid">
+          <div className="card">
+            <h3>Equipes</h3>
+            {teams.map((team) => (
+              <div className="config-chip" key={team}>
+                <span>{team}</span>
+                <button onClick={() => setTeams(teams.filter((item) => item !== team))}>×</button>
+              </div>
+            ))}
+            <button
+              onClick={() => {
+                const name = window.prompt('Nome da equipe');
+                if (name?.trim()) setTeams([...teams, name.trim()]);
+              }}
+            >
+              Adicionar equipe
+            </button>
+          </div>
+          <div className="card">
+            <h3>Motivos de atraso</h3>
+            {reasons.map((reason) => (
+              <div className="config-chip" key={reason}>
+                <span>{reason}</span>
+                <button onClick={() => setReasons(reasons.filter((item) => item !== reason))}>×</button>
+              </div>
+            ))}
+            <button
+              onClick={() => {
+                const name = window.prompt('Novo motivo');
+                if (name?.trim()) setReasons([...reasons, name.trim()]);
+              }}
+            >
+              Adicionar motivo
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function Financial({ tasks }: { tasks: Task[] }) {
   const total = tasks.reduce((s, t) => s + (t.cost ?? 0), 0);
-  const done = tasks.reduce((s, t) => s + (t.cost ?? 0) * t.progress / 100, 0);
+  const done = tasks.reduce((s, t) => s + ((t.cost ?? 0) * t.progress) / 100, 0);
   const [budgetItems] = useState(() => {
-    const items = tasks.filter((task) => task.cost).slice(0, 30).map((task, index) => ({ id: `budget-${task.id}`, code: `1.${index + 1}`, description: task.packageName, value: task.cost ?? 0 }));
-    return items.length ? items : [{ id: 'budget-demo', code: '1.1', description: 'Orçamento ainda não importado', value: 500000 }];
+    const items = tasks
+      .filter((task) => task.cost)
+      .slice(0, 30)
+      .map((task, index) => ({
+        id: `budget-${task.id}`,
+        code: `1.${index + 1}`,
+        description: task.packageName,
+        value: task.cost ?? 0
+      }));
+    return items.length
+      ? items
+      : [
+          {
+            id: 'budget-demo',
+            code: '1.1',
+            description: 'Orçamento ainda não importado',
+            value: 500000
+          }
+        ];
   });
   const [budgetId, setBudgetId] = useState<string | null>(null);
   const [activityIds, setActivityIds] = useState<string[]>([]);
@@ -901,37 +2592,257 @@ function Financial({ tasks }: { tasks: Task[] }) {
   const visibleTasks = tasks.filter((task) => `${task.packageName} ${task.lot} ${task.lotMother}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')));
   function openMapping() {
     if (!selectedBudget || !selectedTasks.length) return;
-    const basis = selectedTasks.map((task) => method === 'duration' ? diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1 : method === 'quantity' ? task.quantity ?? 0 : 1);
+    const basis = selectedTasks.map((task) => (method === 'duration' ? diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1 : method === 'quantity' ? (task.quantity ?? 0) : 1));
     const sum = basis.reduce((value, item) => value + item, 0) || selectedTasks.length;
-    setWeights(Object.fromEntries(selectedTasks.map((task, index) => [task.id, method === 'manual' ? 0 : basis[index] / sum * 100])));
+    setWeights(Object.fromEntries(selectedTasks.map((task, index) => [task.id, method === 'manual' ? 0 : (basis[index] / sum) * 100])));
     setMappingOpen(true);
   }
   function redistribute(nextMethod: typeof method) {
     setMethod(nextMethod);
-    const basis = selectedTasks.map((task) => nextMethod === 'duration' ? diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1 : nextMethod === 'quantity' ? task.quantity ?? 0 : 1);
+    const basis = selectedTasks.map((task) => (nextMethod === 'duration' ? diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1 : nextMethod === 'quantity' ? (task.quantity ?? 0) : 1));
     const sum = basis.reduce((value, item) => value + item, 0) || selectedTasks.length;
-    setWeights(Object.fromEntries(selectedTasks.map((task, index) => [task.id, nextMethod === 'manual' ? weights[task.id] ?? 0 : basis[index] / sum * 100])));
+    setWeights(Object.fromEntries(selectedTasks.map((task, index) => [task.id, nextMethod === 'manual' ? (weights[task.id] ?? 0) : (basis[index] / sum) * 100])));
   }
   const weightTotal = selectedTasks.reduce((sum, task) => sum + (weights[task.id] ?? 0), 0);
   function saveMapping() {
-    if (!selectedBudget || Math.abs(weightTotal - 100) > .05) return;
-    const next = selectedTasks.map((task) => ({ budgetId: selectedBudget.id, taskId: task.id, weight: weights[task.id], value: selectedBudget.value * weights[task.id] / 100 }));
+    if (!selectedBudget || Math.abs(weightTotal - 100) > 0.05) return;
+    const next = selectedTasks.map((task) => ({
+      budgetId: selectedBudget.id,
+      taskId: task.id,
+      weight: weights[task.id],
+      value: (selectedBudget.value * weights[task.id]) / 100
+    }));
     setAllocations([...allocations.filter((item) => item.budgetId !== selectedBudget.id), ...next]);
-    setActivityIds([]); setBudgetId(null); setMappingOpen(false);
+    setActivityIds([]);
+    setBudgetId(null);
+    setMappingOpen(false);
   }
-  return <section className="page financial-mapping"><PageHeader title="Mapeamento físico-financeiro" subtitle="Vincule a EAP orçamentária às atividades do cronograma." />
-    <div className="metric-grid financial-metrics"><Metric label="Orçamento mapeável" value={budgetItems.reduce((sum, item) => sum + item.value, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /><Metric label="Atividades" value={String(tasks.length)} /><Metric label="Vinculadas" value={`${linkedTasks.size}/${tasks.length}`} /><Metric label="Realizado" value={done.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /></div>
-    <div className="mapping-shell">
-      <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FINANCEIRA</small><h3>EAP orçamentária</h3><span>{budgetItems.length} itens</span></div><div className="mapping-table-wrap"><table><thead><tr><th></th><th>Código / descrição</th><th>Valor</th><th>Status</th></tr></thead><tbody>{budgetItems.map((item) => { const links = allocations.filter((allocation) => allocation.budgetId === item.id); return <tr className={budgetId === item.id ? 'mapping-selected' : ''} key={item.id} onClick={() => setBudgetId(item.id)}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={links.length ? 'mapping-status linked' : 'mapping-status'}>{links.length ? 'Vinculado' : 'Livre'}</span></td></tr>})}</tbody></table></div></div>
-      <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FÍSICA</small><h3>Cronograma da obra</h3><span>{visibleTasks.length} atividades</span></div><label className="mapping-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar atividade, lote ou grupo..." /></label><div className="mapping-table-wrap"><table><thead><tr><th></th><th>Atividade</th><th>Lote</th><th>Prazo</th><th>Progresso</th><th>Status</th></tr></thead><tbody>{visibleTasks.map((task) => <tr className={activityIds.includes(task.id) ? 'mapping-selected' : ''} key={task.id} onClick={() => setActivityIds(activityIds.includes(task.id) ? activityIds.filter((id) => id !== task.id) : [...activityIds, task.id])}><td><input type="checkbox" checked={activityIds.includes(task.id)} readOnly /></td><td><small>{task.lotMother}</small><strong>{task.packageName}</strong></td><td>{task.lot}</td><td>{diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1}d</td><td>{task.progress}%</td><td><span className={linkedTasks.has(task.id) ? 'mapping-status linked' : 'mapping-status'}>{linkedTasks.has(task.id) ? 'Vinculada' : 'Livre'}</span></td></tr>)}</tbody></table></div></div>
-    </div>
-    <div className="mapping-action"><Link2 size={18} /><div><strong>{selectedBudget?.code ?? 'Selecione um item'} · {activityIds.length} atividade(s)</strong><small>Escolha um item financeiro e uma ou mais atividades.</small></div><button className="primary" disabled={!budgetId || !activityIds.length} onClick={openMapping}><ArrowLeftRight size={15} /> Vincular</button></div>
-    {mappingOpen && selectedBudget && <div className="mapping-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setMappingOpen(false)}><div className="mapping-modal"><div className="chart-drawer-head"><div><small>{selectedBudget.code}</small><h3>Vincular e ponderar</h3><span>{selectedBudget.description}</span></div><button className="drawer-close" onClick={() => setMappingOpen(false)}>×</button></div><div className="mapping-modal-body"><div className="mapping-methods">{([['equal', 'Igualitário'], ['duration', 'Por duração'], ['quantity', 'Por quantidade'], ['manual', 'Manual']] as const).map(([value, label]) => <button className={method === value ? 'active' : ''} onClick={() => redistribute(value)} key={value}>{label}</button>)}</div><table><thead><tr><th>Atividade / lote</th><th>Base física</th><th>Percentual</th><th>Valor</th></tr></thead><tbody>{selectedTasks.map((task) => <tr key={task.id}><td><strong>{task.packageName}</strong><small>{task.lot}</small></td><td>{method === 'duration' ? `${diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1} dias` : method === 'quantity' ? `${task.quantity ?? 0} ${task.unit ?? ''}` : method === 'equal' ? 'Divisão igual' : 'Definição manual'}</td><td>{method === 'manual' ? <input type="number" min="0" max="100" step=".01" value={(weights[task.id] ?? 0).toFixed(2)} onChange={(event) => setWeights({ ...weights, [task.id]: Number(event.target.value) })} /> : <b>{(weights[task.id] ?? 0).toFixed(2)}%</b>}</td><td>{(selectedBudget.value * (weights[task.id] ?? 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td></tr>)}</tbody></table><aside className="mapping-total"><span>Valor a distribuir</span><strong>{selectedBudget.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong><p>Soma dos pesos <b>{weightTotal.toFixed(2)}%</b></p><button disabled={Math.abs(weightTotal - 100) > .05} onClick={saveMapping}>Confirmar vínculo</button></aside></div></div></div>}
-  </section>;
+  return (
+    <section className="page financial-mapping">
+      <PageHeader title="Mapeamento físico-financeiro" subtitle="Vincule a EAP orçamentária às atividades do cronograma." />
+      <div className="metric-grid financial-metrics">
+        <Metric label="Orçamento mapeável" value={budgetItems.reduce((sum, item) => sum + item.value, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} />
+        <Metric label="Atividades" value={String(tasks.length)} />
+        <Metric label="Vinculadas" value={`${linkedTasks.size}/${tasks.length}`} />
+        <Metric
+          label="Realizado"
+          value={done.toLocaleString('pt-BR', {
+            style: 'currency',
+            currency: 'BRL'
+          })}
+        />
+      </div>
+      <div className="mapping-shell">
+        <div className="mapping-panel">
+          <div className="mapping-panel-head">
+            <small>ORIGEM FINANCEIRA</small>
+            <h3>EAP orçamentária</h3>
+            <span>{budgetItems.length} itens</span>
+          </div>
+          <div className="mapping-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Código / descrição</th>
+                  <th>Valor</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {budgetItems.map((item) => {
+                  const links = allocations.filter((allocation) => allocation.budgetId === item.id);
+                  return (
+                    <tr className={budgetId === item.id ? 'mapping-selected' : ''} key={item.id} onClick={() => setBudgetId(item.id)}>
+                      <td>
+                        <input type="radio" checked={budgetId === item.id} readOnly />
+                      </td>
+                      <td>
+                        <small>{item.code}</small>
+                        <strong>{item.description}</strong>
+                      </td>
+                      <td>
+                        {item.value.toLocaleString('pt-BR', {
+                          style: 'currency',
+                          currency: 'BRL'
+                        })}
+                      </td>
+                      <td>
+                        <span className={links.length ? 'mapping-status linked' : 'mapping-status'}>{links.length ? 'Vinculado' : 'Livre'}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div className="mapping-panel">
+          <div className="mapping-panel-head">
+            <small>ORIGEM FÍSICA</small>
+            <h3>Cronograma da obra</h3>
+            <span>{visibleTasks.length} atividades</span>
+          </div>
+          <label className="mapping-search">
+            <Search size={15} />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar atividade, lote ou grupo..." />
+          </label>
+          <div className="mapping-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th></th>
+                  <th>Atividade</th>
+                  <th>Lote</th>
+                  <th>Prazo</th>
+                  <th>Progresso</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleTasks.map((task) => (
+                  <tr className={activityIds.includes(task.id) ? 'mapping-selected' : ''} key={task.id} onClick={() => setActivityIds(activityIds.includes(task.id) ? activityIds.filter((id) => id !== task.id) : [...activityIds, task.id])}>
+                    <td>
+                      <input type="checkbox" checked={activityIds.includes(task.id)} readOnly />
+                    </td>
+                    <td>
+                      <small>{task.lotMother}</small>
+                      <strong>{task.packageName}</strong>
+                    </td>
+                    <td>{task.lot}</td>
+                    <td>{diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1}d</td>
+                    <td>{task.progress}%</td>
+                    <td>
+                      <span className={linkedTasks.has(task.id) ? 'mapping-status linked' : 'mapping-status'}>{linkedTasks.has(task.id) ? 'Vinculada' : 'Livre'}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div className="mapping-action">
+        <Link2 size={18} />
+        <div>
+          <strong>
+            {selectedBudget?.code ?? 'Selecione um item'} · {activityIds.length} atividade(s)
+          </strong>
+          <small>Escolha um item financeiro e uma ou mais atividades.</small>
+        </div>
+        <button className="primary" disabled={!budgetId || !activityIds.length} onClick={openMapping}>
+          <ArrowLeftRight size={15} /> Vincular
+        </button>
+      </div>
+      {mappingOpen && selectedBudget && (
+        <div className="mapping-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setMappingOpen(false)}>
+          <div className="mapping-modal">
+            <div className="chart-drawer-head">
+              <div>
+                <small>{selectedBudget.code}</small>
+                <h3>Vincular e ponderar</h3>
+                <span>{selectedBudget.description}</span>
+              </div>
+              <button className="drawer-close" onClick={() => setMappingOpen(false)}>
+                ×
+              </button>
+            </div>
+            <div className="mapping-modal-body">
+              <div className="mapping-methods">
+                {(
+                  [
+                    ['equal', 'Igualitário'],
+                    ['duration', 'Por duração'],
+                    ['quantity', 'Por quantidade'],
+                    ['manual', 'Manual']
+                  ] as const
+                ).map(([value, label]) => (
+                  <button className={method === value ? 'active' : ''} onClick={() => redistribute(value)} key={value}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Atividade / lote</th>
+                    <th>Base física</th>
+                    <th>Percentual</th>
+                    <th>Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedTasks.map((task) => (
+                    <tr key={task.id}>
+                      <td>
+                        <strong>{task.packageName}</strong>
+                        <small>{task.lot}</small>
+                      </td>
+                      <td>{method === 'duration' ? `${diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1} dias` : method === 'quantity' ? `${task.quantity ?? 0} ${task.unit ?? ''}` : method === 'equal' ? 'Divisão igual' : 'Definição manual'}</td>
+                      <td>
+                        {method === 'manual' ? (
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step=".01"
+                            value={(weights[task.id] ?? 0).toFixed(2)}
+                            onChange={(event) =>
+                              setWeights({
+                                ...weights,
+                                [task.id]: Number(event.target.value)
+                              })
+                            }
+                          />
+                        ) : (
+                          <b>{(weights[task.id] ?? 0).toFixed(2)}%</b>
+                        )}
+                      </td>
+                      <td>
+                        {((selectedBudget.value * (weights[task.id] ?? 0)) / 100).toLocaleString('pt-BR', {
+                          style: 'currency',
+                          currency: 'BRL'
+                        })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <aside className="mapping-total">
+                <span>Valor a distribuir</span>
+                <strong>
+                  {selectedBudget.value.toLocaleString('pt-BR', {
+                    style: 'currency',
+                    currency: 'BRL'
+                  })}
+                </strong>
+                <p>
+                  Soma dos pesos <b>{weightTotal.toFixed(2)}%</b>
+                </p>
+                <button disabled={Math.abs(weightTotal - 100) > 0.05} onClick={saveMapping}>
+                  Confirmar vínculo
+                </button>
+              </aside>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function SettingsPage() {
-  return <section className="page"><PageHeader title="Configurações" subtitle="Parâmetros do sistema." /><div className="card"><p>Supabase: <strong>{isSupabaseConfigured ? 'configurado' : 'não configurado / modo demo'}</strong></p><p>Próximas configurações: data zero, calendário, feriados, famílias de pacote, tolerância de compras e templates de microserviços.</p></div></section>;
+  return (
+    <section className="page">
+      <PageHeader title="Configurações" subtitle="Parâmetros do sistema." />
+      <div className="card">
+        <p>
+          Supabase: <strong>{isSupabaseConfigured ? 'configurado' : 'não configurado / modo demo'}</strong>
+        </p>
+        <p>Próximas configurações: data zero, calendário, feriados, famílias de pacote, tolerância de compras e templates de microserviços.</p>
+      </div>
+    </section>
+  );
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
