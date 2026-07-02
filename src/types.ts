@@ -39,6 +39,7 @@ export type Task = {
   unit?: string;
   cost?: number;
   service?: string;
+  services?: string[];
   duration?: number;
   responsible?: string;
   predecessors?: string[];

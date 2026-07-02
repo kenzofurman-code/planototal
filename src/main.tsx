@@ -290,15 +290,47 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
       return match ? `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` : text.slice(0, 10);
     };
     const splitIds = (input: unknown) => String(input ?? '').split(/[;,]/).map((item) => item.trim()).filter((item) => item && item !== '-');
-    const imported = importData.rows.slice(importData.headerRow).map((row, index): Task | null => {
+    const parsed = importData.rows.slice(importData.headerRow).map((row, index): Task | null => {
       const id = String(value(row, 'id')).trim();
       const startDate = parseImportedDate(value(row, 'startDate'));
       const endDate = parseImportedDate(value(row, 'endDate'));
       if (!id || !startDate || !endDate) return null;
       const rawCost = String(value(row, 'cost')).replace(/[^\d,.-]/g, '');
       const costText = rawCost.includes(',') ? rawCost.replace(/\./g, '').replace(',', '.') : rawCost;
-      return { id, packageName: String(value(row, 'packageName')).trim() || `Atividade ${index + 1}`, packageFamily: String(value(row, 'packageName')).trim().split(' ')[0] || 'OUTROS', service: String(value(row, 'service')).trim(), lot: String(value(row, 'lot')).trim() || 'Sem lote', lotMother: String(value(row, 'lotMother')).trim() || 'SEM GRUPO', startDate, endDate, duration: Number(value(row, 'duration')) || undefined, cost: Number(costText) || undefined, predecessors: splitIds(value(row, 'predecessors')), successors: splitIds(value(row, 'successors')), responsible: String(value(row, 'responsible')).trim(), progress: Math.min(100, Math.max(0, Number(String(value(row, 'progress')).replace(',', '.')) || 0)), color: '#4f46e5' };
+      const service = String(value(row, 'service')).trim();
+      return { id, packageName: String(value(row, 'packageName')).trim() || `Atividade ${index + 1}`, packageFamily: String(value(row, 'packageName')).trim().split(' ')[0] || 'OUTROS', service, services: service && service !== '-' ? [service] : [], lot: String(value(row, 'lot')).trim() || 'Sem lote', lotMother: String(value(row, 'lotMother')).trim() || 'SEM GRUPO', startDate, endDate, duration: Number(value(row, 'duration')) || undefined, cost: Number(costText) || undefined, predecessors: splitIds(value(row, 'predecessors')), successors: splitIds(value(row, 'successors')), responsible: String(value(row, 'responsible')).trim(), progress: Math.min(100, Math.max(0, Number(String(value(row, 'progress')).replace(',', '.')) || 0)), color: '#4f46e5' };
     }).filter((task): task is Task => task !== null);
+    const parents: Task[] = [];
+    let currentParent: Task | null = null;
+    parsed.forEach((task) => {
+      const isParent = !task.service || task.service === '-';
+      const sameContext = currentParent && currentParent.packageName === task.packageName && currentParent.lot === task.lot && currentParent.lotMother === task.lotMother;
+      if (isParent) {
+        currentParent = { ...task, service: undefined, services: [] };
+        parents.push(currentParent);
+      } else if (sameContext && currentParent) {
+        currentParent.services = Array.from(new Set([...(currentParent.services ?? []), task.service!]));
+      } else {
+        currentParent = { ...task, services: [task.service!] };
+        parents.push(currentParent);
+      }
+    });
+    const consolidated = new Map<string, Task>();
+    parents.forEach((task) => {
+      const key = `${task.lotMother}||${task.lot}||${task.packageName}`.toLocaleLowerCase('pt-BR');
+      const existing = consolidated.get(key);
+      if (!existing) {
+        consolidated.set(key, { ...task, services: [...(task.services ?? [])] });
+        return;
+      }
+      existing.services = Array.from(new Set([...(existing.services ?? []), ...(task.services ?? [])]));
+      if (parseDate(task.startDate) < parseDate(existing.startDate)) existing.startDate = task.startDate;
+      if (parseDate(task.endDate) > parseDate(existing.endDate)) existing.endDate = task.endDate;
+      existing.duration = diffDays(parseDate(existing.startDate), parseDate(existing.endDate)) + 1;
+      existing.predecessors = Array.from(new Set([...(existing.predecessors ?? []), ...(task.predecessors ?? [])]));
+      existing.successors = Array.from(new Set([...(existing.successors ?? []), ...(task.successors ?? [])]));
+    });
+    const imported = Array.from(consolidated.values());
     setTasks(imported);
     setImportData(null);
   }
@@ -340,25 +372,30 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   const [selectedVersionId, setSelectedVersionId] = useState('v00');
   const [groupLines, setGroupLines] = useState<Record<string, number>>({ 'TORRE-PAVIMENTOS': 3, FACHADA: 3 });
   const [familyLane, setFamilyLane] = useState<Record<string, number>>({ ESTRUTURA: 1, ALVENARIA: 1, INSTALAÇÕES: 2, REVESTIMENTO: 3, FACHADA: 2, ESQUADRIAS: 3 });
+  const [groupOrder, setGroupOrder] = useState<string[]>(() => Array.from(new Set(tasks.map((task) => task.lotMother))));
+  const [lotOrder, setLotOrder] = useState<Record<string, string[]>>(() => Object.fromEntries(Array.from(new Set(tasks.map((task) => task.lotMother))).map((group) => [group, Array.from(new Set(tasks.filter((task) => task.lotMother === group).map((task) => task.lot))) ])));
+  const [ordering, setOrdering] = useState<{ type: 'group' | 'lot'; key: string; group?: string } | null>(null);
   const [drag, setDrag] = useState<null | { id: string; mode: 'pending' | 'move' | 'resize' | 'link'; startX: number; startY: number; start: string; end: string; target?: string }>(null);
   const [linkPoint, setLinkPoint] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const longPressRef = useRef<number | null>(null);
 
-  const groups = Array.from(new Set(tasks.map((t) => t.lotMother)));
+  const taskGroups = Array.from(new Set(tasks.map((t) => t.lotMother)));
+  const groups = [...groupOrder.filter((group) => taskGroups.includes(group)), ...taskGroups.filter((group) => !groupOrder.includes(group))];
   const families = Array.from(new Set(tasks.map((t) => t.packageFamily)));
 
   const rows = useMemo(() => {
     const result: Array<{ type: 'group' | 'lot'; key: string; label: string; tasks: Task[]; height: number; group?: string }> = [];
     for (const g of groups) {
       result.push({ type: 'group', key: g, label: g, tasks: [], height: 30 });
-      const lots = Array.from(new Set(tasks.filter((t) => t.lotMother === g).map((t) => t.lot)));
+      const taskLots = Array.from(new Set(tasks.filter((t) => t.lotMother === g).map((t) => t.lot)));
+      const lots = [...(lotOrder[g] ?? []).filter((lot) => taskLots.includes(lot)), ...taskLots.filter((lot) => !(lotOrder[g] ?? []).includes(lot))];
       for (const lot of lots) {
         result.push({ type: 'lot', key: `${g}-${lot}`, label: lot, tasks: tasks.filter((t) => t.lotMother === g && t.lot === lot), height: 12 + (groupLines[g] ?? 3) * 26, group: g });
       }
     }
     return result;
-  }, [tasks, groupLines]);
+  }, [tasks, groupLines, groupOrder, lotOrder]);
 
   const width = Math.max(1300, diffDays(projectStart, chartEnd) * zoomPx[zoom] + 160);
   const height = 90 + rows.reduce((s, r) => s + r.height, 0) + 40;
@@ -503,6 +540,27 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
     setVersions(remaining);
     setSelectedVersionId(remaining[0].id);
   }
+  function reorderRow(target: { type: 'group' | 'lot'; key: string; group?: string }) {
+    if (!ordering || ordering.type !== target.type || ordering.key === target.key) return;
+    if (ordering.type === 'group') {
+      const current = [...groups];
+      const from = current.indexOf(ordering.key);
+      const to = current.indexOf(target.key);
+      current.splice(from, 1);
+      current.splice(to, 0, ordering.key);
+      setGroupOrder(current);
+    } else if (ordering.group && ordering.group === target.group) {
+      const taskLots = Array.from(new Set(tasks.filter((task) => task.lotMother === ordering.group).map((task) => task.lot)));
+      const current = [...(lotOrder[ordering.group] ?? taskLots)];
+      taskLots.forEach((lot) => { if (!current.includes(lot)) current.push(lot); });
+      const from = current.indexOf(ordering.key);
+      const to = current.indexOf(target.key);
+      current.splice(from, 1);
+      current.splice(to, 0, ordering.key);
+      setLotOrder({ ...lotOrder, [ordering.group]: current });
+    }
+    setOrdering(null);
+  }
   return (
     <section className="page">
       <PageHeader title="Linha de balanço" subtitle="Visualização e edição do cronograma." />
@@ -537,7 +595,7 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
         <div className="chart-scroll">
           <div className="lot-labels" style={{ height }}>
             <div className="lot-label-header">Lotes</div>
-            {labelRows.map((row) => <div key={row.key} className={`lot-label ${row.type}`} style={{ top: row.top, height: row.height }}>{row.label}</div>)}
+            {labelRows.map((row) => <div key={row.key} draggable className={`lot-label ${row.type} ${ordering?.key === row.key ? 'ordering' : ''}`} style={{ top: row.top, height: row.height }} onDragStart={() => setOrdering({ type: row.type, key: row.type === 'lot' ? row.label : row.key, group: row.group })} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderRow({ type: row.type, key: row.type === 'lot' ? row.label : row.key, group: row.group })} onDragEnd={() => setOrdering(null)}><span className="drag-grip">⠿</span>{row.label}</div>)}
           </div>
           <svg ref={svgRef} width={width} height={height} onPointerDown={closeDrawersOnEmpty} onPointerMove={onMove} onPointerUp={finishDrag} onPointerCancel={finishDrag}>
             <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
@@ -583,7 +641,8 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
                 const barW = Math.max(10, (diffDays(parseDate(t.startDate), parseDate(t.endDate)) + 1) * zoomPx[zoom]);
                 const barY = currentY + 8 + (lane - 1) * 26;
                 taskLayout.set(t.id, { x, y: barY, width: barW, height: 18 });
-                return <g key={t.id} data-task-id={t.id} onClick={() => setSelectedTask(t)}><title>{t.packageName} · {microservices[t.packageFamily] ?? 'Microserviços não cadastrados'}</title><rect className={`task-bar ${drag?.target === t.id ? 'target-highlight' : ''}`} x={x} y={barY} width={barW} height={18} rx={4} fill={t.color} onPointerDown={(e) => beginDrag(e, t, 'pending')} /><rect className="resize-handle" x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => beginDrag(e, t, 'resize')} /><text pointerEvents="none" x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">{t.packageName}</text><rect pointerEvents="none" x={x} y={barY + 14} width={barW * t.progress / 100} height={4} fill="#fff" opacity={0.55} /></g>;
+                const serviceText = t.services?.length ? t.services.join(' · ') : microservices[t.packageFamily] ?? 'Serviços não cadastrados';
+                return <g key={t.id} data-task-id={t.id} onClick={() => setSelectedTask(t)}><title>{t.packageName} · {serviceText}</title><rect className={`task-bar ${drag?.target === t.id ? 'target-highlight' : ''}`} x={x} y={barY} width={barW} height={18} rx={4} fill={t.color} onPointerDown={(e) => beginDrag(e, t, 'pending')} /><rect className="resize-handle" x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => beginDrag(e, t, 'resize')} /><text pointerEvents="none" x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">{t.packageName}</text><rect pointerEvents="none" x={x} y={barY + 14} width={barW * t.progress / 100} height={4} fill="#fff" opacity={0.55} /></g>;
               })}</g>;
             })}
             {showDeps && dependencies.map((dependency) => {
@@ -605,7 +664,7 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
           </svg>
         </div>
         <aside className={`chart-drawer task-drawer ${selectedTask ? 'open' : ''}`} onPointerDown={(event) => event.stopPropagation()}>
-          {selectedTask && <><div className="chart-drawer-head"><div><small>{selectedTask.packageFamily}</small><h3>{selectedTask.packageName}</h3><span>{selectedTask.lot}</span></div><button className="drawer-close" onClick={() => setSelectedTask(null)}>×</button></div><div className="chart-drawer-body"><div className="task-progress"><span>Progresso da atividade</span><strong>{selectedTask.progress}%</strong><i><b style={{ width: `${selectedTask.progress}%`, background: selectedTask.color }} /></i></div><dl><dt>Lote-mãe</dt><dd>{selectedTask.lotMother}</dd><dt>Lote</dt><dd>{selectedTask.lot}</dd><dt>Início</dt><dd>{parseDate(selectedTask.startDate).toLocaleDateString('pt-BR')}</dd><dt>Fim</dt><dd>{parseDate(selectedTask.endDate).toLocaleDateString('pt-BR')}</dd><dt>Duração</dt><dd>{diffDays(parseDate(selectedTask.startDate), parseDate(selectedTask.endDate)) + 1} dias</dd><dt>Quantidade</dt><dd>{selectedTask.quantity ?? '—'} {selectedTask.unit ?? ''}</dd><dt>Custo</dt><dd>{selectedTask.cost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) ?? '—'}</dd></dl><div className="drawer-section"><h4>Microserviços</h4><p>{microservices[selectedTask.packageFamily] ?? 'Não cadastrados'}</p></div><div className="drawer-section"><h4>Dependências FS</h4><div className="dep-list">{dependencies.filter((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id).map((dependency) => <div key={`${dependency.from}-${dependency.to}`}><span>{tasks.find((task) => task.id === dependency.from)?.packageName} → {tasks.find((task) => task.id === dependency.to)?.packageName}</span><button className="dep-remove" onClick={() => setDependencies(dependencies.filter((item) => item !== dependency))}>×</button></div>)}{!dependencies.some((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id) && 'Nenhuma dependência.'}</div></div></div></>}
+          {selectedTask && <><div className="chart-drawer-head"><div><small>{selectedTask.packageFamily}</small><h3>{selectedTask.packageName}</h3><span>{selectedTask.lot}</span></div><button className="drawer-close" onClick={() => setSelectedTask(null)}>×</button></div><div className="chart-drawer-body"><div className="task-progress"><span>Progresso da atividade</span><strong>{selectedTask.progress}%</strong><i><b style={{ width: `${selectedTask.progress}%`, background: selectedTask.color }} /></i></div><dl><dt>Lote-mãe</dt><dd>{selectedTask.lotMother}</dd><dt>Lote</dt><dd>{selectedTask.lot}</dd><dt>Início</dt><dd>{parseDate(selectedTask.startDate).toLocaleDateString('pt-BR')}</dd><dt>Fim</dt><dd>{parseDate(selectedTask.endDate).toLocaleDateString('pt-BR')}</dd><dt>Duração</dt><dd>{diffDays(parseDate(selectedTask.startDate), parseDate(selectedTask.endDate)) + 1} dias</dd><dt>Quantidade</dt><dd>{selectedTask.quantity ?? '—'} {selectedTask.unit ?? ''}</dd><dt>Custo</dt><dd>{selectedTask.cost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) ?? '—'}</dd></dl><div className="drawer-section"><h4>Serviços inclusos</h4>{selectedTask.services?.length ? <ul className="service-list">{selectedTask.services.map((service) => <li key={service}>{service}</li>)}</ul> : <p>{microservices[selectedTask.packageFamily] ?? 'Não cadastrados'}</p>}</div><div className="drawer-section"><h4>Dependências FS</h4><div className="dep-list">{dependencies.filter((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id).map((dependency) => <div key={`${dependency.from}-${dependency.to}`}><span>{tasks.find((task) => task.id === dependency.from)?.packageName} → {tasks.find((task) => task.id === dependency.to)?.packageName}</span><button className="dep-remove" onClick={() => setDependencies(dependencies.filter((item) => item !== dependency))}>×</button></div>)}{!dependencies.some((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id) && 'Nenhuma dependência.'}</div></div></div></>}
         </aside>
       </div>
     </section>
