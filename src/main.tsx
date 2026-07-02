@@ -718,6 +718,10 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [newUnitName, setNewUnitName] = useState('');
   const mediumLabelsRef = useRef<HTMLDivElement | null>(null);
+  const mediumTimelineRef = useRef<HTMLDivElement | null>(null);
+  const [showMediumDependencies, setShowMediumDependencies] = useState(true);
+  const [mediumOrdering, setMediumOrdering] = useState<string | null>(null);
+  const [mediumDrag, setMediumDrag] = useState<null | { taskId: string; unitId: string; mode: 'move' | 'resize'; startX: number; startDate: string; endDate: string }>(null);
   function threeMonthsAfter(value: string) {
     const date = parseDate(value);
     date.setMonth(date.getMonth() + 3);
@@ -749,15 +753,63 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
     const base = Math.floor(10000 / remaining.length) / 100;
     setUnits({ ...units, [taskId]: remaining.map((unit, index) => ({ ...unit, weight: index === remaining.length - 1 ? Number((100 - base * (remaining.length - 1)).toFixed(2)) : base })) });
   }
+  function addManualActivity() {
+    if (!windowData) return;
+    const packageName = window.prompt('Nome da nova atividade');
+    if (!packageName?.trim()) return;
+    const lot = window.prompt('Lote/local da atividade', 'Atividade extra')?.trim() || 'Atividade extra';
+    const task: Task = { id: crypto.randomUUID(), packageName: packageName.trim(), packageFamily: 'EXTRA', lotMother: 'ATIVIDADES EXTRAS', lot, startDate: windowData.startDate, endDate: addDays(parseDate(windowData.startDate), 6).toISOString().slice(0, 10), progress: 0, color: '#7c3aed', predecessors: [] };
+    setWindowData({ ...windowData, tasks: [...windowData.tasks, task] });
+    setUnits({ ...units, [task.id]: [{ id: crypto.randomUUID(), name: lot, weight: 100, quantity: 0, startDate: task.startDate, endDate: task.endDate, responsible: '' }] });
+    setSelectedTaskId(task.id);
+  }
+  function reorderMediumTask(targetId: string) {
+    if (!windowData || !mediumOrdering || mediumOrdering === targetId) return;
+    const next = [...windowData.tasks];
+    const from = next.findIndex((task) => task.id === mediumOrdering);
+    const to = next.findIndex((task) => task.id === targetId);
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setWindowData({ ...windowData, tasks: next });
+    setMediumOrdering(null);
+  }
+  function mediumPointerX(event: React.PointerEvent) {
+    return event.clientX - (mediumTimelineRef.current?.getBoundingClientRect().left ?? 0);
+  }
+  function beginMediumDrag(event: React.PointerEvent<HTMLElement>, taskId: string, unit: Unit, mode: 'move' | 'resize') {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setMediumDrag({ taskId, unitId: unit.id, mode, startX: mediumPointerX(event), startDate: unit.startDate, endDate: unit.endDate });
+  }
+  function moveMediumItem(event: React.PointerEvent) {
+    if (!mediumDrag || !windowData) return;
+    const delta = Math.round((mediumPointerX(event) - mediumDrag.startX) / dayWidth);
+    if (mediumDrag.mode === 'move') {
+      const duration = diffDays(parseDate(mediumDrag.startDate), parseDate(mediumDrag.endDate));
+      const start = addDays(parseDate(mediumDrag.startDate), delta);
+      updateUnit(mediumDrag.taskId, mediumDrag.unitId, { startDate: toIsoDate(start), endDate: toIsoDate(addDays(start, duration)) });
+    } else {
+      const end = addDays(parseDate(mediumDrag.endDate), delta);
+      if (end >= parseDate(mediumDrag.startDate)) updateUnit(mediumDrag.taskId, mediumDrag.unitId, { endDate: toIsoDate(end) });
+    }
+  }
   const selectedTask = windowData?.tasks.find((task) => task.id === selectedTaskId);
   const dayWidth = 13;
   const timelineWidth = windowData ? Math.max(1100, (diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1) * dayWidth) : 0;
+  const mediumRowLayout = new Map<string, { top: number; height: number }>();
+  let mediumRowTop = 64;
+  windowData?.tasks.forEach((task) => {
+    const height = Math.max(76, (units[task.id]?.length ?? 1) * 66 + 10);
+    mediumRowLayout.set(task.id, { top: mediumRowTop, height });
+    mediumRowTop += height;
+  });
   return (
     <section className="page medium-page">
       <PageHeader title="Médio prazo" subtitle="Janela independente de três meses para abertura e detalhamento dos lotes." />
-      <div className="medium-filter card"><label>Início da análise<input type="date" value={analysisStart} onChange={(event) => setAnalysisStart(event.target.value)} /></label><div><small>Período de três meses</small><strong>{parseDate(analysisStart).toLocaleDateString('pt-BR')} a {parseDate(analysisEnd).toLocaleDateString('pt-BR')}</strong></div><div><small>Atividades encontradas</small><strong>{previewTasks.length}</strong></div><button className="primary" onClick={createWindow}>{windowData ? 'Criar nova janela' : 'Filtrar e criar janela'}</button></div>
+      <div className="medium-filter card"><label>Início da análise<input type="date" value={analysisStart} onChange={(event) => setAnalysisStart(event.target.value)} /></label><div><small>Período de três meses</small><strong>{parseDate(analysisStart).toLocaleDateString('pt-BR')} a {parseDate(analysisEnd).toLocaleDateString('pt-BR')}</strong></div><div><small>Atividades encontradas</small><strong>{previewTasks.length}</strong></div>{windowData && <><label className="medium-check"><input type="checkbox" checked={showMediumDependencies} onChange={(event) => setShowMediumDependencies(event.target.checked)} /> Dependências</label><button onClick={addManualActivity}>＋ Atividade livre</button></>}<button className="primary" onClick={createWindow}>{windowData ? 'Criar nova janela' : 'Filtrar e criar janela'}</button></div>
       {!windowData && <div className="medium-empty card"><CalendarRange size={34} /><h3>Defina o período de análise</h3><p>As atividades serão copiadas do longo prazo e permanecerão independentes de alterações posteriores na base.</p></div>}
-      {windowData && <><div className="medium-window-info"><span className="pill">Janela congelada</span><b>{windowData.tasks.length} atividades</b><small>Criada em {new Date(windowData.createdAt).toLocaleString('pt-BR')}</small></div><div className="medium-timeline-shell"><div ref={mediumLabelsRef} className="medium-label-column"><div className="medium-label-head">Lote / atividade</div>{windowData.tasks.map((task) => <div className="medium-label-row" key={task.id} style={{ height: Math.max(76, (units[task.id]?.length ?? 1) * 66 + 10) }}><span>{task.lotMother} · {task.lot}</span><b>{task.packageName}</b><button onClick={() => setSelectedTaskId(task.id)}>Abrir local</button></div>)}</div><div className="medium-timeline-scroll" onScroll={(event) => { if (mediumLabelsRef.current) mediumLabelsRef.current.scrollTop = event.currentTarget.scrollTop; }}><div className="medium-timeline" style={{ width: timelineWidth }}><div className="medium-time-head">{Array.from({ length: 14 }).map((_, index) => { const date = addDays(parseDate(windowData.startDate), index * 7); return <span key={index} style={{ left: diffDays(parseDate(windowData.startDate), date) * dayWidth }}>S{index + 1}<small>{date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })}</small></span>})}</div>{windowData.tasks.map((task) => <div className="medium-task-row" key={task.id} style={{ height: Math.max(76, (units[task.id]?.length ?? 1) * 66 + 10) }}>{(units[task.id] ?? []).map((unit, unitIndex) => { const x = Math.max(0, diffDays(parseDate(windowData.startDate), parseDate(unit.startDate))) * dayWidth; const width = Math.max(90, (diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1) * dayWidth); return <button className="medium-task-card" key={unit.id} style={{ left: x, top: unitIndex * 66, width, borderColor: task.color }} onClick={() => setSelectedTaskId(task.id)}><i style={{ background: task.color }} /><strong>{unit.name}</strong><span>{task.packageName}</span><small>{unit.weight}% · {unit.quantity || '—'} {task.unit ?? ''} · {unit.responsible || 'Sem responsável'}</small></button>})}</div>)}</div></div></div></>}
+      {windowData && <><div className="medium-window-info"><span className="pill">Janela congelada</span><b>{windowData.tasks.length} atividades</b><small>Criada em {new Date(windowData.createdAt).toLocaleString('pt-BR')}</small></div><div className="medium-timeline-shell" onPointerDown={(event) => { if (!(event.target as Element).closest('.medium-task-card,.medium-label-row,button,input,select')) setSelectedTaskId(null); }}><div ref={mediumLabelsRef} className="medium-label-column"><div className="medium-label-head">Lote / atividade</div>{windowData.tasks.map((task) => <div draggable className={`medium-label-row ${mediumOrdering === task.id ? 'ordering' : ''}`} key={task.id} style={{ height: Math.max(76, (units[task.id]?.length ?? 1) * 66 + 10) }} onDragStart={() => setMediumOrdering(task.id)} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderMediumTask(task.id)} onDragEnd={() => setMediumOrdering(null)}><span>⠿ {task.lotMother} · {task.lot}</span><b>{task.packageName}</b><button onClick={() => setSelectedTaskId(task.id)}>Abrir local</button></div>)}</div><div className="medium-timeline-scroll" onScroll={(event) => { if (mediumLabelsRef.current) mediumLabelsRef.current.scrollTop = event.currentTarget.scrollTop; }}><div ref={mediumTimelineRef} className="medium-timeline" style={{ width: timelineWidth }} onPointerMove={moveMediumItem} onPointerUp={() => setMediumDrag(null)} onPointerCancel={() => setMediumDrag(null)}><div className="medium-time-head">{Array.from({ length: diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1 }).map((_, index) => { const date = addDays(parseDate(windowData.startDate), index); const dayLetter = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'][date.getDay()]; return <span className={date.getDay() === 0 || date.getDay() === 6 ? 'weekend' : ''} key={index} style={{ left: index * dayWidth, width: dayWidth }}><b>{dayLetter}</b><small>{date.getDate()}</small></span>})}</div>{Array.from({ length: diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1 }).map((_, index) => { const date = addDays(parseDate(windowData.startDate), index); return date.getDay() === 0 || date.getDay() === 6 ? <i className="medium-weekend-column" key={index} style={{ left: index * dayWidth, width: dayWidth, height: mediumRowTop }} /> : null })}{showMediumDependencies && <svg className="medium-dependencies" width={timelineWidth} height={mediumRowTop}>{windowData.tasks.flatMap((task) => (task.predecessors ?? []).map((fromId) => { const fromTask = windowData.tasks.find((item) => item.id === fromId); const fromRow = fromTask && mediumRowLayout.get(fromTask.id); const toRow = mediumRowLayout.get(task.id); const fromUnit = fromTask && units[fromTask.id]?.[0]; const toUnit = units[task.id]?.[0]; if (!fromRow || !toRow || !fromUnit || !toUnit) return null; const sx = (diffDays(parseDate(windowData.startDate), parseDate(fromUnit.endDate)) + 1) * dayWidth; const sy = fromRow.top + 34; const ex = diffDays(parseDate(windowData.startDate), parseDate(toUnit.startDate)) * dayWidth; const ey = toRow.top + 34; const mx = Math.max(sx + 18, (sx + ex) / 2); return <path key={`${fromId}-${task.id}`} d={`M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ey}, ${ex} ${ey}`} /> }))}</svg>}{windowData.tasks.map((task) => <div className="medium-task-row" key={task.id} style={{ height: Math.max(76, (units[task.id]?.length ?? 1) * 66 + 10) }}>{(units[task.id] ?? []).map((unit, unitIndex) => { const x = Math.max(0, diffDays(parseDate(windowData.startDate), parseDate(unit.startDate))) * dayWidth; const width = Math.max(90, (diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1) * dayWidth); return <button className="medium-task-card" key={unit.id} style={{ left: x, top: unitIndex * 66, width, borderColor: task.color }} onPointerDown={(event) => beginMediumDrag(event, task.id, unit, 'move')} onClick={() => setSelectedTaskId(task.id)}><i style={{ background: task.color }} /><strong>{unit.name}</strong><span>{task.packageName}</span><small>{unit.weight}% · {unit.quantity || '—'} {task.unit ?? ''} · {unit.responsible || 'Sem responsável'}</small><em title="Alterar duração" onPointerDown={(event) => beginMediumDrag(event, task.id, unit, 'resize')} /></button>})}</div>)}</div></div></div></>}
       <aside className={`calendar-drawer medium-drawer ${selectedTask ? 'open' : ''}`}>{selectedTask && <><button className="drawer-close" onClick={() => setSelectedTaskId(null)}>×</button><h3>Abrir local</h3><p><b>{selectedTask.packageName}</b><br />{selectedTask.lotMother} · {selectedTask.lot}</p><div className="medium-unit-add"><input value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Ex.: Balancim 1, Apto 101..." /><button className="primary" onClick={() => addUnit(selectedTask)}>Adicionar unidade</button></div><div className="medium-unit-list">{(units[selectedTask.id] ?? []).map((unit) => <article key={unit.id}><header><input value={unit.name} onChange={(event) => updateUnit(selectedTask.id, unit.id, { name: event.target.value })} /><button disabled={(units[selectedTask.id] ?? []).length === 1} onClick={() => removeUnit(selectedTask.id, unit.id)}>×</button></header><div><label>Peso %<input type="number" min="0" max="100" step=".01" value={unit.weight} onChange={(event) => updateUnit(selectedTask.id, unit.id, { weight: Number(event.target.value) })} /></label><label>Quantidade<input type="number" min="0" value={unit.quantity} onChange={(event) => updateUnit(selectedTask.id, unit.id, { quantity: Number(event.target.value) })} /></label><label>Início<input type="date" value={unit.startDate} onChange={(event) => updateUnit(selectedTask.id, unit.id, { startDate: event.target.value })} /></label><label>Fim<input type="date" value={unit.endDate} onChange={(event) => updateUnit(selectedTask.id, unit.id, { endDate: event.target.value })} /></label><label className="wide">Responsável<input value={unit.responsible} onChange={(event) => updateUnit(selectedTask.id, unit.id, { responsible: event.target.value })} /></label></div></article>)}</div><div className={`medium-weight-total ${Math.abs((units[selectedTask.id] ?? []).reduce((sum, unit) => sum + unit.weight, 0) - 100) < .01 ? 'ok' : 'invalid'}`}>Soma dos pesos: <b>{(units[selectedTask.id] ?? []).reduce((sum, unit) => sum + unit.weight, 0).toFixed(2)}%</b></div></>}</aside>
     </section>
   );
