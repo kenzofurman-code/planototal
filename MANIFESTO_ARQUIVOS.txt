@@ -1,0 +1,14 @@
+.env.example
+README.md
+docs/arquitetura.md
+index.html
+package.json
+src/demoData.ts
+src/lib/date.ts
+src/lib/supabase.ts
+src/main.tsx
+src/styles.css
+src/types.ts
+supabase/schema.sql
+tsconfig.json
+vite.config.ts
