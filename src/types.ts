@@ -20,6 +20,9 @@ export type Project = {
   status: string;
   startDate: string;
   plannedEndDate: string;
+  city?: string;
+  state?: string;
+  ibgeCode?: string;
 };
 
 export type Task = {
@@ -50,6 +53,8 @@ export type CalendarEvent = {
   title: string;
   kind: 'holiday' | 'routine' | 'important';
   color: string;
+  appliesToAll?: boolean;
+  projectIds?: string[];
 };
 
 export type ProcurementCard = {

@@ -96,6 +96,9 @@ svg { user-select: none; touch-action: none; -webkit-user-select: none; -webkit-
 .calendar-drawer form label { display: grid; gap: 5px; font-size: 12px; color: #64748b; }
 .calendar-drawer form input, .calendar-drawer form select { width: 100%; padding: 9px; border: 1px solid #d1d5db; border-radius: 8px; }
 .calendar-drawer input[type=color] { height: 42px; padding: 3px; }
+.calendar-drawer .calendar-check { display: flex; grid-template-columns: none; align-items: center; gap: 8px; color: #334155; }
+.calendar-drawer .calendar-check input { width: auto; }
+.calendar-drawer fieldset { display: grid; gap: 8px; border: 1px solid #e5e7eb; border-radius: 9px; }
 .calendar-event-list { display: grid; gap: 8px; }
 .calendar-event-list > div { display: flex; align-items: center; gap: 9px; padding: 8px; border: 1px solid #e5e7eb; border-radius: 9px; }
 .calendar-event-list i { width: 12px; height: 30px; border-radius: 5px; }

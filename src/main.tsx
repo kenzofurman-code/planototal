@@ -41,6 +41,7 @@ const zoomPx: Record<number, number> = { 1: 4.8, 2: 6.5, 3: 8.5, 4: 11, 5: 14, 6
 function App() {
   const [collapsed, setCollapsed] = useState(true);
   const [page, setPage] = useState<Page>('projects');
+  const [projectList, setProjectList] = useState<Project[]>(projects);
   const [project, setProject] = useState<Project>(projects[0]);
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
@@ -66,9 +67,9 @@ function App() {
           <b className="pill">{isSupabaseConfigured ? 'Supabase conectado' : 'Modo demo local'}</b>
         </header>
 
-        {page === 'projects' && <Projects selected={project} onCalendar={() => setPage('globalCalendar')} onSelect={(p) => { setProject(p); setPage('dashboard'); }} />}
-        {page === 'globalCalendar' && <AnnualCalendar title="Calendário geral" subtitle="Feriados nacionais e datas compartilhadas entre todas as obras." events={calendarEvents.filter((event) => !event.projectId)} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId), ...events])} />}
-        {page === 'workCalendar' && <AnnualCalendar title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id)} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId !== project.id), ...events.map((event) => ({ ...event, projectId: project.id }))])} />}
+        {page === 'projects' && <Projects projects={projectList} selected={project} onUpdate={(updated) => { setProjectList(projectList.map((item) => item.id === updated.id ? updated : item)); if (project.id === updated.id) setProject(updated); }} onCalendar={() => setPage('globalCalendar')} onSelect={(p) => { setProject(p); setPage('dashboard'); }} />}
+        {page === 'globalCalendar' && <AnnualCalendar projects={projectList} title="Calendário geral" subtitle="Feriados nacionais e datas compartilhadas entre todas as obras." events={calendarEvents.filter((event) => !event.projectId)} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId), ...events])} />}
+        {page === 'workCalendar' && <AnnualCalendar projects={projectList} projectId={project.id} title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id))))} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId !== project.id && event.projectId), ...calendarEvents.filter((event) => !event.projectId), ...events.filter((event) => event.projectId === project.id)])} />}
         {page === 'dashboard' && <Dashboard tasks={tasks} />}
         {page === 'schedule' && <Schedule tasks={tasks} />}
         {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} />}
@@ -94,7 +95,16 @@ function PageHeader({ title, subtitle, children }: { title: string; subtitle: st
   );
 }
 
-function Projects({ selected, onSelect, onCalendar }: { selected: Project; onSelect: (p: Project) => void; onCalendar: () => void }) {
+function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }: { projects: Project[]; selected: Project; onSelect: (p: Project) => void; onCalendar: () => void; onUpdate: (p: Project) => void }) {
+  const [editing, setEditing] = useState<Project | null>(null);
+  const cityOptions = [
+    { city: 'Curitiba', state: 'PR', ibge: '4106902' },
+    { city: 'São Paulo', state: 'SP', ibge: '3550308' },
+    { city: 'Rio de Janeiro', state: 'RJ', ibge: '3304557' },
+    { city: 'Belo Horizonte', state: 'MG', ibge: '3106200' },
+    { city: 'Florianópolis', state: 'SC', ibge: '4205407' },
+    { city: 'Porto Alegre', state: 'RS', ibge: '4314902' },
+  ];
   return (
     <section className="page">
       <PageHeader title="Projetos" subtitle="Selecione uma obra para abrir o planejamento integrado.">
@@ -102,7 +112,7 @@ function Projects({ selected, onSelect, onCalendar }: { selected: Project; onSel
         <button className="primary">Novo projeto</button>
       </PageHeader>
       <div className="project-grid">
-        {projects.map((p) => (
+        {items.map((p) => (
           <article className={`project-card ${selected.id === p.id ? 'selected' : ''}`} key={p.id}>
             <img src={p.imageUrl} />
             <div>
@@ -111,28 +121,44 @@ function Projects({ selected, onSelect, onCalendar }: { selected: Project; onSel
               <p>{p.address}</p>
               <small>{p.area.toLocaleString('pt-BR')} m² · {p.startDate} até {p.plannedEndDate}</small>
               <button onClick={() => onSelect(p)}>Selecionar</button>
+              <button onClick={() => setEditing({ ...p, city: p.city ?? p.address.split(' - ')[0], state: p.state ?? p.address.split(' - ')[1] })}>Editar projeto</button>
             </div>
           </article>
         ))}
       </div>
+      <aside className={`calendar-drawer ${editing ? 'open' : ''}`}>
+        <button className="drawer-close" onClick={() => setEditing(null)}>×</button>
+        {editing && <form onSubmit={(event) => { event.preventDefault(); onUpdate({ ...editing, address: `${editing.city ?? ''} - ${editing.state ?? ''}` }); setEditing(null); }}>
+          <h3>Editar projeto</h3>
+          <label>Nome<input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
+          <label>Cidade<input list="project-cities" value={editing.city ?? ''} onChange={(e) => { const match = cityOptions.find((item) => item.city === e.target.value); setEditing({ ...editing, city: e.target.value, state: match?.state ?? editing.state, ibgeCode: match?.ibge ?? editing.ibgeCode }); }} /></label>
+          <datalist id="project-cities">{cityOptions.map((item) => <option key={item.ibge} value={item.city}>{item.state}</option>)}</datalist>
+          <label>UF<input maxLength={2} value={editing.state ?? ''} onChange={(e) => setEditing({ ...editing, state: e.target.value.toUpperCase() })} /></label>
+          <label>Código IBGE<input value={editing.ibgeCode ?? ''} onChange={(e) => setEditing({ ...editing, ibgeCode: e.target.value })} /></label>
+          <label>Área (m²)<input type="number" value={editing.area} onChange={(e) => setEditing({ ...editing, area: Number(e.target.value) })} /></label>
+          <label>Início<input type="date" value={editing.startDate} onChange={(e) => setEditing({ ...editing, startDate: e.target.value })} /></label>
+          <label>Término previsto<input type="date" value={editing.plannedEndDate} onChange={(e) => setEditing({ ...editing, plannedEndDate: e.target.value })} /></label>
+          <button className="primary" type="submit">Salvar projeto</button>
+        </form>}
+      </aside>
     </section>
   );
 }
 
-function AnnualCalendar({ title, subtitle, events, onChange }: { title: string; subtitle: string; events: CalendarEvent[]; onChange: (events: CalendarEvent[]) => void }) {
+function AnnualCalendar({ title, subtitle, events, onChange, projects: projectOptions, projectId }: { title: string; subtitle: string; events: CalendarEvent[]; onChange: (events: CalendarEvent[]) => void; projects: Project[]; projectId?: string }) {
   const [year, setYear] = useState(new Date().getFullYear());
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [draft, setDraft] = useState({ date: `${year}-01-01`, title: '', kind: 'holiday' as CalendarEvent['kind'], color: '#ef4444' });
+  const [draft, setDraft] = useState({ date: `${year}-01-01`, title: '', kind: 'holiday' as CalendarEvent['kind'], color: '#ef4444', appliesToAll: true, projectIds: [] as string[] });
   const weekdays = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 
   function openDate(date?: string) {
-    setDraft({ date: date ?? `${year}-01-01`, title: '', kind: 'holiday', color: '#ef4444' });
+    setDraft({ date: date ?? `${year}-01-01`, title: '', kind: 'holiday', color: '#ef4444', appliesToAll: true, projectIds: [] });
     setDrawerOpen(true);
   }
   function saveEvent(event: React.FormEvent) {
     event.preventDefault();
     if (!draft.title.trim()) return;
-    onChange([...events, { id: crypto.randomUUID(), ...draft }]);
+    onChange([...events, { id: crypto.randomUUID(), ...draft, projectId }]);
     setDrawerOpen(false);
   }
 
@@ -161,7 +187,10 @@ function AnnualCalendar({ title, subtitle, events, onChange }: { title: string; 
               const weekend = [0, 6].includes(new Date(year, month, day).getDay());
               return <button className={`calendar-day ${weekend ? 'weekend' : 'workday'}`} key={day} onClick={() => openDate(date)}>
                 <b>{day}</b>
-                {dayEvents.map((item) => <i key={item.id} title={item.title} style={{ background: item.color }} />)}
+                {dayEvents.map((item) => {
+                  const scope = item.projectId ? projectOptions.find((project) => project.id === item.projectId)?.name : item.appliesToAll ? 'Todas as obras' : projectOptions.filter((project) => item.projectIds?.includes(project.id)).map((project) => project.name).join(', ');
+                  return <i key={item.id} title={`${item.title} · ${scope || 'Calendário geral'}`} style={{ background: item.color }} />;
+                })}
               </button>;
             })}
           </div>
@@ -176,6 +205,7 @@ function AnnualCalendar({ title, subtitle, events, onChange }: { title: string; 
         <label>Descrição<input value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="Nome do feriado ou rotina" /></label>
         <label>Tipo<select value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value as CalendarEvent['kind'] })}><option value="holiday">Feriado</option><option value="routine">Rotina</option><option value="important">Data importante</option></select></label>
         <label>Cor<input type="color" value={draft.color} onChange={(e) => setDraft({ ...draft, color: e.target.value })} /></label>
+        {!projectId && <><label className="calendar-check"><input type="checkbox" checked={draft.appliesToAll} onChange={(e) => setDraft({ ...draft, appliesToAll: e.target.checked })} /> Aplicar a todas as obras</label>{!draft.appliesToAll && <fieldset><legend>Obras aplicáveis</legend>{projectOptions.map((project) => <label className="calendar-check" key={project.id}><input type="checkbox" checked={draft.projectIds.includes(project.id)} onChange={(e) => setDraft({ ...draft, projectIds: e.target.checked ? [...draft.projectIds, project.id] : draft.projectIds.filter((id) => id !== project.id) })} /> {project.name}</label>)}</fieldset>}</>}
         <button className="primary" type="submit">Salvar marcação</button>
       </form>
       <h4>Marcações deste calendário</h4>
