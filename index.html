@@ -1,12 +1,561 @@
 <!doctype html>
 <html lang="pt-BR">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Linha de Balanço Planejamento</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prévia v6 - Linhas fixas por pacote e por lote-mãe</title>
+<style>
+:root{--bg:#f6f7fb;--paper:#fff;--ink:#172033;--muted:#687083;--brand:#4f46e5;--nav:#1f1d3d;--left:250px;--header:92px;--settings:360px}
+*{box-sizing:border-box}
+body{margin:0;font-family:Inter,Roboto,Arial,sans-serif;background:var(--bg);color:var(--ink);-webkit-user-select:none;-webkit-touch-callout:none;overscroll-behavior:none}
+.app{height:100vh;display:flex;flex-direction:column;overflow:hidden}
+.top{background:var(--nav);color:white;padding:12px 16px;display:flex;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.2)}
+.top h1{font-size:18px;margin:0}
+.top small{opacity:.72}
+.toolbar{background:#fff;border-bottom:1px solid #d9dce7;padding:9px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+button{border:1px solid #d1d5db;background:#fff;border-radius:8px;padding:7px 10px;cursor:pointer;font-size:13px}
+.primary{background:var(--brand);color:white;border-color:var(--brand)} .danger{color:#b91c1c}
+input,select{accent-color:var(--brand)}
+input[type=search]{border:1px solid #d1d5db;border-radius:8px;padding:7px 10px;min-width:230px}
+label{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center}
+.main{flex:1;display:flex;overflow:hidden;position:relative}
+.left{width:var(--left);min-width:var(--left);background:#fff;border-right:1px solid #cfd3df;overflow:hidden}
+.corner{height:var(--header);padding:12px;background:#fafafa;border-bottom:1px solid #cfd3df}
+.corner b{display:block;font-size:13px;margin-bottom:5px}
+.corner small{font-size:12px;color:var(--muted);line-height:1.25;display:block}
+#labels{position:relative;will-change:transform}
+.label-row{position:absolute;left:0;width:var(--left);display:flex;align-items:center;padding:0 10px;font-size:12px;border-bottom:1px solid #e5e7eb;background:#fff}
+.label-row.group{background:#eeeef6;text-transform:uppercase;font-weight:700;color:#34304f;cursor:pointer}
+.label-row.location{background:#fbfbfd}
+.label-row .meta{margin-left:auto;color:#9097a6;font-size:11px}
+.chev{color:var(--brand);margin-right:5px}
+.scroll{flex:1;overflow:auto;background:#fff;position:relative}
+svg{display:block;user-select:none;touch-action:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.bar,.resize-handle{touch-action:none;-webkit-user-select:none;-webkit-touch-callout:none}
+.link-mode-banner{position:fixed;left:50%;top:82px;transform:translateX(-50%);background:#16a34a;color:#fff;padding:9px 13px;border-radius:999px;font-size:13px;font-weight:700;box-shadow:0 10px 25px rgba(0,0,0,.25);z-index:50;display:none}
+.link-mode-banner.show{display:block}
+.side{width:var(--settings);min-width:var(--settings);background:#fff;border-left:1px solid #cfd3df;box-shadow:-4px 0 14px rgba(0,0,0,.06);transition:margin-right .2s ease;overflow:auto}
+.side.hidden{margin-right:calc(-1 * var(--settings))}
+.side-head{background:var(--nav);color:white;padding:14px 16px;display:flex;justify-content:space-between;align-items:center}
+.side h2{margin:0;font-size:17px}
+.side-body{padding:14px}
+.card{border:1px solid #e1e4ee;border-radius:12px;padding:12px;margin-bottom:12px;background:#fff}
+.card h3{font-size:13px;margin:0 0 10px;color:#2f3350}
+.field{margin:9px 0;display:block}
+.field label{display:block;margin-bottom:4px}
+.field input,.field select{width:100%;border:1px solid #d1d5db;border-radius:8px;padding:7px 8px}
+.info{font-size:12px;color:#60697c;line-height:1.45;background:#f5f7ff;border:1px solid #dbe3ff;padding:10px;border-radius:10px}
+.tooltip{position:fixed;z-index:30;pointer-events:none;max-width:330px;background:#111827;color:#fff;padding:10px 12px;border-radius:9px;font-size:12px;box-shadow:0 12px 30px rgba(0,0,0,.25);opacity:0;transform:translate(8px,8px)}
+.tooltip b{display:block;font-size:13px;margin-bottom:5px}
+.tooltip span{display:block;color:#d1d5db;margin-top:2px}
+.drawer{position:fixed;right:0;top:0;height:100vh;width:370px;background:white;box-shadow:-10px 0 30px rgba(0,0,0,.2);transform:translateX(102%);transition:.2s;z-index:40}
+.drawer.open{transform:translateX(0)}
+.drawer-head{background:var(--nav);color:white;padding:15px;display:flex;justify-content:space-between;align-items:center}
+.drawer-body{padding:16px}
+.note{font-size:12px;color:#3730a3;background:#eef2ff;border-top:1px solid #dbe2ff;padding:8px 12px}
+.bar{cursor:grab}
+.resize-handle{cursor:ew-resize}
+.target-highlight{stroke:#22c55e!important;stroke-width:3!important}
+.dep-list{font-size:12px;line-height:1.5;max-height:120px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;padding:8px;background:#fafafa}
+.milestone-label{font-size:11px;fill:#7f1d1d;font-weight:700}
+.config-grid{display:flex;flex-direction:column;gap:8px;max-height:220px;overflow:auto;padding-right:4px}
+.config-row{display:grid;grid-template-columns:1fr 78px;gap:8px;align-items:center;font-size:12px}
+.config-row span{color:#374151;line-height:1.2}
+.badge{display:inline-block;background:#eef2ff;color:#3730a3;border-radius:999px;padding:2px 8px;font-size:11px;font-weight:700}
+@media(max-width:900px){:root{--left:190px;--settings:320px} input[type=search]{min-width:160px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div>
+      <h1>Linha de Balanço - Motor v6</h1>
+      <small>Toque longo = vínculo | Arraste = mover | Ctrl+Arraste = redimensionar</small>
+    </div>
+  </div>
+  <div class="toolbar">
+    <button class="primary" id="toggleSettings">☰ Configurações</button>
+    <label><input type="checkbox" id="editMode" checked> modo edição</label>
+    <label><input type="checkbox" id="dependencyMode" checked> dependências por arraste vertical</label>
+    <label>Zoom <input id="zoom" type="range" min="1" max="5" value="3"></label>
+    <input id="search" type="search" placeholder="Filtrar pacote, local, grupo ou responsável">
+    <button id="undo">Desfazer alteração</button>
+    <button id="reset" class="danger">Restaurar</button>
+  </div>
+  <div class="main">
+    <div class="left">
+      <div class="corner">
+        <b>Pacotes</b>
+        <small>Organize por locais ou grupos. As linhas podem ser fixadas por pacote.</small>
+      </div>
+      <div id="labels"></div>
+    </div>
+    <div class="scroll" id="scroll"><svg id="chart"></svg></div>
+    <aside class="side" id="side">
+      <div class="side-head">
+        <h2>Configurações</h2>
+        <button id="hideSettings" style="color:white;background:transparent;border:0;font-size:20px">×</button>
+      </div>
+      <div class="side-body">
+        <div class="card">
+          <h3>Modo de Agrupamento</h3>
+          <div class="field">
+            <select id="groupMode">
+              <option value="local">Por Local (Lote-Mãe)</option>
+              <option value="group">Por Grupo</option>
+            </select>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Ordenação de Lotes</h3>
+          <div class="field">
+            <select id="lotOrder">
+              <option value="normal">Normal</option>
+              <option value="reverse">Inversa</option>
+              <option value="alpha">Alfabética</option>
+            </select>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Aparência</h3>
+          <label><input type="checkbox" id="compact"> Modo compacto</label>
+          <label><input type="checkbox" id="showText" checked> Mostrar textos</label>
+          <label><input type="checkbox" id="showDeps" checked> Mostrar dependências</label>
+          <label><input type="checkbox" id="snapWeek"> Ajustar ao início da semana</label>
+        </div>
+        <div class="card">
+          <h3>Ações em Grupo</h3>
+          <div class="field">
+            <select id="groupAction">
+              <option value="">Nenhuma</option>
+              <option value="collapsed">Colapsar tudo</option>
+              <option value="expanded">Expandir tudo</option>
+            </select>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Linhas por Lote-Mãe</h3>
+          <div id="groupLineConfig" class="config-grid"></div>
+        </div>
+        <div class="card">
+          <h3>Linhas por Pacote</h3>
+          <div id="packageLaneConfig" class="config-grid"></div>
+        </div>
+        <div class="card">
+          <h3>Dependências</h3>
+          <div id="depList" class="dep-list"></div>
+        </div>
+      </div>
+    </aside>
+  </div>
+  <div class="note">Nesta prévia tudo fica em memória no navegador. O cabeçalho foi simplificado para ficar mais legível, e as linhas podem ser fixadas por pacote e por lote-mãe.</div>
+</div>
+<div class="link-mode-banner" id="linkBanner">Modo vínculo: arraste até a sucessora</div>
+<div class="tooltip" id="tooltip"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-head"><b id="drawerTitle">Atividade</b><button id="drawerClose" style="color:white;background:transparent;border:0;font-size:24px">×</button></div>
+  <div class="drawer-body" id="drawerBody"></div>
+</div>
+
+<script>
+const originalTasks = [{"id": "t1-7-est", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "ESTRUTURA", "sigla": "EST", "inicio": "2025-09-01", "fim": "2025-09-15", "resp": "Estrutura", "cor": "#264653"}, {"id": "t1-7-alv", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "ALVENARIA", "sigla": "ALV", "inicio": "2025-11-11", "fim": "2025-11-24", "resp": "Alvenaria", "cor": "#f97316"}, {"id": "t1-7-ins1", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "INSTALAÇÕES 1", "sigla": "INS1", "inicio": "2025-12-08", "fim": "2025-12-19", "resp": "Instalações", "cor": "#0f766e"}, {"id": "t1-7-emb", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "EMBOÇO/GL", "sigla": "EMB", "inicio": "2026-01-12", "fim": "2026-01-23", "resp": "Revestimento", "cor": "#3b7a78"}, {"id": "t1-7-contra", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "CONTRAPISO", "sigla": "CON", "inicio": "2026-02-02", "fim": "2026-02-13", "resp": "Contrapiso", "cor": "#9ca3af"}, {"id": "t1-7-dry1", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "DRYWALL 1", "sigla": "DRY1", "inicio": "2026-02-18", "fim": "2026-03-03", "resp": "Drywall", "cor": "#1d4ed8"}, {"id": "t1-7-dry2", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "DRYWALL 2", "sigla": "DRY2", "inicio": "2026-03-11", "fim": "2026-03-24", "resp": "Drywall", "cor": "#60a5fa"}, {"id": "t1-7-for", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "FORROS", "sigla": "FOR", "inicio": "2026-04-01", "fim": "2026-04-15", "resp": "Forros", "cor": "#ca8a04"}, {"id": "t1-7-pint1", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "PINTURA 1", "sigla": "PIN1", "inicio": "2026-04-16", "fim": "2026-04-30", "resp": "Pintura", "cor": "#a855f7"}, {"id": "t1-7-imp", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "IMPERMEABILIZAÇÃO INT", "sigla": "IMP", "inicio": "2026-05-04", "fim": "2026-05-15", "resp": "Impermeabilização", "cor": "#dc2626"}, {"id": "t1-7-rev", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "REVEST. CERÂMICO", "sigla": "REV", "inicio": "2026-05-18", "fim": "2026-05-29", "resp": "Revestimento", "cor": "#64748b"}, {"id": "t1-7-ins2", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "INSTALAÇÕES 2", "sigla": "INS2", "inicio": "2026-06-01", "fim": "2026-06-08", "resp": "Instalações", "cor": "#0e7490"}, {"id": "t1-7-des", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "DESENGROSSO", "sigla": "DES", "inicio": "2026-06-09", "fim": "2026-06-15", "resp": "Revestimento", "cor": "#475569"}, {"id": "t1-7-port", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "PORTAS", "sigla": "POR", "inicio": "2026-06-30", "fim": "2026-07-06", "resp": "Esquadrias", "cor": "#92400e"}, {"id": "t1-7-acab", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "ACABAMENTOS", "sigla": "ACB", "inicio": "2026-07-07", "fim": "2026-07-13", "resp": "Acabamentos", "cor": "#059669"}, {"id": "t1-7-piso", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "PISOS ESPECIAIS", "sigla": "PIS", "inicio": "2026-07-14", "fim": "2026-07-20", "resp": "Pisos", "cor": "#7c3aed"}, {"id": "t1-7-pint3", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "PINTURA 3", "sigla": "PIN3", "inicio": "2026-07-21", "fim": "2026-07-27", "resp": "Pintura", "cor": "#d946ef"}, {"id": "t1-7-ins3", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "INSTALAÇÕES 3", "sigla": "INS3", "inicio": "2026-07-28", "fim": "2026-08-03", "resp": "Instalações", "cor": "#0369a1"}, {"id": "t1-7-limp", "grupo": "TORRE-PAVIMENTOS", "local": "7º Pav tipo", "pacote": "LIMPEZA FINAL", "sigla": "LIM", "inicio": "2026-08-11", "fim": "2026-08-17", "resp": "Limpeza", "cor": "#111827"}, {"id": "t1-6-est", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "ESTRUTURA", "sigla": "EST", "inicio": "2025-08-18", "fim": "2025-08-29", "resp": "Estrutura", "cor": "#264653"}, {"id": "t1-6-alv", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "ALVENARIA", "sigla": "ALV", "inicio": "2025-10-28", "fim": "2025-11-10", "resp": "Alvenaria", "cor": "#f97316"}, {"id": "t1-6-ins1", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "INSTALAÇÕES 1", "sigla": "INS1", "inicio": "2025-11-24", "fim": "2025-12-05", "resp": "Instalações", "cor": "#0f766e"}, {"id": "t1-6-emb", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "EMBOÇO/GL", "sigla": "EMB", "inicio": "2025-12-15", "fim": "2026-01-09", "resp": "Revestimento", "cor": "#3b7a78"}, {"id": "t1-6-contra", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "CONTRAPISO", "sigla": "CON", "inicio": "2026-01-19", "fim": "2026-01-30", "resp": "Contrapiso", "cor": "#9ca3af"}, {"id": "t1-6-dry1", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "DRYWALL 1", "sigla": "DRY1", "inicio": "2026-02-02", "fim": "2026-02-13", "resp": "Drywall", "cor": "#1d4ed8"}, {"id": "t1-6-dry2", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "DRYWALL 2", "sigla": "DRY2", "inicio": "2026-02-25", "fim": "2026-03-10", "resp": "Drywall", "cor": "#60a5fa"}, {"id": "t1-6-for", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "FORROS", "sigla": "FOR", "inicio": "2026-03-18", "fim": "2026-03-31", "resp": "Forros", "cor": "#ca8a04"}, {"id": "t1-6-pint1", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "PINTURA 1", "sigla": "PIN1", "inicio": "2026-04-01", "fim": "2026-04-15", "resp": "Pintura", "cor": "#a855f7"}, {"id": "t1-6-imp", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "IMPERMEABILIZAÇÃO INT", "sigla": "IMP", "inicio": "2026-04-16", "fim": "2026-04-30", "resp": "Impermeabilização", "cor": "#dc2626"}, {"id": "t1-6-rev", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "REVEST. CERÂMICO", "sigla": "REV", "inicio": "2026-05-04", "fim": "2026-05-15", "resp": "Revestimento", "cor": "#64748b"}, {"id": "t1-6-limp", "grupo": "TORRE-PAVIMENTOS", "local": "6º Pav tipo", "pacote": "LIMPEZA FINAL", "sigla": "LIM", "inicio": "2026-08-04", "fim": "2026-08-10", "resp": "Limpeza", "cor": "#111827"}, {"id": "f-d-bal", "grupo": "FACHADA", "local": "Fachada D", "pacote": "BALANCIM", "sigla": "BAL", "inicio": "2026-01-06", "fim": "2026-01-19", "resp": "Fachada", "cor": "#6b7280"}, {"id": "f-d-emb", "grupo": "FACHADA", "local": "Fachada D", "pacote": "EMBOÇO EXT.", "sigla": "EMB EXT", "inicio": "2026-02-10", "fim": "2026-03-18", "resp": "Fachada", "cor": "#3b7a78"}, {"id": "f-d-imp", "grupo": "FACHADA", "local": "Fachada D", "pacote": "IMP. FACHADA", "sigla": "IMP", "inicio": "2026-03-18", "fim": "2026-03-26", "resp": "Impermeabilização", "cor": "#dc2626"}, {"id": "f-d-ping", "grupo": "FACHADA", "local": "Fachada D", "pacote": "PINGADEIRAS", "sigla": "PING", "inicio": "2026-03-27", "fim": "2026-04-07", "resp": "Fachada", "cor": "#a16207"}, {"id": "f-d-text", "grupo": "FACHADA", "local": "Fachada D", "pacote": "TEXTURA FACHADA", "sigla": "TEX", "inicio": "2026-05-15", "fim": "2026-06-01", "resp": "Pintura", "cor": "#a855f7"}, {"id": "f-d-esq", "grupo": "FACHADA", "local": "Fachada D", "pacote": "ESQUADRIAS", "sigla": "ESQ", "inicio": "2026-06-10", "fim": "2026-07-03", "resp": "Esquadrias", "cor": "#2563eb"}, {"id": "f-d-sac", "grupo": "FACHADA", "local": "Fachada D", "pacote": "SACADAS", "sigla": "SAC", "inicio": "2026-07-07", "fim": "2026-08-07", "resp": "Fachada", "cor": "#ea580c"}, {"id": "f-c-bal", "grupo": "FACHADA", "local": "Fachada C", "pacote": "BALANCIM", "sigla": "BAL", "inicio": "2026-01-06", "fim": "2026-01-19", "resp": "Fachada", "cor": "#6b7280"}, {"id": "f-c-emb", "grupo": "FACHADA", "local": "Fachada C", "pacote": "EMBOÇO EXT.", "sigla": "EMB EXT", "inicio": "2026-02-10", "fim": "2026-03-11", "resp": "Fachada", "cor": "#3b7a78"}, {"id": "f-c-imp", "grupo": "FACHADA", "local": "Fachada C", "pacote": "IMP. FACHADA", "sigla": "IMP", "inicio": "2026-03-18", "fim": "2026-03-26", "resp": "Impermeabilização", "cor": "#dc2626"}, {"id": "f-c-text", "grupo": "FACHADA", "local": "Fachada C", "pacote": "TEXTURA FACHADA", "sigla": "TEX", "inicio": "2026-05-15", "fim": "2026-05-28", "resp": "Pintura", "cor": "#a855f7"}, {"id": "f-c-esq", "grupo": "FACHADA", "local": "Fachada C", "pacote": "ESQUADRIAS", "sigla": "ESQ", "inicio": "2026-06-10", "fim": "2026-07-03", "resp": "Esquadrias", "cor": "#2563eb"}, {"id": "s1-esc", "grupo": "SUBSOLOS", "local": "Subsolo 1", "pacote": "ESCAVAÇÃO/ATERRO", "sigla": "ESC", "inicio": "2025-10-16", "fim": "2025-11-12", "resp": "Terraplenagem", "cor": "#8b5e34"}, {"id": "s1-tir", "grupo": "SUBSOLOS", "local": "Subsolo 1", "pacote": "TIRANTES", "sigla": "TIR", "inicio": "2025-11-06", "fim": "2025-11-26", "resp": "Contenção", "cor": "#78350f"}, {"id": "s1-last", "grupo": "SUBSOLOS", "local": "Subsolo 1", "pacote": "ESTRUTURA LASTRO", "sigla": "LAS", "inicio": "2026-03-21", "fim": "2026-05-06", "resp": "Estrutura", "cor": "#a8a29e"}, {"id": "s1-emb", "grupo": "SUBSOLOS", "local": "Subsolo 1", "pacote": "EMBOÇO SUB", "sigla": "EMB", "inicio": "2026-04-01", "fim": "2026-04-23", "resp": "Revestimento", "cor": "#3b7a78"}, {"id": "ger-grua", "grupo": "GERAL/CUSTOS", "local": "Geral", "pacote": "GRUA", "sigla": "GRUA", "inicio": "2025-03-21", "fim": "2026-11-28", "resp": "Equipamentos", "cor": "#7c3aed"}, {"id": "ger-crem", "grupo": "GERAL/CUSTOS", "local": "Geral", "pacote": "CREMALHEIRA", "sigla": "CREM", "inicio": "2025-09-01", "fim": "2026-04-15", "resp": "Equipamentos", "cor": "#374151"}, {"id": "ger-custos", "grupo": "GERAL/CUSTOS", "local": "Geral", "pacote": "CUSTOS DE OBRA", "sigla": "CUSTOS", "inicio": "2025-09-02", "fim": "2026-11-30", "resp": "Administração", "cor": "#365314"}];
+const originalDependencies = [{"from": "t1-7-est", "to": "t1-7-alv", "type": "FS"}, {"from": "t1-7-alv", "to": "t1-7-ins1", "type": "FS"}, {"from": "t1-7-ins1", "to": "t1-7-emb", "type": "FS"}, {"from": "t1-6-est", "to": "t1-6-alv", "type": "FS"}, {"from": "t1-6-alv", "to": "t1-6-ins1", "type": "FS"}];
+let tasks = JSON.parse(JSON.stringify(originalTasks));
+let dependencies = JSON.parse(JSON.stringify(originalDependencies));
+tasks.forEach(t => { t._originalInicio = t.inicio; t._originalFim = t.fim; });
+
+const cfg = {header:92,groupH:30,laneH:24,laneGap:5,barH:18,minLabel:36,start:new Date("2025-08-01T00:00:00"),end:new Date("2026-09-15T00:00:00"),today:new Date("2026-07-01T00:00:00")};
+const projectStart = tasks.map(t=>D(t.inicio)).reduce((a,b)=>a<b?a:b);
+const milestones = [
+  {date:"2025-09-01", label:"INÍCIO OBRA"},
+  {date:"2026-01-12", label:"INÍCIO ACAB."},
+  {date:"2026-06-10", label:"ESQUADRIAS"},
+  {date:"2026-08-20", label:"ENTREGA FACH."}
+];
+const zoomPx = {1:2.2,2:3.2,3:4.8,4:7.2,5:10.5};
+const groupNames = ["TORRE-PAVIMENTOS", "FACHADA", "SUBSOLOS", "GERAL/CUSTOS"];
+const packageNames = ["ESTRUTURA", "ALVENARIA", "INSTALAÇÕES 1", "EMBOÇO/GL", "CONTRAPISO", "DRYWALL 1", "DRYWALL 2", "FORROS", "PINTURA 1", "IMPERMEABILIZAÇÃO INT", "REVEST. CERÂMICO", "INSTALAÇÕES 2", "DESENGROSSO", "PORTAS", "ACABAMENTOS", "PISOS ESPECIAIS", "PINTURA 3", "INSTALAÇÕES 3", "LIMPEZA FINAL", "BALANCIM", "EMBOÇO EXT.", "IMP. FACHADA", "PINGADEIRAS", "TEXTURA FACHADA", "ESQUADRIAS", "SACADAS", "ESCAVAÇÃO/ATERRO", "TIRANTES", "ESTRUTURA LASTRO", "EMBOÇO SUB", "GRUA", "CREMALHEIRA", "CUSTOS DE OBRA"];
+const defaultGroupLines = {"TORRE-PAVIMENTOS": 3, "FACHADA": 3, "SUBSOLOS": 2, "GERAL/CUSTOS": 2};
+const defaultPackageLaneMap = {"ESTRUTURA": 1, "ALVENARIA": 2, "INSTALAÇÕES 1": 3, "EMBOÇO/GL": 1, "CONTRAPISO": 2, "DRYWALL 1": 3, "DRYWALL 2": 1, "FORROS": 2, "PINTURA 1": 3, "IMPERMEABILIZAÇÃO INT": 1, "REVEST. CERÂMICO": 2, "INSTALAÇÕES 2": 3, "DESENGROSSO": 1, "PORTAS": 2, "ACABAMENTOS": 3, "PISOS ESPECIAIS": 1, "PINTURA 3": 2, "INSTALAÇÕES 3": 3, "LIMPEZA FINAL": 1, "BALANCIM": 2, "EMBOÇO EXT.": 3, "IMP. FACHADA": 1, "PINGADEIRAS": 2, "TEXTURA FACHADA": 3, "ESQUADRIAS": 1, "SACADAS": 2, "ESCAVAÇÃO/ATERRO": 3, "TIRANTES": 1, "ESTRUTURA LASTRO": 2, "EMBOÇO SUB": 3, "GRUA": 1, "CREMALHEIRA": 2, "CUSTOS DE OBRA": 3};
+let groupLineCount = Object.assign({}, defaultGroupLines);
+let packageLaneMap = Object.assign({}, defaultPackageLaneMap);
+
+let state = {zoom:3, search:"", groupMode:"grupoLocal", lotOrder:"normal", collapsed:new Set(), compact:false, showText:true, showDeps:true, snapWeek:false, editMode:true, dependencyMode:true, history:[]};
+let layout = new Map(), drag = null, linkPreview = null, longPressTimer = null;
+const LONG_PRESS_MS = 520;
+
+function D(s){return new Date(s+"T00:00:00")}
+function iso(date){return date.toISOString().slice(0,10)}
+function days(a,b){return Math.round((b-a)/86400000)}
+function add(a,n){let x=new Date(a); x.setDate(x.getDate()+n); return x}
+function fmt(x){return x.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit",year:"2-digit"})}
+function xFor(date){return days(cfg.start,date)*zoomPx[state.zoom]}
+function wFor(s,e){return Math.max(5,(days(s,e)+1)*zoomPx[state.zoom])}
+function fromX(x){return add(cfg.start, Math.round(x/zoomPx[state.zoom]))}
+function snapDate(date){ if(!state.snapWeek) return date; const dow=date.getDay(); const diff=(dow===0?-6:1-dow); return add(date,diff); }
+function esc(s){return String(s??"").replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}
+function taskById(id){return tasks.find(t=>t.id===id)}
+function clearLongPress(){ if(longPressTimer){ clearTimeout(longPressTimer); longPressTimer=null; } }
+function showLinkBanner(show){ const b=document.getElementById("linkBanner"); if(b) b.classList.toggle("show", !!show); }
+function getGroupLineCount(group){ return Math.max(1, Number(groupLineCount[group] || 3)); }
+function getPackageLane(pkg){ const val = packageLaneMap[pkg]; return val ? Number(val) : null; }
+
+function filtered(){
+  const q=state.search.toLowerCase().trim();
+  if(!q) return tasks;
+  return tasks.filter(t=>[t.grupo,t.local,t.pacote,t.sigla,t.resp].some(v=>String(v).toLowerCase().includes(q)));
+}
+
+function orderedLocations(arr, group){
+  let locs=[...new Set(arr.filter(t=>!group||t.grupo===group).map(t=>t.local))];
+  if(state.lotOrder==="reverse") locs.reverse();
+  if(state.lotOrder==="alpha") locs.sort((a,b)=>a.localeCompare(b,"pt-BR"));
+  return locs;
+}
+
+function pack(rowTasks, groupName){
+  const arr=[...rowTasks].sort((a,b)=>D(a.inicio)-D(b.inicio));
+  const lineCount = getGroupLineCount(groupName || (arr[0]?.grupo || ""));
+  const laneEnds = Array.from({length:lineCount}, ()=>new Date(-8640000000000000));
+
+  arr.forEach(t=>{
+    const forced = getPackageLane(t.pacote);
+    const s=D(t.inicio), e=D(t.fim);
+    if(forced){
+      const lane = forced - 1;
+      t._lane = lane;
+      if(e > laneEnds[lane]) laneEnds[lane] = e;
+    } else {
+      let bestLane = 0, bestEnd = laneEnds[0];
+      for(let i=1; i<lineCount; i++){
+        if(laneEnds[i] < bestEnd){ bestLane = i; bestEnd = laneEnds[i]; }
+      }
+      t._lane = bestLane;
+      if(e > laneEnds[bestLane]) laneEnds[bestLane] = e;
+    }
+  });
+
+  return lineCount;
+}
+
+function rows(){
+  const arr=filtered();
+  let out=[];
+  if(state.groupMode==="local"){
+    orderedLocations(arr).forEach(loc=>{
+      const groupName = arr.find(t=>t.local===loc)?.grupo;
+      const rt=arr.filter(t=>t.local===loc);
+      const lanes = pack(rt, groupName);
+      out.push({type:"location",key:loc,label:loc,grupo:groupName,tasks:rt,lanes,height:(state.compact?8:12)+lanes*((state.compact?18:cfg.laneH)+cfg.laneGap)});
+    });
+    return out;
+  }
+  const groups=[...new Set(arr.map(t=>t.grupo))];
+  groups.forEach(g=>{
+    out.push({type:"group",key:g,label:g,count:arr.filter(t=>t.grupo===g).length,height:cfg.groupH});
+    if(!state.collapsed.has(g)){
+      orderedLocations(arr, g).forEach(loc=>{
+        const rt=arr.filter(t=>t.grupo===g && t.local===loc);
+        const lanes = pack(rt, g);
+        out.push({type:"location",key:loc,label:loc,grupo:g,tasks:rt,lanes,height:(state.compact?8:12)+lanes*((state.compact?18:cfg.laneH)+cfg.laneGap)});
+      });
+    }
+  });
+  return out;
+}
+
+function monthTicks(){let a=[],c=new Date(cfg.start.getFullYear(),cfg.start.getMonth(),1);while(c<=cfg.end){a.push(new Date(c));c.setMonth(c.getMonth()+1)}return a}
+function weekTicks(){let a=[],c=new Date(projectStart);while(c<=cfg.end){a.push(new Date(c));c=add(c,7)}return a}
+function dayTicks(step){let a=[],c=new Date(cfg.start);while(c<=cfg.end){a.push(new Date(c));c=add(c,step)}return a}
+function monthIndex(dt){return (dt.getFullYear()-projectStart.getFullYear())*12 + (dt.getMonth()-projectStart.getMonth()) + 1}
+function monthLabel(dt){const mon=dt.toLocaleDateString("pt-BR",{month:"short"}).replace(".","").toUpperCase(); const yy=String(dt.getFullYear()).slice(-2); return `${mon}/${yy} - M${monthIndex(dt)}`;}
+function weekStartLabel(dt){return dt.toLocaleDateString("pt-BR",{day:"2-digit",month:"2-digit"})}
+function svgPointFromClient(ev){ const svg=document.getElementById("chart"), rect=svg.getBoundingClientRect(); return {x: ev.clientX - rect.left, y: ev.clientY - rect.top}; }
+function closestTaskAtPoint(pt, exceptId){ let best=null,bestDist=Infinity; layout.forEach((b,id)=>{ if(id===exceptId)return; if(pt.x>=b.x-12&&pt.x<=b.x+b.w+12&&pt.y>=b.y-12&&pt.y<=b.y+b.h+12){ const dist=Math.hypot(pt.x-(b.x+b.w/2),pt.y-(b.y+b.h/2)); if(dist<bestDist){best=id;bestDist=dist;} } }); return best; }
+function depPath(a,b){ const sx=a.x+a.w, sy=a.y+a.h/2, ex=b.x, ey=b.y+b.h/2, mx=Math.max(sx+18,(sx+ex)/2); return `M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ey}, ${ex} ${ey}`; }
+
+function updateDepList(){
+  const div=document.getElementById("depList");
+  if(!dependencies.length){div.innerHTML="Nenhuma dependência.";return;}
+  div.innerHTML=dependencies.map(d=>{
+    const a=taskById(d.from), b=taskById(d.to);
+    return `<div><b>${esc(a?.sigla||d.from)}</b> → <b>${esc(b?.sigla||d.to)}</b> <span style="color:#6b7280">(${d.type})</span></div>`;
+  }).join("");
+}
+
+function renderConfigPanels(){
+  const groupBox = document.getElementById("groupLineConfig");
+  groupBox.innerHTML = "";
+  groupNames.forEach(g=>{
+    const row = document.createElement("div");
+    row.className = "config-row";
+    const label = document.createElement("span");
+    label.innerHTML = `${esc(g)}`;
+    const sel = document.createElement("select");
+    [1,2,3,4].forEach(n=>{ const op=document.createElement("option"); op.value=n; op.textContent=`${n} linhas`; if(Number(groupLineCount[g])===n) op.selected=true; sel.appendChild(op); });
+    sel.onchange = () => { groupLineCount[g] = Number(sel.value); render(); };
+    row.appendChild(label); row.appendChild(sel); groupBox.appendChild(row);
+  });
+
+  const pkgBox = document.getElementById("packageLaneConfig");
+  pkgBox.innerHTML = "";
+  packageNames.forEach(pkg=>{
+    const row = document.createElement("div");
+    row.className = "config-row";
+    const label = document.createElement("span");
+    label.textContent = pkg;
+    const sel = document.createElement("select");
+    [1,2,3,4].forEach(n=>{ const op=document.createElement("option"); op.value=n; op.textContent=`Linha ${n}`; if(Number(packageLaneMap[pkg])===n) op.selected=true; sel.appendChild(op); });
+    sel.onchange = () => { packageLaneMap[pkg] = Number(sel.value); render(); };
+    row.appendChild(label); row.appendChild(sel); pkgBox.appendChild(row);
+  });
+}
+
+function render(){
+  const rws=rows(), svg=document.getElementById("chart"), labels=document.getElementById("labels"), scroll=document.getElementById("scroll");
+  svg.innerHTML=""; labels.innerHTML=""; layout.clear();
+  const width=Math.max(scroll.clientWidth,xFor(cfg.end)+140), totalH=cfg.header+rws.reduce((s,r)=>s+r.height,0)+30;
+  svg.setAttribute("width",width); svg.setAttribute("height",totalH);
+  const ns="http://www.w3.org/2000/svg";
+  const el=(n,a={},p=svg)=>{let x=document.createElementNS(ns,n);Object.entries(a).forEach(([k,v])=>x.setAttribute(k,v));p.appendChild(x);return x};
+  const tx=(x,y,text,a={})=>{let n=el("text",{x,y,...a});n.textContent=text;return n};
+  const defs=el("defs");
+  const marker=el("marker",{id:"arrow",viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"7",markerHeight:"7",orient:"auto-start-reverse"},defs);
+  el("path",{d:"M 0 0 L 10 5 L 0 10 z",fill:"#60636f"},marker);
+  const markerGreen=el("marker",{id:"arrowGreen",viewBox:"0 0 10 10",refX:"9",refY:"5",markerWidth:"8",markerHeight:"8",orient:"auto-start-reverse"},defs);
+  el("path",{d:"M 0 0 L 10 5 L 0 10 z",fill:"#16a34a"},markerGreen);
+
+  el("rect",{x:0,y:0,width,height:totalH,fill:"#fff"});
+  el("rect",{x:0,y:0,width,height:cfg.header,fill:"#fafafa"});
+  el("line",{x1:0,y1:cfg.header,x2:width,y2:cfg.header,stroke:"#cfd3df"});
+
+  // grade
+  dayTicks(state.zoom>=4?1:7).forEach(dt=>{ if(state.zoom>=4){ let x=xFor(dt); el("line",{x1:x,y1:cfg.header,x2:x,y2:totalH,stroke:"#f1f2f6"}); } });
+  weekTicks().forEach(dt=>{ let x=xFor(dt); el("line",{x1:x,y1:cfg.header,x2:x,y2:totalH,stroke:"#dfe3ec"}); });
+  monthTicks().forEach(dt=>{ let x=xFor(dt); el("line",{x1:x,y1:0,x2:x,y2:totalH,stroke:"#b7bccb"}); });
+
+  // header simplified
+  el("line",{x1:0,y1:34,x2:width,y2:34,stroke:"#d9dce7"});
+  if(state.zoom>=4){
+    weekTicks().forEach((dt,idx)=>{
+      const x=xFor(dt);
+      tx(x+4,56,weekStartLabel(dt),{"font-size":11,fill:"#6b7280"});
+    });
+  } else if(state.zoom===3){
+    monthTicks().forEach(dt=>{ const x=xFor(dt); const lb=monthLabel(dt); tx(x+4,24,lb.split(" - ")[0],{"font-size":10,fill:"#374151","font-weight":"700"}); tx(x+4,36,lb.split(" - ")[1],{"font-size":10,fill:"#6b7280"}); });
+  } else if(state.zoom===2){
+    monthTicks().forEach((dt,idx)=>{ if(idx%1===0){ const x=xFor(dt); const lb=monthLabel(dt); tx(x+4,24,lb,{"font-size":9,fill:"#6b7280"}); } });
+  } else {
+    monthTicks().forEach((dt,idx)=>{ if(idx%2===0){ const x=xFor(dt); const lb=monthLabel(dt); tx(x+4,24,lb,{"font-size":8,fill:"#9097a6"}); } });
+  }
+
+  // today line
+  let hx=xFor(cfg.today);
+  el("line",{x1:hx,y1:cfg.header,x2:hx,y2:totalH,stroke:"#2563eb","stroke-width":2.3,opacity:.8});
+  tx(hx+4,cfg.header+14,"Hoje",{"font-size":10,fill:"#1d4ed8","font-weight":700});
+
+  // milestones in body
+  milestones.forEach(m=>{
+    const mx=xFor(D(m.date));
+    el("line",{x1:mx,y1:cfg.header,x2:mx,y2:totalH,stroke:"#7f1d1d","stroke-width":1.5,opacity:.4});
+    const t=tx(mx+8,cfg.header+20,m.label);
+    t.setAttribute("transform",`rotate(-90 ${mx+8} ${cfg.header+54})`);
+  });
+
+  let y=cfg.header, frag=document.createDocumentFragment();
+  rws.forEach(row=>{
+    if(row.type==="group"){
+      const g=el("g",{},svg); el("rect",{x:0,y:y+2,width:250,height:row.height-4,fill:"#eeeef6"});
+      const label=el("text",{x:12,y:y+20,"font-size":"13px","font-weight":"700",fill:"#34304f"},g);
+      label.textContent=row.label+" ("+row.count+")";
+      const chev=el("text",{x:8,y:y+20,"font-size":"13px",fill:"var(--brand)"},g);
+      chev.textContent=state.collapsed.has(row.key)?"▶":"▼";
+      g.style.cursor="pointer";
+      g.addEventListener("click",()=>{if(state.collapsed.has(row.key)) state.collapsed.delete(row.key); else state.collapsed.add(row.key); render();});
+      y+=row.height;
+      return;
+    }
+    const row_g=el("g",{},svg);
+    const groupName = row.grupo;
+    let header_y=y;
+    el("line",{x1:0,y1:y,x2:width,y2:y,stroke:"#e5e7eb"});
+    const lab=el("text",{x:12,y:y+cfg.laneH+2,"font-size":"12px",fill:"#34304f"},row_g);
+    lab.textContent=row.label;
+    if(row.tasks.length>0){
+      const meta=el("text",{x:240,y:y+cfg.laneH+2,"font-size":"11px",fill:"#9097a6"},row_g);
+      meta.textContent=row.tasks.length;
+    }
+
+    for(let lane=0;lane<row.lanes;lane++){
+      const lane_y = y + (state.compact?8:12) + lane*((state.compact?18:cfg.laneH)+cfg.laneGap);
+      row.tasks.filter(t=>t._lane===lane).forEach(t=>{
+        const s=D(t.inicio), e=D(t.fim), bx=xFor(s), bw=wFor(s,e), by=lane_y, bh=state.compact?16:cfg.barH;
+        layout.set(t.id,{x:bx,y:by,w:bw,h:bh});
+        const b=el("g",{},row_g);
+        const bar=el("rect",{x:bx,y:by,width:bw,height:bh,fill:t.cor,rx:3},b);
+        if(state.showText){
+          const txt=el("text",{x:bx+5,y:by+bh/2+4,"font-size":"10px",fill:"white","pointer-events":"none"},b);
+          txt.textContent=t.sigla;
+        }
+        addEvents(b,t,"bar");
+      });
+      if(lane<row.lanes-1){
+        el("line",{x1:0,y1:lane_y+((state.compact?18:cfg.laneH)+cfg.laneGap),x2:width,y2:lane_y+((state.compact?18:cfg.laneH)+cfg.laneGap),stroke:"#f1f2f6"});
+      }
+    }
+    y += row.height;
+  });
+
+  if(state.showDeps){
+    dependencies.forEach(d=>{
+      const from=layout.get(d.from), to=layout.get(d.to);
+      if(from && to){
+        const path=el("path",{d:depPath(from,to),fill:"none",stroke:"#60636f","stroke-width":"1.5",marker-end:"url(#arrow)"},svg);
+        path.style.pointerEvents="none";
+      }
+    });
+  }
+  if(linkPreview){
+    const from=layout.get(drag.id), to=layout.get(linkPreview);
+    if(from && to){
+      const path=el("path",{d:depPath(from,to),fill:"none",stroke:"#16a34a","stroke-width":"2.5",marker-end:"url(#arrowGreen)",opacity:.6},svg);
+      path.style.pointerEvents="none";
+    }
+  }
+
+  labels.appendChild(frag);
+  labels.style.height=(totalH-cfg.header)+"px";
+  updateDepList();
+  renderConfigPanels();
+}
+
+function addEvents(node,t,part){
+  const tip=document.getElementById("tooltip");
+  node.addEventListener("mousemove",ev=>{
+    const lines=[];
+    lines.push(`<b>${t.pacote}</b>`);
+    lines.push(`Local: ${t.local}`);
+    lines.push(`Resp: ${t.resp}`);
+    lines.push(`${fmt(D(t.inicio))} → ${fmt(D(t.fim))}`);
+    tip.innerHTML=lines.join("<span style='display:block;margin-top:3px'></span>");
+    tip.style.opacity=1; tip.style.left=ev.clientX+"px"; tip.style.top=ev.clientY+"px";
+  });
+  node.addEventListener("mouseleave",()=>tip.style.opacity=0);
+  node.addEventListener("pointerdown",ev=>{
+    if(!state.editMode) return;
+    clearLongPress();
+    const start_x=ev.clientX, start_y=ev.clientY;
+    longPressTimer=setTimeout(()=>{
+      drag={id:t.id,mode:"link",origInicio:t.inicio,origFim:t.fim,startClientX:ev.clientX,startClientY:ev.clientY,target:null};
+      showLinkBanner(true);
+    },LONG_PRESS_MS);
+  });
+  node.addEventListener("click",()=>{ if(!drag) openDrawer(t); });
+}
+
+window.addEventListener("pointermove",ev=>{
+  if(!drag) return;
+  const t=taskById(drag.id); if(!t) return;
+  const dx=ev.clientX-drag.startClientX, dy=ev.clientY-drag.startClientY, pt=svgPointFromClient(ev);
+
+  if(drag.mode==="pending"){
+    if(Math.abs(dx)>3 || Math.abs(dy)>3) drag.mode="move";
+  }
+  if(drag.mode==="resize"){
+    const newFim = snapDate(fromX(pt.x));
+    t.fim=iso(newFim);
+    render();
+  }
+  if(drag.mode==="move"){
+    const days_offset = Math.round(dx/zoomPx[state.zoom]);
+    const newInicio = snapDate(add(D(drag.origInicio), days_offset));
+    const duracao = Math.round((D(drag.origFim)-D(drag.origInicio))/86400000);
+    t.inicio = iso(newInicio);
+    t.fim = iso(add(newInicio, duracao));
+    render();
+  }
+  if(drag.mode==="link"){
+    const closest = closestTaskAtPoint(pt, drag.id);
+    linkPreview = closest;
+    drag.target = closest;
+    render();
+  }
+});
+
+window.addEventListener("pointerup",()=>{
+  clearLongPress(); showLinkBanner(false);
+  if(!drag) return;
+  const t=taskById(drag.id);
+  if(drag.mode==="link" && drag.target && drag.target!==drag.id){
+    const exists = dependencies.some(d=>d.from===drag.id && d.to===drag.target && d.type==="FS");
+    if(!exists){ dependencies.push({from:drag.id,to:drag.target,type:"FS"}); state.history.push({kind:"dep",from:drag.id,to:drag.target}); }
+  } else if((drag.mode==="move" || drag.mode==="resize") && t && (t.inicio!==drag.origInicio || t.fim!==drag.origFim)){
+    state.history.push({kind:"date",id:drag.id,inicio:drag.origInicio,fim:drag.origFim});
+  }
+  const openedTask=t; drag=null; linkPreview=null; render(); if(openedTask) openDrawer(openedTask);
+});
+
+function openDrawer(t){
+  const succ=dependencies.filter(d=>d.from===t.id).map(d=>taskById(d.to)?.pacote || d.to);
+  const pred=dependencies.filter(d=>d.to===t.id).map(d=>taskById(d.from)?.pacote || d.from);
+  const fixedLane=getPackageLane(t.pacote);
+  document.getElementById("drawerTitle").textContent=t.pacote;
+  document.getElementById("drawerBody").innerHTML=`
+    <div class="card">
+      <h3>Dados</h3>
+      <div class="field"><strong>Sigla:</strong> ${esc(t.sigla)}</div>
+      <div class="field"><strong>Local:</strong> ${esc(t.local)}</div>
+      <div class="field"><strong>Responsável:</strong> ${esc(t.resp)}</div>
+      <div class="field"><strong>Datas:</strong> ${fmt(D(t.inicio))} → ${fmt(D(t.fim))}</div>
+      <div class="field"><strong>Duração:</strong> ${days(D(t.inicio),D(t.fim))+1} dias</div>
+    </div>
+    <div class="card">
+      <h3>Dependências</h3>
+      <div class="field"><strong>Sucessoras:</strong> ${succ.length?succ.join(", "):"Nenhuma"}</div>
+      <div class="field"><strong>Predecessoras:</strong> ${pred.length?pred.join(", "):"Nenhuma"}</div>
+    </div>
+    <div class="card">
+      <h3>Fixação de Linha</h3>
+      <div class="field"><strong>Linha:</strong> ${fixedLane?"Fixa ("+fixedLane+")":"Automática"}</div>
+    </div>
+    <p class="info">Nesta versão, a posição vertical passa a ser definida principalmente pela configuração do pacote e pela quantidade de linhas do lote-mãe.</p>`;
+  document.getElementById("drawer").classList.add("open");
+}
+
+document.getElementById("scroll").addEventListener("scroll",ev=>document.getElementById("labels").style.transform=`translateY(${-ev.target.scrollTop}px)`);
+document.getElementById("toggleSettings").onclick=()=>document.getElementById("side").classList.toggle("hidden");
+document.getElementById("hideSettings").onclick=()=>document.getElementById("side").classList.add("hidden");
+document.getElementById("drawerClose").onclick=()=>document.getElementById("drawer").classList.remove("open");
+document.getElementById("zoom").oninput=e=>{ state.zoom=Number(e.target.value); render(); };
+document.getElementById("search").oninput=e=>{ state.search=e.target.value; render(); };
+document.getElementById("editMode").onchange=e=>{ state.editMode=e.target.checked; render(); };
+document.getElementById("dependencyMode").onchange=e=>{ state.dependencyMode=e.target.checked; render(); };
+document.getElementById("groupMode").onchange=e=>{ state.groupMode=e.target.value; render(); };
+document.getElementById("lotOrder").onchange=e=>{ state.lotOrder=e.target.value; render(); };
+document.getElementById("compact").onchange=e=>{ state.compact=e.target.checked; render(); };
+document.getElementById("showText").onchange=e=>{ state.showText=e.target.checked; render(); };
+document.getElementById("showDeps").onchange=e=>{ state.showDeps=e.target.checked; render(); };
+document.getElementById("snapWeek").onchange=e=>{ state.snapWeek=e.target.checked; render(); };
+document.getElementById("groupAction").onchange=e=>{ if(e.target.value==="collapsed") state.collapsed=new Set(groupNames); else state.collapsed.clear(); render(); };
+document.getElementById("undo").onclick=()=>{
+  const last=state.history.pop(); if(!last) return;
+  if(last.kind==="date"){ const t=taskById(last.id); if(t){ t.inicio=last.inicio; t.fim=last.fim; } }
+  if(last.kind==="dep"){ dependencies=dependencies.filter(d=>!(d.from===last.from && d.to===last.to && d.type==="FS")); }
+  render();
+};
+document.getElementById("reset").onclick=()=>{
+  tasks=JSON.parse(JSON.stringify(originalTasks));
+  tasks.forEach(t=>{ t._originalInicio=t.inicio; t._originalFim=t.fim; });
+  dependencies=JSON.parse(JSON.stringify(originalDependencies));
+  groupLineCount = Object.assign({}, defaultGroupLines);
+  packageLaneMap = Object.assign({}, defaultPackageLaneMap);
+  state.history=[]; linkPreview=null; drag=null; render();
+};
+
+document.addEventListener("contextmenu", ev=>{ if(ev.target.closest("#chart") || ev.target.closest("#labels")) ev.preventDefault(); }, {capture:true});
+window.addEventListener("pointercancel",()=>{ clearLongPress(); showLinkBanner(false); drag=null; linkPreview=null; render(); });
+window.addEventListener("resize",render);
+render();
+</script>
+</body>
 </html>
