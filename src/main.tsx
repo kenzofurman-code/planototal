@@ -330,7 +330,15 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
       existing.predecessors = Array.from(new Set([...(existing.predecessors ?? []), ...(task.predecessors ?? [])]));
       existing.successors = Array.from(new Set([...(existing.successors ?? []), ...(task.successors ?? [])]));
     });
-    const imported = Array.from(consolidated.values());
+    const palette = ['#4f46e5', '#f97316', '#0f766e', '#a855f7', '#2563eb', '#ca8a04', '#dc2626', '#059669', '#7c3aed', '#475569'];
+    const packageIndexes = new Map<string, Map<string, number>>();
+    const imported = Array.from(consolidated.values()).map((task) => {
+      if (!packageIndexes.has(task.lotMother)) packageIndexes.set(task.lotMother, new Map());
+      const groupPackages = packageIndexes.get(task.lotMother)!;
+      if (!groupPackages.has(task.packageName)) groupPackages.set(task.packageName, groupPackages.size);
+      const index = groupPackages.get(task.packageName)!;
+      return { ...task, color: palette[index % palette.length], lane: (index % 3) + 1 };
+    });
     setTasks(imported);
     setImportData(null);
   }
@@ -372,6 +380,8 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   const [selectedVersionId, setSelectedVersionId] = useState('v00');
   const [groupLines, setGroupLines] = useState<Record<string, number>>({ 'TORRE-PAVIMENTOS': 3, FACHADA: 3 });
   const [familyLane, setFamilyLane] = useState<Record<string, number>>({ ESTRUTURA: 1, ALVENARIA: 1, INSTALAÇÕES: 2, REVESTIMENTO: 3, FACHADA: 2, ESQUADRIAS: 3 });
+  const [packageLanes, setPackageLanes] = useState<Record<string, number>>({});
+  const [packageColors, setPackageColors] = useState<Record<string, string>>(() => Object.fromEntries(tasks.map((task) => [`${task.lotMother}||${task.packageName}`, task.color])));
   const [groupOrder, setGroupOrder] = useState<string[]>(() => Array.from(new Set(tasks.map((task) => task.lotMother))));
   const [lotOrder, setLotOrder] = useState<Record<string, string[]>>(() => Object.fromEntries(Array.from(new Set(tasks.map((task) => task.lotMother))).map((group) => [group, Array.from(new Set(tasks.filter((task) => task.lotMother === group).map((task) => task.lot))) ])));
   const [ordering, setOrdering] = useState<{ type: 'group' | 'lot'; key: string; group?: string } | null>(null);
@@ -383,6 +393,10 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   const taskGroups = Array.from(new Set(tasks.map((t) => t.lotMother)));
   const groups = [...groupOrder.filter((group) => taskGroups.includes(group)), ...taskGroups.filter((group) => !groupOrder.includes(group))];
   const families = Array.from(new Set(tasks.map((t) => t.packageFamily)));
+  const packagesByGroup = groups.flatMap((group) => Array.from(new Set(tasks.filter((task) => task.lotMother === group).map((task) => task.packageName))).map((packageName, index) => {
+    const key = `${group}||${packageName}`;
+    return { key, group, packageName, defaultLane: (index % (groupLines[group] ?? 3)) + 1, color: tasks.find((task) => task.lotMother === group && task.packageName === packageName)?.color ?? '#4f46e5' };
+  }));
 
   const rows = useMemo(() => {
     const result: Array<{ type: 'group' | 'lot'; key: string; label: string; tasks: Task[]; height: number; group?: string }> = [];
@@ -581,6 +595,11 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
           {groups.map((g) => <label key={g}>{g}<select value={groupLines[g] ?? 3} onChange={(e) => setGroupLines({ ...groupLines, [g]: Number(e.target.value) })}><option value={1}>1 linha</option><option value={2}>2 linhas</option><option value={3}>3 linhas</option><option value={4}>4 linhas</option></select></label>)}
           <h4>Linha por família</h4>
           {families.map((f) => <label key={f}>{f}<select value={familyLane[f] ?? 1} onChange={(e) => setFamilyLane({ ...familyLane, [f]: Number(e.target.value) })}><option value={1}>Linha 1</option><option value={2}>Linha 2</option><option value={3}>Linha 3</option><option value={4}>Linha 4</option></select></label>)}
+          <h4>Cor e linha por pacote</h4>
+          <div className="package-config-list">{packagesByGroup.map((item) => {
+            const maxLines = groupLines[item.group] ?? 3;
+            return <div className="package-config-row" key={item.key}><input title="Cor do pacote" type="color" value={packageColors[item.key] ?? item.color} onChange={(e) => setPackageColors({ ...packageColors, [item.key]: e.target.value })} /><span title={`${item.group} · ${item.packageName}`}>{item.packageName}</span><select value={Math.min(packageLanes[item.key] ?? item.defaultLane, maxLines)} onChange={(e) => setPackageLanes({ ...packageLanes, [item.key]: Number(e.target.value) })}>{Array.from({ length: maxLines }).map((_, index) => <option value={index + 1} key={index + 1}>Linha {index + 1}</option>)}</select></div>;
+          })}</div>
           <h4>Cabeçalho de datas</h4>
           <label>Nível superior<select value={monthFormat} onChange={(e) => setMonthFormat(e.target.value as 'index' | 'numeric')}><option value="index">M1, M2… desde o início</option><option value="numeric">MM/AA</option></select></label>
           <label>Segundo nível<select value={weekFormat} onChange={(e) => setWeekFormat(e.target.value as 'short' | 'numeric' | 'day')}><option value="short">DD/MMM</option><option value="numeric">DD/MM</option><option value="day">Somente DD</option></select></label>
@@ -636,13 +655,16 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
               y += row.height;
               if (row.type === 'group') return <g key={row.key}><rect x={0} y={currentY} width={width} height={row.height} fill="#eef2ff" opacity=".65" /></g>;
               return <g key={row.key}><line x1={0} x2={width} y1={currentY + row.height} y2={currentY + row.height} stroke="#e5e7eb" />{row.tasks.map((t) => {
-                const lane = familyLane[t.packageFamily] ?? 1;
+                const packageKey = `${t.lotMother}||${t.packageName}`;
+                const packageSetting = packagesByGroup.find((item) => item.key === packageKey);
+                const lane = Math.min(groupLines[t.lotMother] ?? 3, packageLanes[packageKey] ?? t.lane ?? packageSetting?.defaultLane ?? familyLane[t.packageFamily] ?? 1);
                 const x = xFor(parseDate(t.startDate));
                 const barW = Math.max(10, (diffDays(parseDate(t.startDate), parseDate(t.endDate)) + 1) * zoomPx[zoom]);
                 const barY = currentY + 8 + (lane - 1) * 26;
                 taskLayout.set(t.id, { x, y: barY, width: barW, height: 18 });
                 const serviceText = t.services?.length ? t.services.join(' · ') : microservices[t.packageFamily] ?? 'Serviços não cadastrados';
-                return <g key={t.id} data-task-id={t.id} onClick={() => setSelectedTask(t)}><title>{t.packageName} · {serviceText}</title><rect className={`task-bar ${drag?.target === t.id ? 'target-highlight' : ''}`} x={x} y={barY} width={barW} height={18} rx={4} fill={t.color} onPointerDown={(e) => beginDrag(e, t, 'pending')} /><rect className="resize-handle" x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => beginDrag(e, t, 'resize')} /><text pointerEvents="none" x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">{t.packageName}</text><rect pointerEvents="none" x={x} y={barY + 14} width={barW * t.progress / 100} height={4} fill="#fff" opacity={0.55} /></g>;
+                const taskColor = packageColors[packageKey] ?? t.color;
+                return <g key={t.id} data-task-id={t.id} onClick={() => setSelectedTask(t)}><title>{t.packageName} · {serviceText}</title><rect className={`task-bar ${drag?.target === t.id ? 'target-highlight' : ''}`} x={x} y={barY} width={barW} height={18} rx={4} fill={taskColor} onPointerDown={(e) => beginDrag(e, t, 'pending')} /><rect className="resize-handle" x={x + barW - 9} y={barY} width={9} height={18} fill="#fff" opacity={0.25} onPointerDown={(e) => beginDrag(e, t, 'resize')} /><text pointerEvents="none" x={x + 5} y={barY + 13} fontSize={10} fontWeight={700} fill="#fff">{t.packageName}</text><rect pointerEvents="none" x={x} y={barY + 14} width={barW * t.progress / 100} height={4} fill="#fff" opacity={0.55} /></g>;
               })}</g>;
             })}
             {showDeps && dependencies.map((dependency) => {

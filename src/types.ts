@@ -44,6 +44,7 @@ export type Task = {
   responsible?: string;
   predecessors?: string[];
   successors?: string[];
+  lane?: number;
 };
 
 export type ScheduleDependency = {
