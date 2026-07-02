@@ -12,6 +12,9 @@ import {
   Home,
   KanbanSquare,
   LineChart,
+  Link2,
+  ArrowLeftRight,
+  Search,
   Menu,
   Settings,
 } from 'lucide-react';
@@ -724,7 +727,50 @@ function ShortTerm() {
 function Financial({ tasks }: { tasks: Task[] }) {
   const total = tasks.reduce((s, t) => s + (t.cost ?? 0), 0);
   const done = tasks.reduce((s, t) => s + (t.cost ?? 0) * t.progress / 100, 0);
-  return <section className="page"><PageHeader title="Físico-financeiro" subtitle="Avanço físico x valor." /><div className="metric-grid"><Metric label="Valor vinculado demo" value={total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /><Metric label="Valor realizado demo" value={done.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /></div></section>;
+  const [budgetItems] = useState(() => {
+    const items = tasks.filter((task) => task.cost).slice(0, 30).map((task, index) => ({ id: `budget-${task.id}`, code: `1.${index + 1}`, description: task.packageName, value: task.cost ?? 0 }));
+    return items.length ? items : [{ id: 'budget-demo', code: '1.1', description: 'Orçamento ainda não importado', value: 500000 }];
+  });
+  const [budgetId, setBudgetId] = useState<string | null>(null);
+  const [activityIds, setActivityIds] = useState<string[]>([]);
+  const [search, setSearch] = useState('');
+  const [mappingOpen, setMappingOpen] = useState(false);
+  const [method, setMethod] = useState<'equal' | 'duration' | 'quantity' | 'manual'>('equal');
+  const [weights, setWeights] = useState<Record<string, number>>({});
+  const [allocations, setAllocations] = useState<Array<{ budgetId: string; taskId: string; weight: number; value: number }>>([]);
+  const selectedBudget = budgetItems.find((item) => item.id === budgetId);
+  const selectedTasks = tasks.filter((task) => activityIds.includes(task.id));
+  const linkedTasks = new Set(allocations.map((item) => item.taskId));
+  const visibleTasks = tasks.filter((task) => `${task.packageName} ${task.lot} ${task.lotMother}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')));
+  function openMapping() {
+    if (!selectedBudget || !selectedTasks.length) return;
+    const basis = selectedTasks.map((task) => method === 'duration' ? diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1 : method === 'quantity' ? task.quantity ?? 0 : 1);
+    const sum = basis.reduce((value, item) => value + item, 0) || selectedTasks.length;
+    setWeights(Object.fromEntries(selectedTasks.map((task, index) => [task.id, method === 'manual' ? 0 : basis[index] / sum * 100])));
+    setMappingOpen(true);
+  }
+  function redistribute(nextMethod: typeof method) {
+    setMethod(nextMethod);
+    const basis = selectedTasks.map((task) => nextMethod === 'duration' ? diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1 : nextMethod === 'quantity' ? task.quantity ?? 0 : 1);
+    const sum = basis.reduce((value, item) => value + item, 0) || selectedTasks.length;
+    setWeights(Object.fromEntries(selectedTasks.map((task, index) => [task.id, nextMethod === 'manual' ? weights[task.id] ?? 0 : basis[index] / sum * 100])));
+  }
+  const weightTotal = selectedTasks.reduce((sum, task) => sum + (weights[task.id] ?? 0), 0);
+  function saveMapping() {
+    if (!selectedBudget || Math.abs(weightTotal - 100) > .05) return;
+    const next = selectedTasks.map((task) => ({ budgetId: selectedBudget.id, taskId: task.id, weight: weights[task.id], value: selectedBudget.value * weights[task.id] / 100 }));
+    setAllocations([...allocations.filter((item) => item.budgetId !== selectedBudget.id), ...next]);
+    setActivityIds([]); setBudgetId(null); setMappingOpen(false);
+  }
+  return <section className="page financial-mapping"><PageHeader title="Mapeamento físico-financeiro" subtitle="Vincule a EAP orçamentária às atividades do cronograma." />
+    <div className="metric-grid financial-metrics"><Metric label="Orçamento mapeável" value={budgetItems.reduce((sum, item) => sum + item.value, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /><Metric label="Atividades" value={String(tasks.length)} /><Metric label="Vinculadas" value={`${linkedTasks.size}/${tasks.length}`} /><Metric label="Realizado" value={done.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} /></div>
+    <div className="mapping-shell">
+      <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FINANCEIRA</small><h3>EAP orçamentária</h3><span>{budgetItems.length} itens</span></div><div className="mapping-table-wrap"><table><thead><tr><th></th><th>Código / descrição</th><th>Valor</th><th>Status</th></tr></thead><tbody>{budgetItems.map((item) => { const links = allocations.filter((allocation) => allocation.budgetId === item.id); return <tr className={budgetId === item.id ? 'mapping-selected' : ''} key={item.id} onClick={() => setBudgetId(item.id)}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={links.length ? 'mapping-status linked' : 'mapping-status'}>{links.length ? 'Vinculado' : 'Livre'}</span></td></tr>})}</tbody></table></div></div>
+      <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FÍSICA</small><h3>Cronograma da obra</h3><span>{visibleTasks.length} atividades</span></div><label className="mapping-search"><Search size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar atividade, lote ou grupo..." /></label><div className="mapping-table-wrap"><table><thead><tr><th></th><th>Atividade</th><th>Lote</th><th>Prazo</th><th>Progresso</th><th>Status</th></tr></thead><tbody>{visibleTasks.map((task) => <tr className={activityIds.includes(task.id) ? 'mapping-selected' : ''} key={task.id} onClick={() => setActivityIds(activityIds.includes(task.id) ? activityIds.filter((id) => id !== task.id) : [...activityIds, task.id])}><td><input type="checkbox" checked={activityIds.includes(task.id)} readOnly /></td><td><small>{task.lotMother}</small><strong>{task.packageName}</strong></td><td>{task.lot}</td><td>{diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1}d</td><td>{task.progress}%</td><td><span className={linkedTasks.has(task.id) ? 'mapping-status linked' : 'mapping-status'}>{linkedTasks.has(task.id) ? 'Vinculada' : 'Livre'}</span></td></tr>)}</tbody></table></div></div>
+    </div>
+    <div className="mapping-action"><Link2 size={18} /><div><strong>{selectedBudget?.code ?? 'Selecione um item'} · {activityIds.length} atividade(s)</strong><small>Escolha um item financeiro e uma ou mais atividades.</small></div><button className="primary" disabled={!budgetId || !activityIds.length} onClick={openMapping}><ArrowLeftRight size={15} /> Vincular</button></div>
+    {mappingOpen && selectedBudget && <div className="mapping-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setMappingOpen(false)}><div className="mapping-modal"><div className="chart-drawer-head"><div><small>{selectedBudget.code}</small><h3>Vincular e ponderar</h3><span>{selectedBudget.description}</span></div><button className="drawer-close" onClick={() => setMappingOpen(false)}>×</button></div><div className="mapping-modal-body"><div className="mapping-methods">{([['equal', 'Igualitário'], ['duration', 'Por duração'], ['quantity', 'Por quantidade'], ['manual', 'Manual']] as const).map(([value, label]) => <button className={method === value ? 'active' : ''} onClick={() => redistribute(value)} key={value}>{label}</button>)}</div><table><thead><tr><th>Atividade / lote</th><th>Base física</th><th>Percentual</th><th>Valor</th></tr></thead><tbody>{selectedTasks.map((task) => <tr key={task.id}><td><strong>{task.packageName}</strong><small>{task.lot}</small></td><td>{method === 'duration' ? `${diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1} dias` : method === 'quantity' ? `${task.quantity ?? 0} ${task.unit ?? ''}` : method === 'equal' ? 'Divisão igual' : 'Definição manual'}</td><td>{method === 'manual' ? <input type="number" min="0" max="100" step=".01" value={(weights[task.id] ?? 0).toFixed(2)} onChange={(event) => setWeights({ ...weights, [task.id]: Number(event.target.value) })} /> : <b>{(weights[task.id] ?? 0).toFixed(2)}%</b>}</td><td>{(selectedBudget.value * (weights[task.id] ?? 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td></tr>)}</tbody></table><aside className="mapping-total"><span>Valor a distribuir</span><strong>{selectedBudget.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong><p>Soma dos pesos <b>{weightTotal.toFixed(2)}%</b></p><button disabled={Math.abs(weightTotal - 100) > .05} onClick={saveMapping}>Confirmar vínculo</button></aside></div></div></div>}
+  </section>;
 }
 
 function SettingsPage() {
