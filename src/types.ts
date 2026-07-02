@@ -38,6 +38,11 @@ export type Task = {
   quantity?: number;
   unit?: string;
   cost?: number;
+  service?: string;
+  duration?: number;
+  responsible?: string;
+  predecessors?: string[];
+  successors?: string[];
 };
 
 export type ScheduleDependency = {

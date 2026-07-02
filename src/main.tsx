@@ -71,7 +71,7 @@ function App() {
         {page === 'globalCalendar' && <AnnualCalendar projects={projectList} title="Calendário geral" subtitle="Feriados nacionais e datas compartilhadas entre todas as obras." events={calendarEvents.filter((event) => !event.projectId)} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId), ...events])} />}
         {page === 'workCalendar' && <AnnualCalendar projects={projectList} projectId={project.id} title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id))))} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId !== project.id && event.projectId), ...calendarEvents.filter((event) => !event.projectId), ...events.filter((event) => event.projectId === project.id)])} />}
         {page === 'dashboard' && <Dashboard tasks={tasks} />}
-        {page === 'schedule' && <Schedule tasks={tasks} />}
+        {page === 'schedule' && <Schedule tasks={tasks} setTasks={setTasks} />}
         {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'procurement' && <Procurement />}
         {page === 'medium' && <MediumPlan />}
@@ -235,11 +235,72 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <div className="metric"><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function Schedule({ tasks }: { tasks: Task[] }) {
+type ImportField = 'id' | 'packageName' | 'service' | 'lot' | 'lotMother' | 'startDate' | 'endDate' | 'duration' | 'cost' | 'predecessors' | 'successors' | 'responsible' | 'progress';
+const importFields: Array<{ key: ImportField; label: string; required: boolean; aliases: string[] }> = [
+  { key: 'id', label: 'ID', required: true, aliases: ['id'] },
+  { key: 'packageName', label: 'Pacote de trabalho', required: true, aliases: ['pacote de trabalho/tarefas', 'pacote de trabalho'] },
+  { key: 'service', label: 'Serviço', required: true, aliases: ['serviço', 'servico'] },
+  { key: 'lot', label: 'Lote', required: true, aliases: ['lote'] },
+  { key: 'lotMother', label: 'Lote mãe', required: true, aliases: ['lote mãe', 'grupo de replicação'] },
+  { key: 'startDate', label: 'Data de início', required: true, aliases: ['data de início', 'data de inicio'] },
+  { key: 'endDate', label: 'Data de término', required: true, aliases: ['data de término', 'data de termino'] },
+  { key: 'duration', label: 'Duração', required: true, aliases: ['duração', 'duracao'] },
+  { key: 'cost', label: 'Custo vinculado importado', required: false, aliases: ['custo vinculado atual'] },
+  { key: 'predecessors', label: 'Predecessoras', required: false, aliases: ['predecessoras'] },
+  { key: 'successors', label: 'Sucessoras', required: false, aliases: ['sucessoras'] },
+  { key: 'responsible', label: 'Responsáveis', required: false, aliases: ['responsáveis', 'responsaveis'] },
+  { key: 'progress', label: 'Realizado', required: true, aliases: ['realizado'] },
+];
+
+function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
+  const [importData, setImportData] = useState<{ fileName: string; rows: unknown[][]; headerRow: number } | null>(null);
+  const [mapping, setMapping] = useState<Partial<Record<ImportField, number>>>({});
+
   async function readFile(file: File) {
     const buffer = await file.arrayBuffer();
-    const workbook = XLSX.read(buffer);
-    alert(`Arquivo lido: ${file.name}\nAbas detectadas: ${workbook.SheetNames.join(', ')}\nPróximo passo: mapear colunas para o schema.`);
+    const workbook = XLSX.read(buffer, { cellDates: true });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: false });
+    const headerRow = 4;
+    setImportData({ fileName: file.name, rows, headerRow });
+    setMapping(detectMapping(rows[headerRow - 1] ?? []));
+  }
+  function detectMapping(headers: unknown[]) {
+    const result: Partial<Record<ImportField, number>> = {};
+    importFields.forEach((field) => {
+      const index = headers.findIndex((header) => field.aliases.includes(String(header).trim().toLocaleLowerCase('pt-BR')));
+      if (index >= 0) result[field.key] = index;
+    });
+    return result;
+  }
+  function updateHeaderRow(value: number) {
+    if (!importData) return;
+    const headerRow = Math.max(1, value);
+    setImportData({ ...importData, headerRow });
+    setMapping(detectMapping(importData.rows[headerRow - 1] ?? []));
+  }
+  function importSchedule() {
+    if (!importData) return;
+    const missing = importFields.filter((field) => field.required && mapping[field.key] === undefined);
+    if (missing.length) return;
+    const value = (row: unknown[], key: ImportField) => mapping[key] === undefined ? '' : row[mapping[key]!];
+    const parseImportedDate = (input: unknown) => {
+      const text = String(input ?? '').trim();
+      const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+      return match ? `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` : text.slice(0, 10);
+    };
+    const splitIds = (input: unknown) => String(input ?? '').split(/[;,]/).map((item) => item.trim()).filter((item) => item && item !== '-');
+    const imported = importData.rows.slice(importData.headerRow).map((row, index): Task | null => {
+      const id = String(value(row, 'id')).trim();
+      const startDate = parseImportedDate(value(row, 'startDate'));
+      const endDate = parseImportedDate(value(row, 'endDate'));
+      if (!id || !startDate || !endDate) return null;
+      const rawCost = String(value(row, 'cost')).replace(/[^\d,.-]/g, '');
+      const costText = rawCost.includes(',') ? rawCost.replace(/\./g, '').replace(',', '.') : rawCost;
+      return { id, packageName: String(value(row, 'packageName')).trim() || `Atividade ${index + 1}`, packageFamily: String(value(row, 'packageName')).trim().split(' ')[0] || 'OUTROS', service: String(value(row, 'service')).trim(), lot: String(value(row, 'lot')).trim() || 'Sem lote', lotMother: String(value(row, 'lotMother')).trim() || 'SEM GRUPO', startDate, endDate, duration: Number(value(row, 'duration')) || undefined, cost: Number(costText) || undefined, predecessors: splitIds(value(row, 'predecessors')), successors: splitIds(value(row, 'successors')), responsible: String(value(row, 'responsible')).trim(), progress: Math.min(100, Math.max(0, Number(String(value(row, 'progress')).replace(',', '.')) || 0)), color: '#4f46e5' };
+    }).filter((task): task is Task => task !== null);
+    setTasks(imported);
+    setImportData(null);
   }
 
   return (
@@ -255,6 +316,9 @@ function Schedule({ tasks }: { tasks: Task[] }) {
           <tbody>{tasks.map((t) => <tr key={t.id}><td>{t.lotMother}</td><td>{t.lot}</td><td>{t.packageName}</td><td>{t.startDate}</td><td>{t.endDate}</td><td>{t.progress}%</td></tr>)}</tbody>
         </table>
       </div>
+      <aside className={`import-drawer ${importData ? 'open' : ''}`}>
+        {importData && <><div className="chart-drawer-head"><div><small>Importar cronograma</small><h3>Associar colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="chart-drawer-body"><label className="import-header-row">Linha dos cabeçalhos<input type="number" min={1} value={importData.headerRow} onChange={(e) => updateHeaderRow(Number(e.target.value))} /></label><p className="import-help">Confirme onde está cada informação. Campos com * são indispensáveis.</p><div className="mapping-grid">{importFields.map((field) => <label key={field.key}>{field.label}{field.required ? ' *' : ''}<select value={mapping[field.key] ?? ''} onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value === '' ? undefined : Number(e.target.value) })}><option value="">Não importar</option>{(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => <option value={index} key={index}>{XLSX.utils.encode_col(index)} · {String(header) || '(sem título)'}</option>)}</select></label>)}</div><div className="import-summary"><strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong><span>{importFields.filter((field) => field.required && mapping[field.key] === undefined).length ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para importar.'}</span></div><button className="primary import-confirm" disabled={importFields.some((field) => field.required && mapping[field.key] === undefined)} onClick={importSchedule}>Importar cronograma</button></div></>}
+      </aside>
     </section>
   );
 }
@@ -265,7 +329,7 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   const [dependencyMode, setDependencyMode] = useState(true);
   const [showDeps, setShowDeps] = useState(true);
   const [snapWeek, setSnapWeek] = useState(false);
-  const [dependencies, setDependencies] = useState<ScheduleDependency[]>([]);
+  const [dependencies, setDependencies] = useState<ScheduleDependency[]>(() => tasks.flatMap((task) => (task.predecessors ?? []).map((from) => ({ from, to: task.id, type: 'FS' as const }))));
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [monthFormat, setMonthFormat] = useState<'index' | 'numeric'>('numeric');
