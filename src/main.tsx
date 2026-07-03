@@ -7,7 +7,7 @@ import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { isSupabaseConfigured } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
 import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
-import { loadPublishedMediumPlan, savePublishedMediumPlan } from './lib/mediumPlanRepository';
+import { loadMediumWindowState, loadPublishedMediumPlan, saveMediumWindowState, savePublishedMediumPlan } from './lib/mediumPlanRepository';
 import type { CalendarEvent, Page, Project, ScheduleDependency, Task } from './types';
 import './styles.css';
 
@@ -131,7 +131,7 @@ function App() {
         {page === 'schedule' && <Schedule tasks={tasks} setTasks={setTasks} />}
         {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'procurement' && <Procurement />}
-        {page === 'medium' && <MediumPlan tasks={tasks} onPublish={handleMediumPublish} />}
+        {page === 'medium' && <MediumPlan tasks={tasks} projectId={project.id} onPublish={handleMediumPublish} />}
         {page === 'short' && <ShortTerm tasks={latestMediumTasks.length ? latestMediumTasks : tasks} projectId={project.id} />}
         {page === 'financial' && <Financial tasks={tasks} />}
         {page === 'settings' && <SettingsPage />}
@@ -1569,7 +1569,7 @@ function Procurement() {
   );
 }
 
-function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Task[]) => void }) {
+function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId: string; onPublish: (tasks: Task[]) => void }) {
   type Unit = {
     id: string;
     parentId?: string;
@@ -1622,6 +1622,7 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
   const mediumPanRef = useRef<null | { x: number; y: number; left: number; top: number }>(null);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [monthPickerStartYear, setMonthPickerStartYear] = useState(() => parseDate(tasks[0]?.startDate ?? toIsoDate(new Date())).getFullYear());
+  const mediumWindowLoadedRef = useRef(false);
   useEffect(() => {
     const element = mediumTimelineScrollRef.current;
     if (!element) return;
@@ -1631,6 +1632,24 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
     observer.observe(element);
     return () => observer.disconnect();
   }, [windowData]);
+  useEffect(() => {
+    let active = true;
+    if (mediumWindowLoadedRef.current) return;
+    mediumWindowLoadedRef.current = true;
+    void loadMediumWindowState(projectId)
+      .then((state) => {
+        if (!active || !state) return;
+        if (state.analysisStart) setAnalysisStart(state.analysisStart);
+        if (state.windowData) setWindowData(state.windowData as Window);
+        if (state.units) setUnits(state.units as Record<string, Unit[]>);
+      })
+      .catch(() => {
+        if (active) return;
+      });
+    return () => {
+      active = false;
+    };
+  }, [tasks]);
   useEffect(() => {
     if (!windowData) return;
     const published = windowData.tasks.flatMap((task) =>
@@ -1650,7 +1669,20 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
       }))
     );
     onPublish(published);
-  }, [windowData, units, onPublish]);
+    void saveMediumWindowState(projectId, {
+      analysisStart,
+      windowData,
+      units
+    });
+  }, [windowData, units, analysisStart, projectId, onPublish]);
+  useEffect(() => {
+    if (!mediumWindowLoadedRef.current) return;
+    void saveMediumWindowState(projectId, {
+      analysisStart,
+      windowData,
+      units
+    });
+  }, [analysisStart, windowData, units, projectId]);
   function threeMonthsAfter(value: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return toIsoDate(addDays(new Date(), 90));
     const date = parseDate(value);
@@ -1667,13 +1699,13 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
         services: [...(task.services ?? [])]
       }))
       .sort((a, b) => `${a.lotMother}|${a.lot}|${a.packageName}`.localeCompare(`${b.lotMother}|${b.lot}|${b.packageName}`, 'pt-BR'));
-    setWindowData({
+    const windowSnapshot = {
       id: crypto.randomUUID(),
       startDate: analysisStart,
       endDate: analysisEnd,
       createdAt: new Date().toISOString(),
       tasks: snapshot
-    });
+    };
     const rootIds = new Map(snapshot.map((task) => [task.id, crypto.randomUUID()]));
     const resolveTaskId = (reference: string) => {
       if (rootIds.has(reference)) return reference;
@@ -1702,8 +1734,35 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
         })
       )
     );
+    const unitSnapshot = Object.fromEntries(
+      snapshot.map((task) => {
+        const predecessorUnits = (task.predecessors ?? []).map(resolveTaskId).filter((id): id is string => Boolean(id)).map((id) => rootIds.get(id)!).filter(Boolean);
+        return [
+          task.id,
+          [
+            {
+              id: rootIds.get(task.id)!,
+              name: task.lot,
+              weight: 100,
+              quantity: task.quantity ?? 0,
+              startDate: task.startDate,
+              endDate: task.endDate,
+              responsible: task.responsible ?? '',
+              predecessors: predecessorUnits
+            }
+          ]
+        ];
+      })
+    );
+    setWindowData(windowSnapshot);
+    setUnits(unitSnapshot);
     setSelectedTaskId(null);
     setSelectedMediumTaskIds([]);
+    void saveMediumWindowState(projectId, {
+      analysisStart,
+      windowData: windowSnapshot,
+      units: unitSnapshot
+    });
   }
   function addUnit(task: Task) {
     if (!newUnitName.trim()) return;

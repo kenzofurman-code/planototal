@@ -179,6 +179,27 @@ drop policy if exists "authenticated_medium_plan_snapshots_update" on medium_pla
 create policy "authenticated_medium_plan_snapshots_update" on medium_plan_snapshots
   for update to authenticated using (true) with check (true);
 
+create table if not exists medium_plan_windows (
+  project_key text primary key,
+  payload jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id) on delete set null
+);
+
+alter table medium_plan_windows enable row level security;
+
+drop policy if exists "authenticated_medium_plan_windows_select" on medium_plan_windows;
+create policy "authenticated_medium_plan_windows_select" on medium_plan_windows
+  for select to authenticated using (true);
+
+drop policy if exists "authenticated_medium_plan_windows_insert" on medium_plan_windows;
+create policy "authenticated_medium_plan_windows_insert" on medium_plan_windows
+  for insert to authenticated with check (true);
+
+drop policy if exists "authenticated_medium_plan_windows_update" on medium_plan_windows;
+create policy "authenticated_medium_plan_windows_update" on medium_plan_windows
+  for update to authenticated using (true) with check (true);
+
 create table if not exists microservice_templates (
   id uuid primary key default uuid_generate_v4(),
   project_id uuid references projects(id) on delete cascade,
