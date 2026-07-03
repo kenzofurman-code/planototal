@@ -56,7 +56,7 @@ const addDays = (date: Date, days: number): Date => {
 function StatCard({ title, value, color }: { title: string; value: string; color: string }) {
   return (
     <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between">
-      <span className="text-[10px] font-black text-slate-405 uppercase tracking-wider">{title}</span>
+      <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider">{title}</span>
       <span className={`text-2xl font-black ${color.replace('bg-', 'text-')} mt-1.5`}>{value}</span>
     </div>
   );
@@ -1706,7 +1706,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                         const isHalf = avg > 50;
                         const isStarted = avg > 0;
 
-                        let cellClass = 'text-slate-400';
+                        let cellClass = 'text-slate-500';
                         if (isCompleted) cellClass = 'bg-emerald-100 text-emerald-800 border-emerald-200';
                         else if (isHalf) cellClass = 'bg-indigo-50 text-indigo-800 border-indigo-200';
                         else if (isStarted) cellClass = 'bg-orange-50 text-orange-800 border-orange-200';
@@ -1918,7 +1918,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {(ppcHistory || []).map((h, i) => (
               <div key={i} className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex flex-col justify-between">
-                <div className="text-[9px] font-black text-slate-400 uppercase">{formatDateBR(h?.weekStart)}</div>
+                <div className="text-[9px] font-black text-slate-500 uppercase">{formatDateBR(h?.weekStart)}</div>
                 <div className="text-2xl font-black text-indigo-900 mt-1">{(h?.ppc || 0).toFixed(1)}%</div>
                 <div className="text-[9px] text-slate-500 font-bold uppercase mt-2">{h?.completed ?? 0} / {h?.totalPlanned ?? 0} concluídos</div>
               </div>
@@ -2005,7 +2005,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                       <td className="p-2.5 border-r text-center">
                         <div className="flex gap-[2px] justify-center">
                           {t.dailyWork.map((dw, i) => (
-                            <span key={i} className={`w-3.5 h-3.5 rounded-full text-[7px] font-black flex items-center justify-center border ${dw ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-100 text-slate-300 border-transparent'}`}>
+                            <span key={i} className={`w-3.5 h-3.5 rounded-full text-[7px] font-black flex items-center justify-center border ${dw ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
                               {['S','T','Q','Q','S'][i]}
                             </span>
                           ))}
@@ -2147,7 +2147,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                     <span className="block text-[11px] font-black text-slate-850 uppercase truncate">{team}</span>
                     <span className="block text-[8px] text-slate-500 font-mono mt-0.5">{phone || 'Sem telefone'}</span>
                   </div>
-                  <button onClick={() => handleSendWhatsApp(team)} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-705 text-white text-[9px] font-black uppercase rounded-lg transition cursor-pointer">Enviar Link</button>
+                  <button onClick={() => handleSendWhatsApp(team)} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[9px] font-black uppercase rounded-lg transition cursor-pointer">Enviar Link</button>
                 </div>
               );
             })}
