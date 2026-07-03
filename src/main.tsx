@@ -1551,6 +1551,8 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   const [unitParentId, setUnitParentId] = useState<string | null>(null);
   const mediumLabelsRef = useRef<HTMLDivElement | null>(null);
   const mediumTimelineRef = useRef<HTMLDivElement | null>(null);
+  const mediumTimelineScrollRef = useRef<HTMLDivElement | null>(null);
+  const [mediumViewportWidth, setMediumViewportWidth] = useState(900);
   const [showMediumDependencies, setShowMediumDependencies] = useState(true);
   const [mediumOrdering, setMediumOrdering] = useState<string | null>(null);
   const [mediumDrag, setMediumDrag] = useState<null | {
@@ -1572,6 +1574,15 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   const [mediumMotherSort, setMediumMotherSort] = useState<'import' | 'asc' | 'desc'>('import');
   const [mediumLotSort, setMediumLotSort] = useState<'import' | 'asc' | 'desc'>('import');
   const mediumPanRef = useRef<null | { x: number; y: number; left: number; top: number }>(null);
+  useEffect(() => {
+    const element = mediumTimelineScrollRef.current;
+    if (!element) return;
+    const update = () => setMediumViewportWidth(Math.max(320, element.clientWidth));
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [windowData]);
   function threeMonthsAfter(value: string) {
     const date = parseDate(value);
     date.setMonth(date.getMonth() + 3);
@@ -1882,8 +1893,10 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   const selectedTask = windowData?.tasks.find((task) => task.id === selectedTaskId);
   const activeUnitParentId = selectedTask ? ((units[selectedTask.id] ?? []).some((unit) => unit.id === unitParentId) ? unitParentId! : units[selectedTask.id]?.[0]?.id) : undefined;
   const activeSiblingWeight = selectedTask ? (units[selectedTask.id] ?? []).filter((unit) => unit.parentId === activeUnitParentId).reduce((sum, unit) => sum + unit.weight, 0) : 0;
-  const dayWidth = [0, 13, 18, 24][mediumZoom];
-  const timelineWidth = windowData ? Math.max(1100, (diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1) * dayWidth) : 0;
+  const windowDayCount = windowData ? diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1 : 90;
+  const visibleDaysByZoom = mediumZoom === 1 ? windowDayCount : mediumZoom === 2 ? Math.min(60, windowDayCount) : Math.min(30, windowDayCount);
+  const dayWidth = mediumViewportWidth / Math.max(1, visibleDaysByZoom);
+  const timelineWidth = windowData ? windowDayCount * dayWidth : 0;
   function leafUnits(taskId: string) {
     const list = units[taskId] ?? [];
     const parents = new Set(list.map((unit) => unit.parentId).filter(Boolean));
@@ -1935,7 +1948,7 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
       return mother || numericCompare(a.lot, b.lot, mediumLotSort);
     });
   const mediumRowLayout = new Map<string, { top: number; height: number }>();
-  const mediumUnitLayout = new Map<string, { x: number; y: number; width: number; height: number; lane: number }>();
+  const mediumUnitLayout = new Map<string, { x: number; y: number; width: number; height: number; lane: number; truncatedStart: boolean; truncatedEnd: boolean }>();
   const mediumGroupLayout = new Map<string, { top: number; height: number; laneCount: number; cardHeight: number }>();
   const mediumWindowStart = windowData?.startDate ?? analysisStart;
   let mediumRowTop = 80;
@@ -1954,12 +1967,18 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
     mediumGroupLayout.set(group.key, { top: mediumRowTop, height, laneCount, cardHeight });
     group.tasks.forEach((task) => mediumRowLayout.set(task.id, { top: mediumRowTop, height }));
     positioned.forEach(({ unit, lane }) => {
+      const clippedStart = unit.startDate < mediumWindowStart ? mediumWindowStart : unit.startDate;
+      const windowEnd = windowData?.endDate ?? unit.endDate;
+      const clippedEnd = unit.endDate > windowEnd ? windowEnd : unit.endDate;
+      const visible = clippedStart <= clippedEnd;
       mediumUnitLayout.set(unit.id, {
-        x: diffDays(parseDate(mediumWindowStart), parseDate(unit.startDate)) * dayWidth,
+        x: visible ? diffDays(parseDate(mediumWindowStart), parseDate(clippedStart)) * dayWidth : 0,
         y: mediumRowTop + 5 + lane * cardHeight + cardHeight / 2,
-        width: (diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1) * dayWidth,
+        width: visible ? (diffDays(parseDate(clippedStart), parseDate(clippedEnd)) + 1) * dayWidth : 0,
         height: cardHeight,
-        lane
+        lane,
+        truncatedStart: unit.startDate < mediumWindowStart,
+        truncatedEnd: unit.endDate > windowEnd
       });
     });
     mediumRowTop += height;
@@ -2117,6 +2136,7 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
               })}
             </div>
             <div
+              ref={mediumTimelineScrollRef}
               className="medium-timeline-scroll"
               onPointerDown={startMediumPan}
               onPointerMove={moveMediumPan}
@@ -2220,10 +2240,11 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                       leafUnits(task.id).map((unit) => {
                       const layout = mediumUnitLayout.get(unit.id)!;
                       const x = Math.max(0, layout.x);
-                      const width = Math.max(90, layout.width);
+                      const width = layout.width;
+                      if (width <= 0) return null;
                       return (
                         <button
-                          className={`medium-task-card ${layout.height < 36 ? 'compact' : ''} ${selectedMediumTaskIds.includes(task.id) ? 'selected' : ''} ${mediumDrag?.target === unit.id ? 'target' : ''}`}
+                          className={`medium-task-card ${layout.height < 36 || width < 90 ? 'compact' : ''} ${layout.truncatedStart ? 'truncated-start' : ''} ${layout.truncatedEnd ? 'truncated-end' : ''} ${selectedMediumTaskIds.includes(task.id) ? 'selected' : ''} ${mediumDrag?.target === unit.id ? 'target' : ''}`}
                           data-medium-task-id={task.id}
                           data-medium-unit-id={unit.id}
                           key={unit.id}
