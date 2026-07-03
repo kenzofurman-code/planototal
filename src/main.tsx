@@ -40,6 +40,7 @@ function App() {
   const [projectList, setProjectList] = useState<Project[]>(projects);
   const [project, setProject] = useState<Project>(projects[0]);
   const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [latestMediumTasks, setLatestMediumTasks] = useState<Task[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
 
   return (
@@ -86,8 +87,8 @@ function App() {
         {page === 'schedule' && <Schedule tasks={tasks} setTasks={setTasks} />}
         {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'procurement' && <Procurement />}
-        {page === 'medium' && <MediumPlan tasks={tasks} />}
-        {page === 'short' && <ShortTerm tasks={tasks} projectId={project.id} />}
+        {page === 'medium' && <MediumPlan tasks={tasks} onPublish={setLatestMediumTasks} />}
+        {page === 'short' && <ShortTerm tasks={latestMediumTasks.length ? latestMediumTasks : tasks} projectId={project.id} />}
         {page === 'financial' && <Financial tasks={tasks} />}
         {page === 'settings' && <SettingsPage />}
       </main>
@@ -1524,7 +1525,7 @@ function Procurement() {
   );
 }
 
-function MediumPlan({ tasks }: { tasks: Task[] }) {
+function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Task[]) => void }) {
   type Unit = {
     id: string;
     parentId?: string;
@@ -1586,6 +1587,26 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
     observer.observe(element);
     return () => observer.disconnect();
   }, [windowData]);
+  useEffect(() => {
+    if (!windowData) return;
+    const published = windowData.tasks.flatMap((task) =>
+      leafUnits(task.id).map((unit) => ({
+        ...task,
+        id: `${task.id}:${unit.id}`,
+        lot: unit.name,
+        startDate: unit.startDate,
+        endDate: unit.endDate,
+        duration: diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1,
+        quantity: unit.quantity || task.quantity,
+        responsible: unit.responsible || task.responsible,
+        predecessors: (unit.predecessors ?? []).map((id) => {
+          const owner = Object.entries(units).find(([, list]) => list.some((item) => item.id === id))?.[0];
+          return owner ? `${owner}:${id}` : id;
+        })
+      }))
+    );
+    onPublish(published);
+  }, [windowData, units, onPublish]);
   function threeMonthsAfter(value: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return toIsoDate(addDays(new Date(), 90));
     const date = parseDate(value);
