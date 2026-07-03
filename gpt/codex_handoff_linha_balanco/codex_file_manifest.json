@@ -1,0 +1,163 @@
+{
+  "created_at": "2026-07-02",
+  "purpose": "Pacote de handoff para Codex - projeto Linha de Balanço / Planejamento Integrado",
+  "source_files": [
+    {
+      "file": "Cronograma Longo prazo Nizza V00 (Término Cliente).pdf",
+      "type": "cronograma base",
+      "codex_note": "Usar como referencia visual e de estrutura de grupos/lotes; nao usar PDF como importador principal."
+    },
+    {
+      "file": "REQUISIÇÕES POR NÍVEL.xlsx",
+      "type": "compras/requisicoes",
+      "codex_note": "CSV samples extraidos por aba em csv_requisicoes_por_nivel/; usar para construir importador de compras."
+    },
+    {
+      "file": "Captura de tela 2026-07-01 223750.png",
+      "type": "referencia UI",
+      "codex_note": "Tela modelo de seleção/projetos/dash do app atual."
+    },
+    {
+      "file": "Captura de tela 2026-07-01 223837.png",
+      "type": "referencia UI",
+      "codex_note": "Tela modelo de cronograma/tabela/importacao do app atual."
+    },
+    {
+      "file": "previa_motor_linha_balanco_v6_linhas_fixas.html",
+      "type": "prototipo validado",
+      "codex_note": "Referencia de comportamento do visualizador; converter fielmente para React."
+    },
+    {
+      "file": "linha-balanco-planejamento-v02-completo.zip",
+      "type": "codigo React/Vite v0.2",
+      "codex_note": "Base atual para evoluir; comparar com prototipos HTML para corrigir gaps."
+    }
+  ],
+  "xlsx_sheets": [
+    {
+      "sheet": "Solicitações",
+      "csv": "Solicita_es.csv",
+      "sample_rows_exported": 500,
+      "sample_cols": 9,
+      "header_preview": [
+        "00650 - PIEMONTE P78 CARNEIRO LOBO SPE LTDA",
+        "",
+        "Requisição de Materiais e Serviços",
+        "Emissão:",
+        "46112",
+        "0.54106481481721858",
+        "Página: 1 / 1"
+      ]
+    },
+    {
+      "sheet": "Approvo ocorrências",
+      "csv": "Approvo_ocorr_ncias.csv",
+      "sample_rows_exported": 500,
+      "sample_cols": 11,
+      "header_preview": [
+        "Número do documento",
+        "Ação",
+        "Data/Hora",
+        "Aprovador",
+        "Motivo da operação",
+        "Tipo de documento",
+        "Data do documento",
+        "Valor (R$)",
+        "Filial",
+        "Agente",
+        "Solicitante"
+      ]
+    },
+    {
+      "sheet": "Approvo documentos",
+      "csv": "Approvo_documentos.csv",
+      "sample_rows_exported": 500,
+      "sample_cols": 15,
+      "header_preview": [
+        "Concat",
+        "",
+        "Número",
+        "Tipo de documento",
+        "Data",
+        "Status",
+        "Valor (R$)",
+        "Filial",
+        "Agente",
+        "Solicitante",
+        "Data de envio para aprovação",
+        "Classe financeira",
+        "Centro de custo",
+        "Projeto",
+        "Regra de aprovação"
+      ]
+    },
+    {
+      "sheet": "Follow solicitação",
+      "csv": "Follow_solicita_o.csv",
+      "sample_rows_exported": 500,
+      "sample_cols": 50,
+      "header_preview": []
+    },
+    {
+      "sheet": "Controle",
+      "csv": "Controle.csv",
+      "sample_rows_exported": 500,
+      "sample_cols": 21,
+      "header_preview": [
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
+        "Solicitação de Obra",
+        "",
+        "Mapa de Cotação",
+        "",
+        "Pedido de compra",
+        "",
+        "Contrato de Cotação e Materiais"
+      ]
+    },
+    {
+      "sheet": "Follow PEdidos",
+      "csv": "Follow_PEdidos.csv",
+      "sample_rows_exported": 500,
+      "sample_cols": 29,
+      "header_preview": [
+        "concatpedido",
+        "Filial",
+        "Nome Filial",
+        "Número do pedido",
+        "Série",
+        "Nr.Processo",
+        "Situação do Item",
+        "Dt.Emissão",
+        "Cód.Agente",
+        "Nome Fantasia",
+        "Cond.Pagto.",
+        "Contato",
+        "Situação do Pedido",
+        "Tipo de Preço",
+        "Total Pedido Compra",
+        "Item Pedido",
+        "Cód. Item",
+        "Cód.Alternativo",
+        "Descrição do Item",
+        "Unid."
+      ]
+    }
+  ],
+  "directories": {
+    "source/": "copias dos arquivos fonte e zips",
+    "csv_requisicoes_por_nivel/": "amostras CSV das abas do XLSX para Codex ler rapidamente",
+    "screenshots/": "prints de referencia de UI"
+  }
+}
