@@ -455,6 +455,48 @@ drop policy if exists "public_short_term_state_access" on short_term_state;
 create policy "public_short_term_state_access" on short_term_state
   for all to anon using (true) with check (true);
 
+create table if not exists app_users (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text not null,
+  created_at timestamptz not null default now()
+);
+
+create or replace function public.register_app_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.app_users (id, email) values (new.id, coalesce(new.email, ''))
+  on conflict (id) do update set email = excluded.email;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created after insert or update of email on auth.users
+for each row execute procedure public.register_app_user();
+
+insert into public.app_users (id, email)
+select id, coalesce(email, '') from auth.users
+on conflict (id) do update set email = excluded.email;
+
+alter table app_users enable row level security;
+drop policy if exists "public_app_users_access" on app_users;
+create policy "public_app_users_access" on app_users for select to anon, authenticated using (true);
+
+create table if not exists user_project_access (
+  user_id uuid not null references auth.users(id) on delete cascade,
+  project_key text not null references projects(project_key) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (user_id, project_key)
+);
+
+alter table user_project_access enable row level security;
+drop policy if exists "public_user_project_access" on user_project_access;
+create policy "public_user_project_access" on user_project_access
+  for all to anon, authenticated using (true) with check (true);
+
 create index if not exists idx_schedule_tasks_project on schedule_tasks(project_id, version_id);
 create unique index if not exists idx_schedule_tasks_project_external on schedule_tasks(project_key, external_id);
 create index if not exists idx_procurement_cards_project on procurement_cards(project_id);

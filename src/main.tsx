@@ -8,9 +8,11 @@ import { saveCalendarEvents } from './lib/calendarRepository';
 import { loadLineBalanceData, saveLineBalanceData } from './lib/lineBalanceRepository';
 import { saveProject } from './lib/projectRepository';
 import { saveScheduleTasks } from './lib/scheduleRepository';
-import { isSupabaseConfigured } from './lib/supabase';
+import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
 import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
+import { AuthGate } from './components/AuthGate';
+import { setProjectAccess } from './lib/accessRepository';
 import { loadMediumWindowState, loadPublishedMediumPlan, saveMediumWindowState, savePublishedMediumPlan } from './lib/mediumPlanRepository';
 import { loadWorkspace } from './lib/workspaceRepository';
 import type { CalendarEvent, Page, Project, ScheduleDependency, Task } from './types';
@@ -41,7 +43,7 @@ const zoomPx: Record<number, number> = {
   7: 24
 };
 
-function App() {
+function App({ userId }: { userId: string }) {
   const [collapsed, setCollapsed] = useState(true);
   const [page, setPage] = useState<Page>('projects');
   const [projectList, setProjectList] = useState<Project[]>([]);
@@ -79,7 +81,7 @@ function App() {
     const timeout = new Promise<never>((_, reject) => {
       window.setTimeout(() => reject(new Error('Tempo limite excedido ao conectar com o Supabase.')), 15000);
     });
-    void Promise.race([loadWorkspace('all'), timeout])
+    void Promise.race([loadWorkspace(userId), timeout])
       .then((workspace) => {
         if (!active) return;
         if (workspace?.projects?.length) {
@@ -111,7 +113,7 @@ function App() {
     return () => {
       active = false;
     };
-  }, [workspaceReload]);
+  }, [workspaceReload, userId]);
 
   useEffect(() => {
     if (!workspaceLoaded || !project) return;
@@ -147,6 +149,7 @@ function App() {
     setCreatingFirstProject(true);
     try {
       await saveProject(created);
+      await setProjectAccess(userId, created.id, true);
       setProjectList((current) => [...current, created]);
       setProject(created);
       setPage('projects');
@@ -199,7 +202,10 @@ function App() {
             <strong>{project.name}</strong>
             <span>{project.address}</span>
           </div>
-          <b className="pill">{isSupabaseConfigured ? 'Supabase conectado' : 'Modo demo local'}</b>
+          <div className="topbar-session">
+            <b className="pill">{isSupabaseConfigured ? 'Supabase conectado' : 'Modo demo local'}</b>
+            <button onClick={() => void supabase?.auth.signOut()}>Sair</button>
+          </div>
         </header>
 
         {page === 'projects' && (
@@ -3106,4 +3112,6 @@ function SettingsPage() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <AuthGate>{(userId) => <App userId={userId} />}</AuthGate>
+);

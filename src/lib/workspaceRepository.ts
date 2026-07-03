@@ -60,12 +60,13 @@ function mapCalendarEvent(row: Record<string, any>): CalendarEvent {
   };
 }
 
-export async function loadWorkspace(projectKey: string): Promise<WorkspaceSnapshot | null> {
+export async function loadWorkspace(userId: string): Promise<WorkspaceSnapshot | null> {
   if (!supabase) return null;
-  const [projectsRes, tasksRes, calendarRes] = await Promise.all([
+  const [projectsRes, tasksRes, calendarRes, accessRes] = await Promise.all([
     supabase.from('projects').select('*').order('created_at', { ascending: true }),
     supabase.from('schedule_tasks').select('*').order('created_at', { ascending: true }),
-    supabase.from('calendar_events').select('*').order('created_at', { ascending: true })
+    supabase.from('calendar_events').select('*').order('created_at', { ascending: true }),
+    supabase.from('user_project_access').select('project_key').eq('user_id', userId)
   ]);
   if (projectsRes.error) {
     throw new Error(`projects: ${projectsRes.error.message}${projectsRes.error.hint ? ` (${projectsRes.error.hint})` : ''} [${projectsRes.error.code}]`);
@@ -76,9 +77,13 @@ export async function loadWorkspace(projectKey: string): Promise<WorkspaceSnapsh
   if (calendarRes.error) {
     throw new Error(`calendar_events: ${calendarRes.error.message}${calendarRes.error.hint ? ` (${calendarRes.error.hint})` : ''} [${calendarRes.error.code}]`);
   }
+  if (accessRes.error) {
+    throw new Error(`user_project_access: ${accessRes.error.message}${accessRes.error.hint ? ` (${accessRes.error.hint})` : ''} [${accessRes.error.code}]`);
+  }
+  const allowed = new Set((accessRes.data ?? []).map((row) => row.project_key));
   return {
-    projects: (projectsRes.data ?? []).map(mapProject),
-    tasks: (tasksRes.data ?? []).map(mapTask),
-    calendarEvents: (calendarRes.data ?? []).map(mapCalendarEvent)
+    projects: (projectsRes.data ?? []).filter((row) => allowed.has(row.project_key)).map(mapProject),
+    tasks: (tasksRes.data ?? []).filter((row) => allowed.has(row.project_key)).map(mapTask),
+    calendarEvents: (calendarRes.data ?? []).filter((row) => !row.project_key || allowed.has(row.project_key)).map(mapCalendarEvent)
   };
 }
