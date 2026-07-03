@@ -2029,6 +2029,24 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
     );
   }
 
+  function handleAddTeam() {
+    const val = newTeamName.trim();
+    if (!val) return;
+    if (teams.map(t => t.toLowerCase()).includes(val.toLowerCase())) return;
+    setTeams([...teams, val.toUpperCase()]);
+    setNewTeamName('');
+    setNotification({ message: 'Equipe registrada!', type: 'success' });
+  }
+
+  function handleAddDelayReason() {
+    const val = newDelayReason.trim();
+    if (!val) return;
+    if (delayReasons.map(r => r.toLowerCase()).includes(val.toLowerCase())) return;
+    setDelayReasons([...delayReasons, val.toUpperCase()]);
+    setNewDelayReason('');
+    setNotification({ message: 'Causa de atraso registrada!', type: 'success' });
+  }
+
   function renderConfig() {
     return (
       <div className="space-y-6 animate-in fade-in duration-300 pb-20">
@@ -2087,23 +2105,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
     );
   }
 
-  const handleAddTeam = () => {
-    const val = newTeamName.trim();
-    if (!val) return;
-    if (teams.map(t => t.toLowerCase()).includes(val.toLowerCase())) return;
-    setTeams([...teams, val.toUpperCase()]);
-    setNewTeamName('');
-    setNotification({ message: 'Equipe registrada!', type: 'success' });
-  };
 
-  const handleAddDelayReason = () => {
-    const val = newDelayReason.trim();
-    if (!val) return;
-    if (delayReasons.map(r => r.toLowerCase()).includes(val.toLowerCase())) return;
-    setDelayReasons([...delayReasons, val.toUpperCase()]);
-    setNewDelayReason('');
-    setNotification({ message: 'Causa de atraso registrada!', type: 'success' });
-  };
 
   // --- SUB-MODAIS INTERNOS ---
 
