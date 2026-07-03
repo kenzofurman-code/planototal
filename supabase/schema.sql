@@ -121,6 +121,12 @@ create table if not exists schedule_tasks (
   updated_at timestamptz default now()
 );
 
+alter table schedule_tasks add column if not exists color text;
+alter table schedule_tasks add column if not exists services jsonb default '[]'::jsonb;
+alter table schedule_tasks add column if not exists predecessors jsonb default '[]'::jsonb;
+alter table schedule_tasks add column if not exists successors jsonb default '[]'::jsonb;
+alter table schedule_tasks add column if not exists lane integer;
+
 alter table schedule_tasks enable row level security;
 drop policy if exists "authenticated_schedule_tasks_select" on schedule_tasks;
 create policy "authenticated_schedule_tasks_select" on schedule_tasks for select to authenticated using (true);
@@ -147,6 +153,9 @@ create table if not exists line_balance_settings (
   show_baseline boolean default true,
   show_dependencies boolean default true
 );
+
+alter table line_balance_settings add column if not exists payload jsonb default '{}'::jsonb;
+alter table line_balance_settings add column if not exists updated_at timestamptz default now();
 
 alter table line_balance_settings enable row level security;
 drop policy if exists "authenticated_line_balance_settings_select" on line_balance_settings;
@@ -204,6 +213,9 @@ create table if not exists schedule_dependencies (
   lag_days integer default 0,
   created_at timestamptz default now()
 );
+
+alter table schedule_dependencies alter column from_task_id type text using from_task_id::text;
+alter table schedule_dependencies alter column to_task_id type text using to_task_id::text;
 
 alter table schedule_dependencies enable row level security;
 drop policy if exists "authenticated_schedule_dependencies_select" on schedule_dependencies;

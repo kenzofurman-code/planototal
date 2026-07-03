@@ -47,6 +47,20 @@ function mapTask(row: Record<string, any>): Task {
   };
 }
 
+function restoreTaskColors(rows: Array<Record<string, any>>): Task[] {
+  const palette = ['#4f46e5', '#f97316', '#0f766e', '#a855f7', '#2563eb', '#ca8a04', '#dc2626', '#059669', '#7c3aed', '#475569'];
+  const packageIndexes = new Map<string, Map<string, number>>();
+  return rows.map((row) => {
+    const task = mapTask(row);
+    if (row.color) return task;
+    if (!packageIndexes.has(task.lotMother)) packageIndexes.set(task.lotMother, new Map());
+    const group = packageIndexes.get(task.lotMother)!;
+    if (!group.has(task.packageName)) group.set(task.packageName, group.size);
+    const index = group.get(task.packageName)!;
+    return { ...task, color: palette[index % palette.length], lane: task.lane ?? (index % 3) + 1 };
+  });
+}
+
 function mapCalendarEvent(row: Record<string, any>): CalendarEvent {
   return {
     id: row.id,
@@ -83,7 +97,7 @@ export async function loadWorkspace(userId: string): Promise<WorkspaceSnapshot |
   const allowed = new Set((accessRes.data ?? []).map((row) => row.project_key));
   return {
     projects: (projectsRes.data ?? []).filter((row) => allowed.has(row.project_key)).map(mapProject),
-    tasks: (tasksRes.data ?? []).filter((row) => allowed.has(row.project_key)).map(mapTask),
+    tasks: restoreTaskColors((tasksRes.data ?? []).filter((row) => allowed.has(row.project_key))),
     calendarEvents: (calendarRes.data ?? []).filter((row) => !row.project_key || allowed.has(row.project_key)).map(mapCalendarEvent)
   };
 }

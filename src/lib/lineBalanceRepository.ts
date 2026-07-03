@@ -37,8 +37,12 @@ export async function loadLineBalanceData(projectKey: string) {
   if (settingsRes.error) throw settingsRes.error;
   return {
     versions: (versionsRes.data?.payload as LineBalanceVersion[] | undefined) ?? null,
-    dependencies: (depsRes.data ?? []) as ScheduleDependency[],
-    settings: (settingsRes.data as Partial<LineBalanceSettings> | undefined) ?? null
+    dependencies: (depsRes.data ?? []).map((row) => ({
+      from: row.from_task_id,
+      to: row.to_task_id,
+      type: row.type as ScheduleDependency['type']
+    })),
+    settings: (settingsRes.data?.payload as Partial<LineBalanceSettings> | undefined) ?? null
   };
 }
 

@@ -7,7 +7,7 @@ import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { saveCalendarEvents } from './lib/calendarRepository';
 import { loadLineBalanceData, saveLineBalanceData } from './lib/lineBalanceRepository';
 import { saveProject } from './lib/projectRepository';
-import { saveScheduleTasks } from './lib/scheduleRepository';
+import { deleteProjectBudget, saveScheduleTasks } from './lib/scheduleRepository';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
 import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
@@ -233,7 +233,7 @@ function App({ userId }: { userId: string }) {
         {page === 'procurement' && <Procurement />}
         {page === 'medium' && <MediumPlan tasks={tasks} projectId={project.id} onPublish={handleMediumPublish} />}
         {page === 'short' && <ShortTerm tasks={latestMediumTasks.length ? latestMediumTasks : tasks} projectId={project.id} />}
-        {page === 'financial' && <Financial tasks={tasks} />}
+        {page === 'financial' && <Financial projectKey={project.id} tasks={tasks} setTasks={setTasks} />}
         {page === 'settings' && <SettingsPage />}
       </main>
     </div>
@@ -2822,10 +2822,10 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
   );
 }
 
-function Financial({ tasks }: { tasks: Task[] }) {
+function Financial({ projectKey, tasks, setTasks }: { projectKey: string; tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
   const total = tasks.reduce((s, t) => s + (t.cost ?? 0), 0);
   const done = tasks.reduce((s, t) => s + ((t.cost ?? 0) * t.progress) / 100, 0);
-  const [budgetItems] = useState(() => {
+  const [budgetItems, setBudgetItems] = useState(() => {
     const items = tasks
       .filter((task) => task.cost)
       .slice(0, 30)
@@ -2835,6 +2835,7 @@ function Financial({ tasks }: { tasks: Task[] }) {
         description: task.packageName,
         value: task.cost ?? 0
       }));
+    if (!items.length) return [];
     return items.length
       ? items
       : [
@@ -2884,9 +2885,23 @@ function Financial({ tasks }: { tasks: Task[] }) {
     setBudgetId(null);
     setMappingOpen(false);
   }
+  async function deleteBudget() {
+    if (!window.confirm('Excluir todo o orçamento desta obra? As atividades e datas do cronograma serão mantidas.')) return;
+    await deleteProjectBudget(projectKey);
+    setBudgetItems([]);
+    setTasks(tasks.map((task) => ({ ...task, cost: undefined })));
+    setAllocations([]);
+    setBudgetId(null);
+    setActivityIds([]);
+  }
   return (
     <section className="page financial-mapping">
       <PageHeader title="Mapeamento físico-financeiro" subtitle="Vincule a EAP orçamentária às atividades do cronograma." />
+      <div className="financial-delete-action">
+        <button className="danger-button" onClick={() => void deleteBudget()} disabled={!budgetItems.length}>
+          <Trash2 size={16} /> Excluir orçamento
+        </button>
+      </div>
       <div className="metric-grid financial-metrics">
         <Metric label="Orçamento mapeável" value={budgetItems.reduce((sum, item) => sum + item.value, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} />
         <Metric label="Atividades" value={String(tasks.length)} />

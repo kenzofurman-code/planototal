@@ -20,10 +20,31 @@ export async function saveScheduleTasks(projectKey: string, tasks: Task[]) {
     responsible_name: task.responsible ?? null,
     team_name: null,
     cost_estimated: task.cost ?? null,
+    color: task.color,
+    services: task.services ?? [],
+    predecessors: task.predecessors ?? [],
+    successors: task.successors ?? [],
+    lane: task.lane ?? null,
     status: 'planejado',
     source: 'import',
     updated_at: new Date().toISOString()
   }));
   const { error } = await supabase.from('schedule_tasks').upsert(rows, { onConflict: 'project_key,external_id' });
   if (error) throw error;
+}
+
+export async function deleteProjectBudget(projectKey: string) {
+  if (!supabase) return;
+  const tasksResult = await supabase.from('schedule_tasks').update({
+    cost_estimated: null,
+    updated_at: new Date().toISOString()
+  }).eq('project_key', projectKey);
+  if (tasksResult.error) throw tasksResult.error;
+
+  const projectResult = await supabase.from('projects').select('id').eq('project_key', projectKey).maybeSingle();
+  if (projectResult.error) throw projectResult.error;
+  if (projectResult.data?.id) {
+    const budgetResult = await supabase.from('budget_items').delete().eq('project_id', projectResult.data.id);
+    if (budgetResult.error) throw budgetResult.error;
+  }
 }
