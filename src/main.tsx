@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import * as XLSX from 'xlsx';
 import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2 } from 'lucide-react';
-import { projects, procurement, tasks as initialTasks } from './demoData';
+import { procurement } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { saveCalendarEvents } from './lib/calendarRepository';
 import { loadLineBalanceData, saveLineBalanceData } from './lib/lineBalanceRepository';
@@ -78,18 +78,18 @@ function App() {
           setProjectList(workspace.projects);
           setProject(workspace.projects[0]);
         } else {
-          setProjectList(projects);
-          setProject(projects[0]);
+          setProjectList([]);
+          setProject(null);
         }
-        setTasks(workspace?.tasks?.length ? workspace.tasks : initialTasks);
+        setTasks(workspace?.tasks?.length ? workspace.tasks : []);
         setCalendarEvents(workspace?.calendarEvents ?? []);
         setWorkspaceLoaded(true);
       })
       .catch(() => {
         if (!active) return;
-        setProjectList(projects);
-        setProject(projects[0]);
-        setTasks(initialTasks);
+        setProjectList([]);
+        setProject(null);
+        setTasks([]);
         setWorkspaceLoaded(true);
       });
     return () => {
@@ -858,7 +858,7 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
       name: 'Cronograma inicial · V00',
       createdAt: new Date().toISOString(),
       kind: 'scenario',
-      tasks: initialTasks.map((task) => ({ ...task }))
+      tasks: tasks.map((task) => ({ ...task }))
     }
   ]);
   const [selectedVersionId, setSelectedVersionId] = useState('v00');
