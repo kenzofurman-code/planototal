@@ -4,6 +4,8 @@ import * as XLSX from 'xlsx';
 import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2 } from 'lucide-react';
 import { projects, procurement, tasks as initialTasks } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
+import { saveCalendarEvents } from './lib/calendarRepository';
+import { saveProject } from './lib/projectRepository';
 import { isSupabaseConfigured } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
 import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
@@ -67,7 +69,7 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    void loadWorkspace('nizza')
+    void loadWorkspace('all')
       .then((workspace) => {
         if (!active) return;
         if (workspace?.projects?.length) {
@@ -153,6 +155,7 @@ function App() {
             onUpdate={(updated) => {
               setProjectList(projectList.map((item) => (item.id === updated.id ? updated : item)));
               if (project.id === updated.id) setProject(updated);
+              void saveProject(updated);
             }}
             onCalendar={() => setPage('globalCalendar')}
             onSelect={(p) => {
@@ -161,8 +164,8 @@ function App() {
             }}
           />
         )}
-        {page === 'globalCalendar' && <AnnualCalendar projects={projectList} title="Calendário geral" subtitle="Feriados nacionais e datas compartilhadas entre todas as obras." events={calendarEvents.filter((event) => !event.projectId)} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId), ...events])} />}
-        {page === 'workCalendar' && <AnnualCalendar projects={projectList} projectId={project.id} title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id))))} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId !== project.id && event.projectId), ...calendarEvents.filter((event) => !event.projectId), ...events.filter((event) => event.projectId === project.id)])} />}
+        {page === 'globalCalendar' && <AnnualCalendar projects={projectList} title="Calendário geral" subtitle="Feriados nacionais e datas compartilhadas entre todas as obras." events={calendarEvents.filter((event) => !event.projectId)} onChange={(events) => { const next = [...calendarEvents.filter((event) => event.projectId), ...events]; setCalendarEvents(next); void saveCalendarEvents('global', next); }} />}
+        {page === 'workCalendar' && <AnnualCalendar projects={projectList} projectId={project.id} title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id))))} onChange={(events) => { const next = [...calendarEvents.filter((event) => event.projectId !== project.id && event.projectId), ...calendarEvents.filter((event) => !event.projectId), ...events.filter((event) => event.projectId === project.id)]; setCalendarEvents(next); void saveCalendarEvents(project.id, next); }} />}
         {page === 'dashboard' && <Dashboard tasks={tasks} />}
         {page === 'schedule' && <Schedule tasks={tasks} setTasks={setTasks} />}
         {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}

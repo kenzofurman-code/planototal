@@ -63,16 +63,15 @@ function mapCalendarEvent(row: Record<string, any>): CalendarEvent {
 export async function loadWorkspace(projectKey: string): Promise<WorkspaceSnapshot | null> {
   if (!supabase) return null;
   const [projectsRes, tasksRes, calendarRes] = await Promise.all([
-    supabase.from('projects').select('*').eq('project_key', projectKey).maybeSingle(),
-    supabase.from('schedule_tasks').select('*').eq('project_key', projectKey).order('created_at', { ascending: true }),
-    supabase.from('calendar_events').select('*').eq('project_key', projectKey)
+    supabase.from('projects').select('*').order('created_at', { ascending: true }),
+    supabase.from('schedule_tasks').select('*').order('created_at', { ascending: true }),
+    supabase.from('calendar_events').select('*').order('created_at', { ascending: true })
   ]);
   if (projectsRes.error) throw projectsRes.error;
   if (tasksRes.error) throw tasksRes.error;
   if (calendarRes.error) throw calendarRes.error;
-  const project = projectsRes.data ? [mapProject(projectsRes.data)] : [];
   return {
-    projects: project,
+    projects: (projectsRes.data ?? []).map(mapProject),
     tasks: (tasksRes.data ?? []).map(mapTask),
     calendarEvents: (calendarRes.data ?? []).map(mapCalendarEvent)
   };
