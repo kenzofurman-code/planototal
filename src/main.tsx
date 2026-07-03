@@ -50,6 +50,8 @@ function App() {
   const [latestMediumTasks, setLatestMediumTasks] = useState<Task[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState('');
+  const [workspaceReload, setWorkspaceReload] = useState(0);
 
   // Interceptação do modo WhatsApp / Apontamento de Equipe de Campo
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -71,7 +73,12 @@ function App() {
 
   useEffect(() => {
     let active = true;
-    void loadWorkspace('all')
+    setWorkspaceLoaded(false);
+    setWorkspaceError('');
+    const timeout = new Promise<never>((_, reject) => {
+      window.setTimeout(() => reject(new Error('Tempo limite excedido ao conectar com o Supabase.')), 15000);
+    });
+    void Promise.race([loadWorkspace('all'), timeout])
       .then((workspace) => {
         if (!active) return;
         if (workspace?.projects?.length) {
@@ -85,17 +92,18 @@ function App() {
         setCalendarEvents(workspace?.calendarEvents ?? []);
         setWorkspaceLoaded(true);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!active) return;
         setProjectList([]);
         setProject(null);
         setTasks([]);
+        setWorkspaceError(error instanceof Error ? error.message : 'Não foi possível carregar o workspace.');
         setWorkspaceLoaded(true);
       });
     return () => {
       active = false;
     };
-  }, []);
+  }, [workspaceReload]);
 
   useEffect(() => {
     if (!workspaceLoaded || !project) return;
@@ -123,8 +131,28 @@ function App() {
     }
   }
 
-  if (!workspaceLoaded || !project) {
+  if (!workspaceLoaded) {
     return <div className="app"><main className="page"><p>Carregando workspace do Supabase...</p></main></div>;
+  }
+
+  if (workspaceError || !project) {
+    return (
+      <div className="app">
+        <main className="page">
+          <section className="panel" style={{ maxWidth: 720, margin: '48px auto' }}>
+            <h2>{workspaceError ? 'Não foi possível conectar ao Supabase' : 'Nenhum projeto encontrado'}</h2>
+            <p>
+              {workspaceError
+                ? workspaceError
+                : 'A conexão funcionou, mas a tabela projects está vazia. Cadastre ou importe ao menos um projeto no Supabase.'}
+            </p>
+            <button className="primary" onClick={() => setWorkspaceReload((value) => value + 1)}>
+              Tentar novamente
+            </button>
+          </section>
+        </main>
+      </div>
+    );
   }
 
   return (

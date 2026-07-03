@@ -17,6 +17,10 @@ create table if not exists projects (
   updated_at timestamptz default now()
 );
 
+alter table projects add column if not exists city text;
+alter table projects add column if not exists state text;
+alter table projects add column if not exists ibge_code text;
+
 alter table projects enable row level security;
 drop policy if exists "authenticated_projects_select" on projects;
 create policy "authenticated_projects_select" on projects for select to authenticated using (true);
@@ -24,6 +28,8 @@ drop policy if exists "authenticated_projects_insert" on projects;
 create policy "authenticated_projects_insert" on projects for insert to authenticated with check (true);
 drop policy if exists "authenticated_projects_update" on projects;
 create policy "authenticated_projects_update" on projects for update to authenticated using (true) with check (true);
+drop policy if exists "public_projects_access" on projects;
+create policy "public_projects_access" on projects for all to anon using (true) with check (true);
 
 create table if not exists schedule_imports (
   id uuid primary key default uuid_generate_v4(),
@@ -122,6 +128,8 @@ drop policy if exists "authenticated_schedule_tasks_insert" on schedule_tasks;
 create policy "authenticated_schedule_tasks_insert" on schedule_tasks for insert to authenticated with check (true);
 drop policy if exists "authenticated_schedule_tasks_update" on schedule_tasks;
 create policy "authenticated_schedule_tasks_update" on schedule_tasks for update to authenticated using (true) with check (true);
+drop policy if exists "public_schedule_tasks_access" on schedule_tasks;
+create policy "public_schedule_tasks_access" on schedule_tasks for all to anon using (true) with check (true);
 
 create table if not exists line_balance_settings (
   id uuid primary key default uuid_generate_v4(),
@@ -147,6 +155,8 @@ drop policy if exists "authenticated_line_balance_settings_insert" on line_balan
 create policy "authenticated_line_balance_settings_insert" on line_balance_settings for insert to authenticated with check (true);
 drop policy if exists "authenticated_line_balance_settings_update" on line_balance_settings;
 create policy "authenticated_line_balance_settings_update" on line_balance_settings for update to authenticated using (true) with check (true);
+drop policy if exists "public_line_balance_settings_access" on line_balance_settings;
+create policy "public_line_balance_settings_access" on line_balance_settings for all to anon using (true) with check (true);
 
 create table if not exists milestones (
   id uuid primary key default uuid_generate_v4(),
@@ -180,6 +190,8 @@ drop policy if exists "authenticated_calendar_events_insert" on calendar_events;
 create policy "authenticated_calendar_events_insert" on calendar_events for insert to authenticated with check (true);
 drop policy if exists "authenticated_calendar_events_update" on calendar_events;
 create policy "authenticated_calendar_events_update" on calendar_events for update to authenticated using (true) with check (true);
+drop policy if exists "public_calendar_events_access" on calendar_events;
+create policy "public_calendar_events_access" on calendar_events for all to anon using (true) with check (true);
 
 create table if not exists schedule_dependencies (
   id uuid primary key default uuid_generate_v4(),
@@ -200,6 +212,8 @@ drop policy if exists "authenticated_schedule_dependencies_insert" on schedule_d
 create policy "authenticated_schedule_dependencies_insert" on schedule_dependencies for insert to authenticated with check (true);
 drop policy if exists "authenticated_schedule_dependencies_update" on schedule_dependencies;
 create policy "authenticated_schedule_dependencies_update" on schedule_dependencies for update to authenticated using (true) with check (true);
+drop policy if exists "public_schedule_dependencies_access" on schedule_dependencies;
+create policy "public_schedule_dependencies_access" on schedule_dependencies for all to anon using (true) with check (true);
 
 create table if not exists line_balance_versions (
   project_key text primary key,
@@ -214,6 +228,8 @@ drop policy if exists "authenticated_line_balance_versions_insert" on line_balan
 create policy "authenticated_line_balance_versions_insert" on line_balance_versions for insert to authenticated with check (true);
 drop policy if exists "authenticated_line_balance_versions_update" on line_balance_versions;
 create policy "authenticated_line_balance_versions_update" on line_balance_versions for update to authenticated using (true) with check (true);
+drop policy if exists "public_line_balance_versions_access" on line_balance_versions;
+create policy "public_line_balance_versions_access" on line_balance_versions for all to anon using (true) with check (true);
 
 create table if not exists medium_plan_tasks (
   id uuid primary key default uuid_generate_v4(),
@@ -250,6 +266,9 @@ create policy "authenticated_medium_plan_snapshots_insert" on medium_plan_snapsh
 drop policy if exists "authenticated_medium_plan_snapshots_update" on medium_plan_snapshots;
 create policy "authenticated_medium_plan_snapshots_update" on medium_plan_snapshots
   for update to authenticated using (true) with check (true);
+drop policy if exists "public_medium_plan_snapshots_access" on medium_plan_snapshots;
+create policy "public_medium_plan_snapshots_access" on medium_plan_snapshots
+  for all to anon using (true) with check (true);
 
 create table if not exists medium_plan_windows (
   project_key text primary key,
@@ -271,6 +290,9 @@ create policy "authenticated_medium_plan_windows_insert" on medium_plan_windows
 drop policy if exists "authenticated_medium_plan_windows_update" on medium_plan_windows;
 create policy "authenticated_medium_plan_windows_update" on medium_plan_windows
   for update to authenticated using (true) with check (true);
+drop policy if exists "public_medium_plan_windows_access" on medium_plan_windows;
+create policy "public_medium_plan_windows_access" on medium_plan_windows
+  for all to anon using (true) with check (true);
 
 create table if not exists microservice_templates (
   id uuid primary key default uuid_generate_v4(),
@@ -428,6 +450,10 @@ create policy "authenticated_short_term_insert" on short_term_state
 drop policy if exists "authenticated_short_term_update" on short_term_state;
 create policy "authenticated_short_term_update" on short_term_state
   for update to authenticated using (true) with check (true);
+
+drop policy if exists "public_short_term_state_access" on short_term_state;
+create policy "public_short_term_state_access" on short_term_state
+  for all to anon using (true) with check (true);
 
 create index if not exists idx_schedule_tasks_project on schedule_tasks(project_id, version_id);
 create unique index if not exists idx_schedule_tasks_project_external on schedule_tasks(project_key, external_id);
