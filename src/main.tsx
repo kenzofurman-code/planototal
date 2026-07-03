@@ -50,10 +50,12 @@ function App() {
   const urlTeamName = urlParams.get('t') || '';
   const urlWeekStartDate = urlParams.get('w') || '';
 
-  if (isTeamMode && project) {
+  const urlProjectId = urlParams.get('u') || '';
+
+  if (isTeamMode) {
     return (
       <ShortTermTeamScreen 
-        projectId={project.id} 
+        projectId={urlProjectId || (project ? project.id : '')} 
         teamName={urlTeamName} 
         weekStartDate={urlWeekStartDate} 
       />

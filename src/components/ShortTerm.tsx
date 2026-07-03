@@ -62,7 +62,7 @@ function StatCard({ title, value, color }: { title: string; value: string; color
   );
 }
 
-function DaysSelector({ dailyWork, disabled, onChange }: { dailyWork: number[]; disabled?: boolean; onChange: (dw: number[]) => void }) {
+function DaysSelector({ dailyWork, disabled, onChange, currentWeekStart, weatherCache, projectCity }: { dailyWork: number[]; disabled?: boolean; onChange: (dw: number[]) => void; currentWeekStart: Date; weatherCache: any; projectCity: string }) {
   const toggleDay = (idx: number) => {
     if (disabled) return;
     const next = [...dailyWork];
@@ -70,22 +70,32 @@ function DaysSelector({ dailyWork, disabled, onChange }: { dailyWork: number[]; 
     onChange(next);
   };
   return (
-    <div className="flex gap-[3.5px] justify-center items-center h-8">
-      {['S', 'T', 'Q', 'Q', 'S'].map((day, idx) => (
-        <button
-          key={idx}
-          type="button"
-          disabled={disabled}
-          onClick={() => toggleDay(idx)}
-          className={`w-6 h-6 rounded-full text-[9px] font-black flex items-center justify-center transition active:scale-95 cursor-pointer border ${
-            dailyWork[idx] === 1
-              ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
-              : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-slate-405'
-          } disabled:opacity-50 disabled:cursor-default`}
-        >
-          {day}
-        </button>
-      ))}
+    <div className="flex gap-[3.5px] justify-center items-center">
+      {['S', 'T', 'Q', 'Q', 'S'].map((day, idx) => {
+        const dayDate = addDays(currentWeekStart, idx);
+        const dayStr = toISODate(dayDate);
+        const weather = weatherCache[`${projectCity.trim().toLowerCase()}_${dayStr}`];
+        const emoji = weather ? getWeatherEmoji(weather.icon) : '';
+        const tooltip = weather ? `${weather.conditions} (${weather.tempMin.toFixed(0)}°C - ${weather.tempMax.toFixed(0)}°C)` : 'Sem clima';
+
+        return (
+          <div key={idx} className="flex flex-col items-center gap-[1px]" title={tooltip}>
+            {emoji && <span className="text-[9px] leading-none mb-0.5 select-none">{emoji}</span>}
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => toggleDay(idx)}
+              className={`w-6 h-6 rounded-full text-[9px] font-black flex items-center justify-center transition active:scale-95 cursor-pointer border ${
+                dailyWork[idx] === 1
+                  ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
+                  : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-slate-400'
+              } disabled:opacity-50 disabled:cursor-default`}
+            >
+              {day}
+            </button>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1555,7 +1565,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                       </td>
 
                       <td className="p-3 border-r align-middle text-center bg-slate-50/10">
-                        <DaysSelector dailyWork={t.dailyWork} disabled={t.finalized} onChange={(newDW) => handleDailyWorkChange(t.id, newDW)} />
+                        <DaysSelector dailyWork={t.dailyWork} disabled={t.finalized} onChange={(newDW) => handleDailyWorkChange(t.id, newDW)} currentWeekStart={currentWeekStart} weatherCache={weatherCache} projectCity={projectCity} />
                       </td>
 
                       <td className="p-3 border-r align-middle">
