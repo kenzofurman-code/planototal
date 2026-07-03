@@ -398,5 +398,6 @@ create policy "authenticated_short_term_update" on short_term_state
   for update to authenticated using (true) with check (true);
 
 create index if not exists idx_schedule_tasks_project on schedule_tasks(project_id, version_id);
+create unique index if not exists idx_schedule_tasks_project_external on schedule_tasks(project_key, external_id);
 create index if not exists idx_procurement_cards_project on procurement_cards(project_id);
 create index if not exists idx_change_log_project on change_log(project_id, changed_at desc);
