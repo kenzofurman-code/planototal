@@ -43,6 +43,16 @@ export function AuthGate({ children }: { children: (userId: string) => React.Rea
     else if (mode === 'signup' && !result.data.session) setMessage('Cadastro realizado. Confirme o e-mail para entrar.');
   }
 
+  async function resetPassword() {
+    setMessage('');
+    if (!supabase) return setMessage('Supabase não configurado.');
+    if (!email.trim()) return setMessage('Informe seu e-mail para recuperar a senha.');
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: window.location.origin
+    });
+    setMessage(error ? error.message : 'Enviamos as instruções de recuperação para o seu e-mail.');
+  }
+
   return (
     <main className="auth-shell">
       <button className="admin-entry" onClick={() => setAdminOpen(true)}>Admin</button>
@@ -53,10 +63,17 @@ export function AuthGate({ children }: { children: (userId: string) => React.Rea
         <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>
           <label>E-mail<input required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
           <label>Senha<input required minLength={6} type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+          {mode === 'login' && <button className="forgot-password" type="button" onClick={() => void resetPassword()}>Esqueci minha senha</button>}
           {message && <p className="form-error">{message}</p>}
           <button className="primary" type="submit">{mode === 'login' ? 'Entrar' : 'Cadastrar'}</button>
         </form>
-        <button className="auth-switch" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage(''); }}>
+        <p className="auth-register-prompt">
+          {mode === 'login' ? 'Ainda não tem uma conta? ' : 'Já tem uma conta? '}
+          <button onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage(''); }}>
+            {mode === 'login' ? 'Crie agora mesmo!' : 'Entre agora!'}
+          </button>
+        </p>
+        <button className="auth-switch auth-switch-old" onClick={() => { setMode(mode === 'login' ? 'signup' : 'login'); setMessage(''); }}>
           {mode === 'login' ? 'Ainda não tenho cadastro' : 'Já tenho cadastro'}
         </button>
       </section>
@@ -124,4 +141,3 @@ function AdminScreen({ onExit }: { onExit: () => void }) {
     </main>
   );
 }
-

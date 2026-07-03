@@ -47,6 +47,10 @@ main { flex: 1; min-width: 0; }
 .auth-card label, .auth-modal label { display: grid; gap: 6px; color: #475569; font-size: 13px; font-weight: 650; }
 .auth-card input, .auth-modal input { border: 1px solid #dbe2ea; border-radius: 10px; padding: 11px 12px; }
 .auth-switch { width: 100%; margin-top: 12px; border: 0; color: #4f46e5; }
+.auth-switch-old { display: none; }
+.forgot-password { justify-self: end; margin-top: -8px; padding: 0; border: 0; color: #4f46e5; background: transparent; font-size: 13px; }
+.auth-register-prompt { margin: 16px 0 0; text-align: center; font-size: 14px; }
+.auth-register-prompt button { padding: 0; border: 0; color: #4f46e5; background: transparent; font-weight: 700; }
 .auth-modal-backdrop { position: fixed; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(15,23,42,.55); }
 .auth-modal { position: relative; width: min(400px, 100%); padding: 28px; border-radius: 18px; background: #fff; }
 .admin-page { min-height: 100vh; padding: 28px; display: grid; align-content: start; gap: 18px; background: #f5f6fb; }
