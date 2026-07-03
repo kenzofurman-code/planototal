@@ -5,6 +5,7 @@ import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSq
 import { projects, procurement, tasks as initialTasks } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { saveCalendarEvents } from './lib/calendarRepository';
+import { loadLineBalanceData, saveLineBalanceData } from './lib/lineBalanceRepository';
 import { saveProject } from './lib/projectRepository';
 import { saveScheduleTasks } from './lib/scheduleRepository';
 import { isSupabaseConfigured } from './lib/supabase';
@@ -169,7 +170,7 @@ function App() {
         {page === 'workCalendar' && <AnnualCalendar projects={projectList} projectId={project.id} title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id))))} onChange={(events) => { const next = [...calendarEvents.filter((event) => event.projectId !== project.id && event.projectId), ...calendarEvents.filter((event) => !event.projectId), ...events.filter((event) => event.projectId === project.id)]; setCalendarEvents(next); void saveCalendarEvents(project.id, next); }} />}
         {page === 'dashboard' && <Dashboard tasks={tasks} />}
         {page === 'schedule' && <Schedule projectKey={project.id} tasks={tasks} setTasks={setTasks} />}
-        {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
+        {page === 'line' && <LineBalance projectKey={project.id} tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'procurement' && <Procurement />}
         {page === 'medium' && <MediumPlan tasks={tasks} projectId={project.id} onPublish={handleMediumPublish} />}
         {page === 'short' && <ShortTerm tasks={latestMediumTasks.length ? latestMediumTasks : tasks} projectId={project.id} />}
@@ -824,7 +825,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
   );
 }
 
-function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (tasks: Task[]) => void; holidays: CalendarEvent[] }) {
+function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: string; tasks: Task[]; setTasks: (tasks: Task[]) => void; holidays: CalendarEvent[] }) {
   const [zoom, setZoom] = useState(3);
   const [editMode, setEditMode] = useState(true);
   const [dependencyMode, setDependencyMode] = useState(true);
@@ -894,6 +895,84 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   const [linkPoint, setLinkPoint] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const longPressRef = useRef<number | null>(null);
+  const lineBalanceReady = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    lineBalanceReady.current = false;
+    if (!projectKey) return;
+    void loadLineBalanceData(projectKey)
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (data.settings) {
+          setZoom(data.settings.zoom ?? 3);
+          setEditMode(data.settings.editMode ?? true);
+          setDependencyMode(data.settings.dependencyMode ?? true);
+          setShowDeps(data.settings.showDeps ?? true);
+          setSnapWeek(data.settings.snapWeek ?? false);
+          setMonthFormat(data.settings.monthFormat ?? 'numeric');
+          setWeekFormat(data.settings.weekFormat ?? 'day');
+          setGroupLines((data.settings.groupLines as Record<string, number>) ?? {});
+          setFamilyLane((data.settings.familyLane as Record<string, number>) ?? {});
+          setPackageLanes((data.settings.packageLanes as Record<string, number>) ?? {});
+          setPackageColors((data.settings.packageColors as Record<string, string>) ?? {});
+          setGroupOrder((data.settings.groupOrder as string[]) ?? []);
+          setLotOrder((data.settings.lotOrder as Record<string, string[]>) ?? {});
+        }
+        if (data.versions?.length) {
+          setVersions(data.versions);
+          setSelectedVersionId(data.versions[0].id);
+        }
+        if (data.dependencies?.length) setDependencies(data.dependencies);
+        lineBalanceReady.current = true;
+      })
+      .catch(() => {
+        lineBalanceReady.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectKey]);
+
+  useEffect(() => {
+    if (!projectKey || !lineBalanceReady.current) return;
+    void saveLineBalanceData(projectKey, {
+      versions,
+      dependencies,
+      settings: {
+        zoom,
+        editMode,
+        dependencyMode,
+        showDeps,
+        snapWeek,
+        monthFormat,
+        weekFormat,
+        groupLines,
+        familyLane,
+        packageLanes,
+        packageColors,
+        groupOrder,
+        lotOrder
+      }
+    });
+  }, [
+    projectKey,
+    versions,
+    dependencies,
+    zoom,
+    editMode,
+    dependencyMode,
+    showDeps,
+    snapWeek,
+    monthFormat,
+    weekFormat,
+    groupLines,
+    familyLane,
+    packageLanes,
+    packageColors,
+    groupOrder,
+    lotOrder
+  ]);
 
   const taskGroups = Array.from(new Set(tasks.map((t) => t.lotMother)));
   const groups = [...groupOrder.filter((group) => taskGroups.includes(group)), ...taskGroups.filter((group) => !groupOrder.includes(group))];

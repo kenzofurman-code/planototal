@@ -126,6 +126,7 @@ create policy "authenticated_schedule_tasks_update" on schedule_tasks for update
 create table if not exists line_balance_settings (
   id uuid primary key default uuid_generate_v4(),
   project_id uuid references projects(id) on delete cascade,
+  project_key text unique,
   version_id uuid references schedule_versions(id) on delete cascade,
   project_start_date date,
   default_zoom integer default 3,
@@ -138,6 +139,14 @@ create table if not exists line_balance_settings (
   show_baseline boolean default true,
   show_dependencies boolean default true
 );
+
+alter table line_balance_settings enable row level security;
+drop policy if exists "authenticated_line_balance_settings_select" on line_balance_settings;
+create policy "authenticated_line_balance_settings_select" on line_balance_settings for select to authenticated using (true);
+drop policy if exists "authenticated_line_balance_settings_insert" on line_balance_settings;
+create policy "authenticated_line_balance_settings_insert" on line_balance_settings for insert to authenticated with check (true);
+drop policy if exists "authenticated_line_balance_settings_update" on line_balance_settings;
+create policy "authenticated_line_balance_settings_update" on line_balance_settings for update to authenticated using (true) with check (true);
 
 create table if not exists milestones (
   id uuid primary key default uuid_generate_v4(),
@@ -175,6 +184,7 @@ create policy "authenticated_calendar_events_update" on calendar_events for upda
 create table if not exists schedule_dependencies (
   id uuid primary key default uuid_generate_v4(),
   project_id uuid references projects(id) on delete cascade,
+  project_key text,
   version_id uuid references schedule_versions(id) on delete cascade,
   from_task_id uuid,
   to_task_id uuid,
@@ -182,6 +192,28 @@ create table if not exists schedule_dependencies (
   lag_days integer default 0,
   created_at timestamptz default now()
 );
+
+alter table schedule_dependencies enable row level security;
+drop policy if exists "authenticated_schedule_dependencies_select" on schedule_dependencies;
+create policy "authenticated_schedule_dependencies_select" on schedule_dependencies for select to authenticated using (true);
+drop policy if exists "authenticated_schedule_dependencies_insert" on schedule_dependencies;
+create policy "authenticated_schedule_dependencies_insert" on schedule_dependencies for insert to authenticated with check (true);
+drop policy if exists "authenticated_schedule_dependencies_update" on schedule_dependencies;
+create policy "authenticated_schedule_dependencies_update" on schedule_dependencies for update to authenticated using (true) with check (true);
+
+create table if not exists line_balance_versions (
+  project_key text primary key,
+  payload jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table line_balance_versions enable row level security;
+drop policy if exists "authenticated_line_balance_versions_select" on line_balance_versions;
+create policy "authenticated_line_balance_versions_select" on line_balance_versions for select to authenticated using (true);
+drop policy if exists "authenticated_line_balance_versions_insert" on line_balance_versions;
+create policy "authenticated_line_balance_versions_insert" on line_balance_versions for insert to authenticated with check (true);
+drop policy if exists "authenticated_line_balance_versions_update" on line_balance_versions;
+create policy "authenticated_line_balance_versions_update" on line_balance_versions for update to authenticated using (true) with check (true);
 
 create table if not exists medium_plan_tasks (
   id uuid primary key default uuid_generate_v4(),
