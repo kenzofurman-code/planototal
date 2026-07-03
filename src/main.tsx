@@ -1886,18 +1886,41 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   });
   const maxSublotDepth = Math.max(0, ...visibleMediumTasks.flatMap((task) => leafUnits(task.id).map((unit) => unitPath(task.id, unit).length)), 0);
   const labelColumnWidth = 170 + maxSublotDepth * 145;
+  const mediumLotGroups = Array.from(
+    visibleMediumTasks.reduce((map, task) => {
+      const key = `${task.lotMother}||${task.lot}`;
+      const group = map.get(key) ?? { key, lotMother: task.lotMother, lot: task.lot, tasks: [] as Task[] };
+      group.tasks.push(task);
+      map.set(key, group);
+      return map;
+    }, new Map<string, { key: string; lotMother: string; lot: string; tasks: Task[] }>())
+  ).map(([, group]) => group);
   const mediumRowLayout = new Map<string, { top: number; height: number }>();
-  const mediumUnitLayout = new Map<string, { x: number; y: number; width: number }>();
+  const mediumUnitLayout = new Map<string, { x: number; y: number; width: number; height: number; lane: number }>();
+  const mediumGroupLayout = new Map<string, { top: number; height: number; laneCount: number; cardHeight: number }>();
   const mediumWindowStart = windowData?.startDate ?? analysisStart;
   let mediumRowTop = 80;
-  visibleMediumTasks.forEach((task) => {
-    const height = Math.max(76, leafUnits(task.id).length * 66 + 10);
-    mediumRowLayout.set(task.id, { top: mediumRowTop, height });
-    leafUnits(task.id).forEach((unit, index) => {
+  mediumLotGroups.forEach((group) => {
+    const entries = group.tasks.flatMap((task) => leafUnits(task.id).map((unit) => ({ task, unit }))).sort((a, b) => a.unit.startDate.localeCompare(b.unit.startDate));
+    const laneEnds: string[] = [];
+    const positioned = entries.map((entry) => {
+      let lane = laneEnds.findIndex((end) => end < entry.unit.startDate);
+      if (lane < 0) lane = laneEnds.length;
+      laneEnds[lane] = entry.unit.endDate;
+      return { ...entry, lane };
+    });
+    const laneCount = Math.max(1, laneEnds.length);
+    const height = 116;
+    const cardHeight = Math.max(18, Math.min(50, (height - 10) / laneCount));
+    mediumGroupLayout.set(group.key, { top: mediumRowTop, height, laneCount, cardHeight });
+    group.tasks.forEach((task) => mediumRowLayout.set(task.id, { top: mediumRowTop, height }));
+    positioned.forEach(({ unit, lane }) => {
       mediumUnitLayout.set(unit.id, {
         x: diffDays(parseDate(mediumWindowStart), parseDate(unit.startDate)) * dayWidth,
-        y: mediumRowTop + index * 66 + 34,
-        width: (diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1) * dayWidth
+        y: mediumRowTop + 5 + lane * cardHeight + cardHeight / 2,
+        width: (diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1) * dayWidth,
+        height: cardHeight,
+        lane
       });
     });
     mediumRowTop += height;
@@ -1995,40 +2018,38 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                   <b key={index}>Sublote {index + 1}</b>
                 ))}
               </div>
-              {visibleMediumTasks.map((task) => (
+              {mediumLotGroups.map((group) => {
+                const paths = group.tasks.flatMap((task) => leafUnits(task.id).map((unit) => unitPath(task.id, unit)));
+                return (
                 <div
                   draggable
-                  className={`medium-label-row ${mediumOrdering === task.id ? 'ordering' : ''}`}
-                  key={task.id}
-                  style={{
-                    height: Math.max(76, leafUnits(task.id).length * 66 + 10)
-                  }}
-                  onDragStart={() => setMediumOrdering(task.id)}
+                  className={`medium-label-row ${mediumOrdering === group.tasks[0].id ? 'ordering' : ''}`}
+                  key={group.key}
+                  style={{ height: mediumGroupLayout.get(group.key)?.height ?? 116 }}
+                  onDragStart={() => setMediumOrdering(group.tasks[0].id)}
                   onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => reorderMediumTask(task.id)}
+                  onDrop={() => reorderMediumTask(group.tasks[0].id)}
                   onDragEnd={() => setMediumOrdering(null)}
                 >
-                  {firstTaskByLot.get(`${task.lotMother}||${task.lot}`) === task.id && <span className="medium-parent-lot">⠿ {task.lot}</span>}
-                  {leafUnits(task.id).map((unit) => {
-                    const path = unitPath(task.id, unit);
-                    return (
-                      <div
-                        className="medium-location-grid medium-location-line"
-                        style={{
-                          gridTemplateColumns: `170px repeat(${maxSublotDepth},145px)`
-                        }}
-                        key={unit.id}
-                      >
-                        <span />
-                        {Array.from({ length: maxSublotDepth }).map((_, index) => (
-                          <span key={index}>{path[index]?.name ?? '—'}</span>
-                        ))}
-                      </div>
-                    );
-                  })}
-                  <button onClick={(event) => selectMediumTask(event, task.id)}>Abrir lote</button>
+                  <span className="medium-parent-lot">⠿ {group.lot}</span>
+                  <div className="medium-location-grid medium-location-line" style={{ gridTemplateColumns: `170px repeat(${maxSublotDepth},145px)` }}>
+                    <span />
+                    {Array.from({ length: maxSublotDepth }).map((_, index) => (
+                      <span key={index}>{Array.from(new Set(paths.map((path) => path[index]?.name).filter(Boolean))).join(', ') || '—'}</span>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => {
+                      const ids = group.tasks.map((task) => task.id);
+                      setSelectedMediumTaskIds(ids);
+                      setSelectedTaskId(ids[0] ?? null);
+                    }}
+                  >
+                    Abrir lote
+                  </button>
                 </div>
-              ))}
+                );
+              })}
             </div>
             <div
               className="medium-timeline-scroll"
@@ -2122,26 +2143,25 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                       </svg>
                     );
                   })()}
-                {visibleMediumTasks.map((task) => (
-                  <div
-                    className="medium-task-row"
-                    key={task.id}
-                    style={{
-                      height: Math.max(76, leafUnits(task.id).length * 66 + 10)
-                    }}
-                  >
-                    {leafUnits(task.id).map((unit, unitIndex) => {
-                      const x = Math.max(0, diffDays(parseDate(windowData.startDate), parseDate(unit.startDate))) * dayWidth;
-                      const width = Math.max(90, (diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1) * dayWidth);
+                {mediumLotGroups.map((group) => {
+                  const groupLayout = mediumGroupLayout.get(group.key)!;
+                  return (
+                  <div className="medium-task-row" key={group.key} style={{ height: groupLayout.height }}>
+                    {group.tasks.flatMap((task) =>
+                      leafUnits(task.id).map((unit) => {
+                      const layout = mediumUnitLayout.get(unit.id)!;
+                      const x = Math.max(0, layout.x);
+                      const width = Math.max(90, layout.width);
                       return (
                         <button
-                          className={`medium-task-card ${selectedMediumTaskIds.includes(task.id) ? 'selected' : ''} ${mediumDrag?.target === unit.id ? 'target' : ''}`}
+                          className={`medium-task-card ${layout.height < 36 ? 'compact' : ''} ${selectedMediumTaskIds.includes(task.id) ? 'selected' : ''} ${mediumDrag?.target === unit.id ? 'target' : ''}`}
                           data-medium-task-id={task.id}
                           data-medium-unit-id={unit.id}
                           key={unit.id}
                           style={{
                             left: x,
-                            top: unitIndex * 66,
+                            top: layout.y - groupLayout.top - layout.height / 2,
+                            height: layout.height,
                             width,
                             borderColor: task.color
                           }}
@@ -2157,9 +2177,10 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                           <em title="Alterar duração" onPointerDown={(event) => beginMediumDrag(event, task.id, unit, 'resize')} />
                         </button>
                       );
-                    })}
+                    }))}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
