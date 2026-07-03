@@ -157,6 +157,28 @@ create table if not exists medium_plan_tasks (
   progress_percent numeric default 0
 );
 
+create table if not exists medium_plan_snapshots (
+  project_key text primary key,
+  payload jsonb not null default '[]'::jsonb,
+  published_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id) on delete set null
+);
+
+alter table medium_plan_snapshots enable row level security;
+
+drop policy if exists "authenticated_medium_plan_snapshots_select" on medium_plan_snapshots;
+create policy "authenticated_medium_plan_snapshots_select" on medium_plan_snapshots
+  for select to authenticated using (true);
+
+drop policy if exists "authenticated_medium_plan_snapshots_insert" on medium_plan_snapshots;
+create policy "authenticated_medium_plan_snapshots_insert" on medium_plan_snapshots
+  for insert to authenticated with check (true);
+
+drop policy if exists "authenticated_medium_plan_snapshots_update" on medium_plan_snapshots;
+create policy "authenticated_medium_plan_snapshots_update" on medium_plan_snapshots
+  for update to authenticated using (true) with check (true);
+
 create table if not exists microservice_templates (
   id uuid primary key default uuid_generate_v4(),
   project_id uuid references projects(id) on delete cascade,

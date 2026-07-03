@@ -7,6 +7,7 @@ import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { isSupabaseConfigured } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
 import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
+import { loadPublishedMediumPlan, savePublishedMediumPlan } from './lib/mediumPlanRepository';
 import type { CalendarEvent, Page, Project, ScheduleDependency, Task } from './types';
 import './styles.css';
 
@@ -62,6 +63,30 @@ function App() {
     );
   }
 
+  useEffect(() => {
+    let active = true;
+    void loadPublishedMediumPlan(project.id)
+      .then((published) => {
+        if (!active || !published?.length) return;
+        setLatestMediumTasks(published);
+      })
+      .catch(() => {
+        if (active) setLatestMediumTasks([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [project.id]);
+
+  async function handleMediumPublish(published: Task[]) {
+    setLatestMediumTasks(published);
+    try {
+      await savePublishedMediumPlan(project.id, published);
+    } catch {
+      // Mantém o fluxo local mesmo se o snapshot persistido falhar.
+    }
+  }
+
   return (
     <div className="app">
       <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
@@ -106,8 +131,8 @@ function App() {
         {page === 'schedule' && <Schedule tasks={tasks} setTasks={setTasks} />}
         {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'procurement' && <Procurement />}
-        {page === 'medium' && <MediumPlan tasks={tasks} onPublish={setLatestMediumTasks} />}
-        {page === 'short' && <ShortTerm tasks={latestMediumTasks.length ? latestMediumTasks : tasks} projectId={project.id} setTasks={setTasks} />}
+        {page === 'medium' && <MediumPlan tasks={tasks} onPublish={handleMediumPublish} />}
+        {page === 'short' && <ShortTerm tasks={latestMediumTasks.length ? latestMediumTasks : tasks} projectId={project.id} />}
         {page === 'financial' && <Financial tasks={tasks} />}
         {page === 'settings' && <SettingsPage />}
       </main>
