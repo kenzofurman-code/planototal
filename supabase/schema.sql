@@ -2,6 +2,7 @@ create extension if not exists "uuid-ossp";
 
 create table if not exists projects (
   id uuid primary key default uuid_generate_v4(),
+  project_key text unique,
   name text not null,
   image_url text,
   address text,
@@ -15,6 +16,14 @@ create table if not exists projects (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+alter table projects enable row level security;
+drop policy if exists "authenticated_projects_select" on projects;
+create policy "authenticated_projects_select" on projects for select to authenticated using (true);
+drop policy if exists "authenticated_projects_insert" on projects;
+create policy "authenticated_projects_insert" on projects for insert to authenticated with check (true);
+drop policy if exists "authenticated_projects_update" on projects;
+create policy "authenticated_projects_update" on projects for update to authenticated using (true) with check (true);
 
 create table if not exists schedule_imports (
   id uuid primary key default uuid_generate_v4(),
@@ -81,6 +90,7 @@ create table if not exists packages (
 create table if not exists schedule_tasks (
   id uuid primary key default uuid_generate_v4(),
   project_id uuid references projects(id) on delete cascade,
+  project_key text,
   version_id uuid references schedule_versions(id) on delete cascade,
   external_id text,
   lot_mother text,
@@ -104,6 +114,14 @@ create table if not exists schedule_tasks (
   created_at timestamptz default now(),
   updated_at timestamptz default now()
 );
+
+alter table schedule_tasks enable row level security;
+drop policy if exists "authenticated_schedule_tasks_select" on schedule_tasks;
+create policy "authenticated_schedule_tasks_select" on schedule_tasks for select to authenticated using (true);
+drop policy if exists "authenticated_schedule_tasks_insert" on schedule_tasks;
+create policy "authenticated_schedule_tasks_insert" on schedule_tasks for insert to authenticated with check (true);
+drop policy if exists "authenticated_schedule_tasks_update" on schedule_tasks;
+create policy "authenticated_schedule_tasks_update" on schedule_tasks for update to authenticated using (true) with check (true);
 
 create table if not exists line_balance_settings (
   id uuid primary key default uuid_generate_v4(),
@@ -131,6 +149,28 @@ create table if not exists milestones (
   show_on_line_balance boolean default true,
   description text
 );
+
+create table if not exists calendar_events (
+  id uuid primary key default uuid_generate_v4(),
+  project_id uuid references projects(id) on delete cascade,
+  project_key text,
+  date date not null,
+  title text not null,
+  kind text not null,
+  color text not null,
+  applies_to_all boolean default false,
+  project_ids jsonb default '[]'::jsonb,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+
+alter table calendar_events enable row level security;
+drop policy if exists "authenticated_calendar_events_select" on calendar_events;
+create policy "authenticated_calendar_events_select" on calendar_events for select to authenticated using (true);
+drop policy if exists "authenticated_calendar_events_insert" on calendar_events;
+create policy "authenticated_calendar_events_insert" on calendar_events for insert to authenticated with check (true);
+drop policy if exists "authenticated_calendar_events_update" on calendar_events;
+create policy "authenticated_calendar_events_update" on calendar_events for update to authenticated using (true) with check (true);
 
 create table if not exists schedule_dependencies (
   id uuid primary key default uuid_generate_v4(),

@@ -8,6 +8,7 @@ import { isSupabaseConfigured } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
 import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
 import { loadMediumWindowState, loadPublishedMediumPlan, saveMediumWindowState, savePublishedMediumPlan } from './lib/mediumPlanRepository';
+import { loadWorkspace } from './lib/workspaceRepository';
 import type { CalendarEvent, Page, Project, ScheduleDependency, Task } from './types';
 import './styles.css';
 
@@ -39,11 +40,12 @@ const zoomPx: Record<number, number> = {
 function App() {
   const [collapsed, setCollapsed] = useState(true);
   const [page, setPage] = useState<Page>('projects');
-  const [projectList, setProjectList] = useState<Project[]>(projects);
-  const [project, setProject] = useState<Project>(projects[0]);
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [projectList, setProjectList] = useState<Project[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [latestMediumTasks, setLatestMediumTasks] = useState<Task[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
 
   // Interceptação do modo WhatsApp / Apontamento de Equipe de Campo
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -65,6 +67,35 @@ function App() {
 
   useEffect(() => {
     let active = true;
+    void loadWorkspace('nizza')
+      .then((workspace) => {
+        if (!active) return;
+        if (workspace?.projects?.length) {
+          setProjectList(workspace.projects);
+          setProject(workspace.projects[0]);
+        } else {
+          setProjectList(projects);
+          setProject(projects[0]);
+        }
+        setTasks(workspace?.tasks?.length ? workspace.tasks : initialTasks);
+        setCalendarEvents(workspace?.calendarEvents ?? []);
+        setWorkspaceLoaded(true);
+      })
+      .catch(() => {
+        if (!active) return;
+        setProjectList(projects);
+        setProject(projects[0]);
+        setTasks(initialTasks);
+        setWorkspaceLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceLoaded || !project) return;
+    let active = true;
     void loadPublishedMediumPlan(project.id)
       .then((published) => {
         if (!active || !published?.length) return;
@@ -76,15 +107,20 @@ function App() {
     return () => {
       active = false;
     };
-  }, [project.id]);
+  }, [project, workspaceLoaded]);
 
   async function handleMediumPublish(published: Task[]) {
+    if (!project) return;
     setLatestMediumTasks(published);
     try {
       await savePublishedMediumPlan(project.id, published);
     } catch {
       // Mantém o fluxo local mesmo se o snapshot persistido falhar.
     }
+  }
+
+  if (!workspaceLoaded || !project) {
+    return <div className="app"><main className="page"><p>Carregando workspace do Supabase...</p></main></div>;
   }
 
   return (
