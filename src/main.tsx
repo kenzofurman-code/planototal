@@ -1533,6 +1533,7 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
     startDate: string;
     endDate: string;
     responsible: string;
+    predecessors?: string[];
   };
   type Window = {
     id: string;
@@ -1564,6 +1565,9 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   }>(null);
   const [mediumLinkPoint, setMediumLinkPoint] = useState<{ x: number; y: number } | null>(null);
   const mediumLongPressRef = useRef<number | null>(null);
+  const [mediumActivitySearch, setMediumActivitySearch] = useState('');
+  const [mediumResponsibleSearch, setMediumResponsibleSearch] = useState('');
+  const [mediumOnlyUnassigned, setMediumOnlyUnassigned] = useState(false);
   function threeMonthsAfter(value: string) {
     const date = parseDate(value);
     date.setMonth(date.getMonth() + 3);
@@ -1572,10 +1576,12 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   const analysisEnd = threeMonthsAfter(analysisStart);
   const previewTasks = tasks.filter((task) => task.startDate <= analysisEnd && task.endDate >= analysisStart);
   function createWindow() {
-    const snapshot = previewTasks.map((task) => ({
-      ...task,
-      services: [...(task.services ?? [])]
-    }));
+    const snapshot = previewTasks
+      .map((task) => ({
+        ...task,
+        services: [...(task.services ?? [])]
+      }))
+      .sort((a, b) => `${a.lotMother}|${a.lot}|${a.packageName}`.localeCompare(`${b.lotMother}|${b.lot}|${b.packageName}`, 'pt-BR'));
     setWindowData({
       id: crypto.randomUUID(),
       startDate: analysisStart,
@@ -1608,6 +1614,7 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
     if (!newUnitName.trim()) return;
     const current = units[task.id] ?? [];
     const parentId = current.some((unit) => unit.id === unitParentId) ? unitParentId! : current[0]?.id;
+    const parent = current.find((unit) => unit.id === parentId);
     const next = [
       ...current,
       {
@@ -1616,9 +1623,10 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
         name: newUnitName.trim(),
         weight: 0,
         quantity: 0,
-        startDate: task.startDate,
-        endDate: task.endDate,
-        responsible: task.responsible ?? ''
+        startDate: parent?.startDate ?? task.startDate,
+        endDate: parent?.endDate ?? task.endDate,
+        responsible: parent?.responsible ?? task.responsible ?? '',
+        predecessors: [...(parent?.predecessors ?? [])]
       }
     ];
     const siblings = next.filter((unit) => unit.parentId === parentId);
@@ -1636,10 +1644,26 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
     setNewUnitName('');
   }
   function updateUnit(taskId: string, unitId: string, patch: Partial<Unit>) {
-    setUnits({
-      ...units,
-      [taskId]: (units[taskId] ?? []).map((unit) => (unit.id === unitId ? { ...unit, ...patch } : unit))
-    });
+    const next = Object.fromEntries(Object.entries(units).map(([owner, list]) => [owner, list.map((unit) => ({ ...unit }))]));
+    const source = next[taskId]?.find((unit) => unit.id === unitId);
+    if (!source) return;
+    Object.assign(source, patch);
+    const propagate = (sourceUnit: Unit, visited = new Set<string>()) => {
+      if (visited.has(sourceUnit.id)) return;
+      visited.add(sourceUnit.id);
+      Object.values(next)
+        .flat()
+        .filter((unit) => (unit.predecessors ?? []).includes(sourceUnit.id))
+        .forEach((successor) => {
+          const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
+          const start = addDays(parseDate(sourceUnit.endDate), 1);
+          successor.startDate = toIsoDate(start);
+          successor.endDate = toIsoDate(addDays(start, duration));
+          propagate(successor, visited);
+        });
+    };
+    propagate(source);
+    setUnits(next);
   }
   function removeUnit(taskId: string, unitId: string) {
     const source = units[taskId] ?? [];
@@ -1760,8 +1784,8 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
     if (mediumDrag.mode === 'link') {
       const target = document
         .elementsFromPoint(event.clientX, event.clientY)
-        .map((element) => element.closest('[data-medium-task-id]')?.getAttribute('data-medium-task-id'))
-        .find((id) => id && id !== mediumDrag.taskId);
+        .map((element) => element.closest('[data-medium-unit-id]')?.getAttribute('data-medium-unit-id'))
+        .find((id) => id && id !== mediumDrag.unitId);
       setMediumDrag({ ...mediumDrag, target: target ?? undefined });
       setMediumLinkPoint({ x: mediumPointerX(event), y: mediumPointerY(event) });
       return;
@@ -1784,11 +1808,28 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   }
   function finishMediumDrag() {
     clearMediumLongPress();
-    if (mediumDrag?.mode === 'link' && mediumDrag.target && windowData) {
-      setWindowData({
-        ...windowData,
-        tasks: windowData.tasks.map((task) => task.id === mediumDrag.target && !(task.predecessors ?? []).includes(mediumDrag.taskId) ? { ...task, predecessors: [...(task.predecessors ?? []), mediumDrag.taskId] } : task)
-      });
+    if (mediumDrag?.mode === 'link' && mediumDrag.target) {
+      const allUnits = Object.values(units).flat();
+      const source = allUnits.find((unit) => unit.id === mediumDrag.unitId);
+      const target = allUnits.find((unit) => unit.id === mediumDrag.target);
+      const targetOwner = Object.entries(units).find(([, list]) => list.some((unit) => unit.id === target?.id))?.[0];
+      if (source && target && targetOwner) {
+        const duration = diffDays(parseDate(target.startDate), parseDate(target.endDate));
+        const requiredStart = addDays(parseDate(source.endDate), 1);
+        setUnits({
+          ...units,
+          [targetOwner]: units[targetOwner].map((unit) =>
+            unit.id === target.id
+              ? {
+                  ...unit,
+                  predecessors: Array.from(new Set([...(unit.predecessors ?? []), source.id])),
+                  startDate: toIsoDate(requiredStart),
+                  endDate: toIsoDate(addDays(requiredStart, duration))
+                }
+              : unit
+          )
+        });
+      }
     }
     setMediumDrag(null);
     setMediumLinkPoint(null);
@@ -1831,13 +1872,34 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
     }
     return path;
   }
-  const maxSublotDepth = Math.max(0, ...(windowData?.tasks.flatMap((task) => leafUnits(task.id).map((unit) => unitPath(task.id, unit).length)) ?? [0]));
+  const visibleMediumTasks = (windowData?.tasks ?? []).filter((task) => {
+    const activityText = `${task.packageName} ${task.service ?? ''} ${(task.services ?? []).join(' ')} ${task.lot} ${task.lotMother}`.toLocaleLowerCase('pt-BR');
+    const responsibleNames = [task.responsible ?? '', ...(units[task.id] ?? []).map((unit) => unit.responsible)].filter(Boolean);
+    const activityMatches = activityText.includes(mediumActivitySearch.trim().toLocaleLowerCase('pt-BR'));
+    const responsibleMatches = responsibleNames.join(' ').toLocaleLowerCase('pt-BR').includes(mediumResponsibleSearch.trim().toLocaleLowerCase('pt-BR'));
+    return activityMatches && responsibleMatches && (!mediumOnlyUnassigned || responsibleNames.length === 0);
+  });
+  const firstTaskByLot = new Map<string, string>();
+  visibleMediumTasks.forEach((task) => {
+    const key = `${task.lotMother}||${task.lot}`;
+    if (!firstTaskByLot.has(key)) firstTaskByLot.set(key, task.id);
+  });
+  const maxSublotDepth = Math.max(0, ...visibleMediumTasks.flatMap((task) => leafUnits(task.id).map((unit) => unitPath(task.id, unit).length)), 0);
   const labelColumnWidth = 170 + maxSublotDepth * 145;
   const mediumRowLayout = new Map<string, { top: number; height: number }>();
+  const mediumUnitLayout = new Map<string, { x: number; y: number; width: number }>();
+  const mediumWindowStart = windowData?.startDate ?? analysisStart;
   let mediumRowTop = 80;
-  windowData?.tasks.forEach((task) => {
+  visibleMediumTasks.forEach((task) => {
     const height = Math.max(76, leafUnits(task.id).length * 66 + 10);
     mediumRowLayout.set(task.id, { top: mediumRowTop, height });
+    leafUnits(task.id).forEach((unit, index) => {
+      mediumUnitLayout.set(unit.id, {
+        x: diffDays(parseDate(mediumWindowStart), parseDate(unit.startDate)) * dayWidth,
+        y: mediumRowTop + index * 66 + 34,
+        width: (diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1) * dayWidth
+      });
+    });
     mediumRowTop += height;
   });
   return (
@@ -1881,8 +1943,33 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
         <>
           <div className="medium-window-info">
             <span className="pill">Janela congelada</span>
-            <b>{windowData.tasks.length} atividades</b>
+            <b>{visibleMediumTasks.length}/{windowData.tasks.length} atividades</b>
             <small>Criada em {new Date(windowData.createdAt).toLocaleString('pt-BR')}</small>
+          </div>
+          <div className="medium-search-bar card">
+            <label>
+              <Search size={15} />
+              <input value={mediumActivitySearch} onChange={(event) => setMediumActivitySearch(event.target.value)} placeholder="Procurar atividade, serviço ou lote..." />
+            </label>
+            <label>
+              <span>Equipe</span>
+              <input value={mediumResponsibleSearch} onChange={(event) => setMediumResponsibleSearch(event.target.value)} placeholder="Filtrar por responsável..." />
+            </label>
+            <label className="medium-unassigned-filter">
+              <input type="checkbox" checked={mediumOnlyUnassigned} onChange={(event) => setMediumOnlyUnassigned(event.target.checked)} />
+              Sem responsável
+            </label>
+            {(mediumActivitySearch || mediumResponsibleSearch || mediumOnlyUnassigned) && (
+              <button
+                onClick={() => {
+                  setMediumActivitySearch('');
+                  setMediumResponsibleSearch('');
+                  setMediumOnlyUnassigned(false);
+                }}
+              >
+                Limpar filtros
+              </button>
+            )}
           </div>
           <div
             className="medium-timeline-shell"
@@ -1908,7 +1995,7 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                   <b key={index}>Sublote {index + 1}</b>
                 ))}
               </div>
-              {windowData.tasks.map((task) => (
+              {visibleMediumTasks.map((task) => (
                 <div
                   draggable
                   className={`medium-label-row ${mediumOrdering === task.id ? 'ordering' : ''}`}
@@ -1921,6 +2008,7 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                   onDrop={() => reorderMediumTask(task.id)}
                   onDragEnd={() => setMediumOrdering(null)}
                 >
+                  {firstTaskByLot.get(`${task.lotMother}||${task.lot}`) === task.id && <span className="medium-parent-lot">⠿ {task.lot}</span>}
                   {leafUnits(task.id).map((unit) => {
                     const path = unitPath(task.id, unit);
                     return (
@@ -1931,7 +2019,7 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                         }}
                         key={unit.id}
                       >
-                        <span>⠿ {task.lot}</span>
+                        <span />
                         {Array.from({ length: maxSublotDepth }).map((_, index) => (
                           <span key={index}>{path[index]?.name ?? '—'}</span>
                         ))}
@@ -2007,24 +2095,34 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                         return <path key={`${fromId}-${task.id}`} d={`M ${sx} ${sy} C ${mx} ${sy}, ${mx} ${ey}, ${ex} ${ey}`} />;
                       })
                     )}
+                    {Object.values(units)
+                      .flat()
+                      .flatMap((unit) =>
+                        (unit.predecessors ?? []).map((fromId) => {
+                          const from = mediumUnitLayout.get(fromId);
+                          const to = mediumUnitLayout.get(unit.id);
+                          if (!from || !to) return null;
+                          const sx = from.x + from.width;
+                          const mx = Math.max(sx + 18, (sx + to.x) / 2);
+                          return <path key={`unit-${fromId}-${unit.id}`} d={`M ${sx} ${from.y} C ${mx} ${from.y}, ${mx} ${to.y}, ${to.x} ${to.y}`} />;
+                        })
+                      )}
                   </svg>
                 )}
                 {mediumDrag?.mode === 'link' &&
                   mediumLinkPoint &&
                   (() => {
-                    const sourceTask = windowData.tasks.find((task) => task.id === mediumDrag.taskId);
-                    const sourceRow = sourceTask && mediumRowLayout.get(sourceTask.id);
-                    const sourceUnit = sourceTask && leafUnits(sourceTask.id)[0];
-                    if (!sourceRow || !sourceUnit) return null;
-                    const sx = (diffDays(parseDate(windowData.startDate), parseDate(sourceUnit.endDate)) + 1) * dayWidth;
-                    const sy = sourceRow.top + 34;
+                    const source = mediumUnitLayout.get(mediumDrag.unitId);
+                    if (!source) return null;
+                    const sx = source.x + source.width;
+                    const sy = source.y;
                     return (
                       <svg className="medium-dependencies medium-link-preview" width={timelineWidth} height={mediumRowTop}>
                         <path d={`M ${sx} ${sy} C ${sx + 40} ${sy}, ${mediumLinkPoint.x - 40} ${mediumLinkPoint.y}, ${mediumLinkPoint.x} ${mediumLinkPoint.y}`} />
                       </svg>
                     );
                   })()}
-                {windowData.tasks.map((task) => (
+                {visibleMediumTasks.map((task) => (
                   <div
                     className="medium-task-row"
                     key={task.id}
@@ -2037,8 +2135,9 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                       const width = Math.max(90, (diffDays(parseDate(unit.startDate), parseDate(unit.endDate)) + 1) * dayWidth);
                       return (
                         <button
-                          className={`medium-task-card ${selectedMediumTaskIds.includes(task.id) ? 'selected' : ''} ${mediumDrag?.target === task.id ? 'target' : ''}`}
+                          className={`medium-task-card ${selectedMediumTaskIds.includes(task.id) ? 'selected' : ''} ${mediumDrag?.target === unit.id ? 'target' : ''}`}
                           data-medium-task-id={task.id}
+                          data-medium-unit-id={unit.id}
                           key={unit.id}
                           style={{
                             left: x,
