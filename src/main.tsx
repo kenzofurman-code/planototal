@@ -1574,6 +1574,8 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   const [mediumMotherSort, setMediumMotherSort] = useState<'import' | 'asc' | 'desc'>('import');
   const [mediumLotSort, setMediumLotSort] = useState<'import' | 'asc' | 'desc'>('import');
   const mediumPanRef = useRef<null | { x: number; y: number; left: number; top: number }>(null);
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const [monthPickerStartYear, setMonthPickerStartYear] = useState(() => parseDate(tasks[0]?.startDate ?? toIsoDate(new Date())).getFullYear());
   useEffect(() => {
     const element = mediumTimelineScrollRef.current;
     if (!element) return;
@@ -1584,7 +1586,9 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
     return () => observer.disconnect();
   }, [windowData]);
   function threeMonthsAfter(value: string) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return toIsoDate(addDays(new Date(), 90));
     const date = parseDate(value);
+    if (Number.isNaN(date.getTime())) return toIsoDate(addDays(new Date(), 90));
     date.setMonth(date.getMonth() + 3);
     return toIsoDate(date);
   }
@@ -1989,8 +1993,16 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
       <div className="medium-filter card">
         <label>
           Início da análise
-          <input type="date" value={analysisStart} onChange={(event) => setAnalysisStart(event.target.value)} />
+          <input type="date" value={analysisStart} onChange={(event) => { if (event.target.value) setAnalysisStart(event.target.value); }} />
         </label>
+        <button
+          onClick={() => {
+            setMonthPickerStartYear(parseDate(analysisStart).getFullYear());
+            setMonthPickerOpen(true);
+          }}
+        >
+          <CalendarRange size={15} /> Selecionar mês
+        </button>
         <div>
           <small>Período de três meses</small>
           <strong>
@@ -2275,6 +2287,32 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
             </div>
           </div>
         </>
+      )}
+      {monthPickerOpen && (
+        <div className="month-picker-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setMonthPickerOpen(false)}>
+          <div className="month-picker-modal">
+            <header>
+              <button onClick={() => setMonthPickerStartYear(monthPickerStartYear - 2)}><ChevronLeft size={18} /></button>
+              <div><small>Início da janela de análise</small><h3>Selecionar mês</h3></div>
+              <button onClick={() => setMonthPickerStartYear(monthPickerStartYear + 2)}><ChevronRight size={18} /></button>
+            </header>
+            <div className="month-picker-years">
+              {[monthPickerStartYear, monthPickerStartYear + 1].map((year) => (
+                <section key={year}>
+                  <h4>{year}</h4>
+                  <div>
+                    {Array.from({ length: 12 }).map((_, month) => {
+                      const value = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+                      const active = analysisStart.slice(0, 7) === value.slice(0, 7);
+                      return <button className={active ? 'active' : ''} key={month} onClick={() => { setAnalysisStart(value); setMonthPickerOpen(false); }}>{new Date(year, month, 1).toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '')}</button>;
+                    })}
+                  </div>
+                </section>
+              ))}
+            </div>
+            <footer><span>24 meses disponíveis</span><button onClick={() => setMonthPickerOpen(false)}>Cancelar</button></footer>
+          </div>
+        </div>
       )}
       <aside className={`calendar-drawer medium-drawer ${selectedMediumTaskIds.length ? 'open' : ''}`}>
         {selectedTask && (
