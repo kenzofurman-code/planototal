@@ -2,20 +2,34 @@ import { supabase } from './supabase';
 
 export type ShortTermWeeklyItem = {
   id: string;
-  taskId: string;
-  weekStart: string;
-  planned: number;
-  measured: number;
-  team: string;
-  reason: string;
-  notes: string;
+  weekId: string;
+  activityId: string;
+  activityName: string;
+  floor: string;
+  sectionId: string;
+  responsible: string;
+  efetivo: number | null;
+  plannedThisWeek: number;
+  progressThisWeek: number;
+  executedBefore: number;
+  dailyWork: number[];
+  delayReason: string;
+  observations: string;
+  finalized: boolean;
+  isManual: boolean;
+  serviceComplement?: string;
+  preFilledProgress?: number;
+  preFilledDelayReason?: string;
+  preFilledObservations?: string;
+  preFilledAt?: string;
+  lastUpdatedBy?: string;
 };
 
 export type ShortTermHistory = {
-  week: string;
+  weekStart: string;
   ppc: number;
-  planned: number;
   completed: number;
+  totalPlanned: number;
 };
 
 export type ShortTermState = {
@@ -23,6 +37,20 @@ export type ShortTermState = {
   teams: string[];
   reasons: string[];
   history: ShortTermHistory[];
+  teamPhones?: { [teamName: string]: string };
+  projectCity?: string;
+  weatherApiKey?: string;
+  matrices?: Array<{
+    id: string;
+    name: string;
+    macros: string[];
+    floors: string[];
+  }>;
+  accessControl?: {
+    users: string[];
+    projectAccess: { [projectId: string]: string[] };
+    logs: { username: string; timestamp: string }[];
+  };
 };
 
 export async function loadShortTermState(projectId: string): Promise<ShortTermState | null> {
