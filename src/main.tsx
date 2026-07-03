@@ -1622,7 +1622,7 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
   const mediumPanRef = useRef<null | { x: number; y: number; left: number; top: number }>(null);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [monthPickerStartYear, setMonthPickerStartYear] = useState(() => parseDate(tasks[0]?.startDate ?? toIsoDate(new Date())).getFullYear());
-  const mediumWindowLoadedRef = useRef(false);
+  const [mediumWindowReady, setMediumWindowReady] = useState(false);
   useEffect(() => {
     const element = mediumTimelineScrollRef.current;
     if (!element) return;
@@ -1634,22 +1634,22 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
   }, [windowData]);
   useEffect(() => {
     let active = true;
-    if (mediumWindowLoadedRef.current) return;
-    mediumWindowLoadedRef.current = true;
+    setMediumWindowReady(false);
     void loadMediumWindowState(projectId)
       .then((state) => {
         if (!active || !state) return;
         if (state.analysisStart) setAnalysisStart(state.analysisStart);
         if (state.windowData) setWindowData(state.windowData as Window);
         if (state.units) setUnits(state.units as Record<string, Unit[]>);
+        if (active) setMediumWindowReady(true);
       })
       .catch(() => {
-        if (active) return;
+        if (active) setMediumWindowReady(true);
       });
     return () => {
       active = false;
     };
-  }, [tasks]);
+  }, [projectId]);
   useEffect(() => {
     if (!windowData) return;
     const published = windowData.tasks.flatMap((task) =>
@@ -1669,20 +1669,21 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
       }))
     );
     onPublish(published);
+    if (!mediumWindowReady) return;
     void saveMediumWindowState(projectId, {
       analysisStart,
       windowData,
       units
     });
-  }, [windowData, units, analysisStart, projectId, onPublish]);
+  }, [windowData, units, analysisStart, projectId, onPublish, mediumWindowReady]);
   useEffect(() => {
-    if (!mediumWindowLoadedRef.current) return;
+    if (!mediumWindowReady) return;
     void saveMediumWindowState(projectId, {
       analysisStart,
       windowData,
       units
     });
-  }, [analysisStart, windowData, units, projectId]);
+  }, [analysisStart, windowData, units, projectId, mediumWindowReady]);
   function threeMonthsAfter(value: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return toIsoDate(addDays(new Date(), 90));
     const date = parseDate(value);
