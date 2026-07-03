@@ -31,6 +31,12 @@ main { flex: 1; min-width: 0; }
 .project-card img { width: 100%; height: 150px; object-fit: cover; display: block; }
 .project-card div { padding: 16px; display: grid; gap: 10px; }
 .project-card h2 { margin: 0; }
+.project-form { display: grid; gap: 14px; margin-top: 22px; }
+.project-form label { display: grid; gap: 6px; color: #475569; font-size: 13px; font-weight: 650; }
+.project-form input { width: 100%; border: 1px solid #dbe2ea; border-radius: 10px; padding: 11px 12px; background: #fff; }
+.project-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.project-form .primary { justify-self: start; min-width: 150px; }
+.form-error { margin: 0; color: #b91c1c; }
 .metric { padding: 18px; }
 .metric span { display: block; font-size: 13px; margin-bottom: 8px; }
 .metric strong { font-size: 26px; }

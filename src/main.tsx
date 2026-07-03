@@ -52,6 +52,7 @@ function App() {
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
   const [workspaceError, setWorkspaceError] = useState('');
   const [workspaceReload, setWorkspaceReload] = useState(0);
+  const [creatingFirstProject, setCreatingFirstProject] = useState(false);
 
   // Interceptação do modo WhatsApp / Apontamento de Equipe de Campo
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -142,20 +143,36 @@ function App() {
     return <div className="app"><main className="page"><p>Carregando workspace do Supabase...</p></main></div>;
   }
 
+  async function handleCreateProject(created: Project) {
+    setCreatingFirstProject(true);
+    try {
+      await saveProject(created);
+      setProjectList((current) => [...current, created]);
+      setProject(created);
+      setPage('projects');
+      setWorkspaceError('');
+    } finally {
+      setCreatingFirstProject(false);
+    }
+  }
+
   if (workspaceError || !project) {
     return (
       <div className="app">
         <main className="page">
           <section className="panel" style={{ maxWidth: 720, margin: '48px auto' }}>
             <h2>{workspaceError ? 'Não foi possível conectar ao Supabase' : 'Nenhum projeto encontrado'}</h2>
-            <p>
-              {workspaceError
-                ? workspaceError
-                : 'A conexão funcionou, mas a tabela projects está vazia. Cadastre ou importe ao menos um projeto no Supabase.'}
-            </p>
-            <button className="primary" onClick={() => setWorkspaceReload((value) => value + 1)}>
-              Tentar novamente
-            </button>
+            {workspaceError ? (
+              <>
+                <p>{workspaceError}</p>
+                <button className="primary" onClick={() => setWorkspaceReload((value) => value + 1)}>Tentar novamente</button>
+              </>
+            ) : (
+              <>
+                <p>A conexão está pronta. Cadastre a primeira obra para começar.</p>
+                <ProjectForm onSubmit={handleCreateProject} submitting={creatingFirstProject} />
+              </>
+            )}
           </section>
         </main>
       </div>
@@ -194,6 +211,7 @@ function App() {
               if (project.id === updated.id) setProject(updated);
               void saveProject(updated);
             }}
+            onCreate={handleCreateProject}
             onCalendar={() => setPage('globalCalendar')}
             onSelect={(p) => {
               setProject(p);
@@ -228,7 +246,55 @@ function PageHeader({ title, subtitle, children }: { title: string; subtitle: st
   );
 }
 
-function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }: { projects: Project[]; selected: Project; onSelect: (p: Project) => void; onCalendar: () => void; onUpdate: (p: Project) => void }) {
+function emptyProject(): Project {
+  const today = new Date();
+  const end = new Date(today);
+  end.setFullYear(end.getFullYear() + 2);
+  return {
+    id: crypto.randomUUID(),
+    name: '',
+    imageUrl: '',
+    address: '',
+    area: 0,
+    status: 'ativo',
+    startDate: toIsoDate(today),
+    plannedEndDate: toIsoDate(end),
+    city: '',
+    state: '',
+    ibgeCode: ''
+  };
+}
+
+function ProjectForm({ onSubmit, submitting = false }: { onSubmit: (project: Project) => void | Promise<void>; submitting?: boolean }) {
+  const [draft, setDraft] = useState<Project>(emptyProject);
+  const [error, setError] = useState('');
+  return (
+    <form className="project-form" onSubmit={async (event) => {
+      event.preventDefault();
+      setError('');
+      try {
+        await onSubmit({ ...draft, address: [draft.city, draft.state].filter(Boolean).join(' - ') });
+      } catch (caught) {
+        setError((caught as { message?: string })?.message ?? 'Não foi possível salvar o projeto.');
+      }
+    }}>
+      <label>Nome da obra<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+      <div className="project-form-row">
+        <label>Cidade<input required value={draft.city ?? ''} onChange={(event) => setDraft({ ...draft, city: event.target.value })} /></label>
+        <label>UF<input required maxLength={2} value={draft.state ?? ''} onChange={(event) => setDraft({ ...draft, state: event.target.value.toUpperCase() })} /></label>
+      </div>
+      <div className="project-form-row">
+        <label>Data de início<input required type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} /></label>
+        <label>Término previsto<input required type="date" value={draft.plannedEndDate} onChange={(event) => setDraft({ ...draft, plannedEndDate: event.target.value })} /></label>
+      </div>
+      <label>Área (m²)<input min="0" type="number" value={draft.area || ''} onChange={(event) => setDraft({ ...draft, area: Number(event.target.value) })} /></label>
+      {error && <p className="form-error">{error}</p>}
+      <button className="primary" type="submit" disabled={submitting}>{submitting ? 'Criando projeto...' : 'Criar projeto'}</button>
+    </form>
+  );
+}
+
+function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate, onCreate }: { projects: Project[]; selected: Project; onSelect: (p: Project) => void; onCalendar: () => void; onUpdate: (p: Project) => void; onCreate: (p: Project) => void | Promise<void> }) {
   const [editing, setEditing] = useState<Project | null>(null);
   const cityOptions = [
     { city: 'Curitiba', state: 'PR', ibge: '4106902' },
@@ -244,7 +310,7 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }:
         <button onClick={onCalendar}>
           <CalendarRange size={17} /> Calendário
         </button>
-        <button className="primary">Novo projeto</button>
+        <button className="primary" onClick={() => setEditing(emptyProject())}>Novo projeto</button>
       </PageHeader>
       <div className="project-grid">
         {items.map((p) => (
@@ -281,14 +347,16 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }:
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              onUpdate({
+              const saved = {
                 ...editing,
                 address: `${editing.city ?? ''} - ${editing.state ?? ''}`
-              });
+              };
+              if (items.some((item) => item.id === editing.id)) onUpdate(saved);
+              else void onCreate(saved);
               setEditing(null);
             }}
           >
-            <h3>Editar projeto</h3>
+            <h3>{items.some((item) => item.id === editing.id) ? 'Editar projeto' : 'Novo projeto'}</h3>
             <label>
               Nome
               <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
