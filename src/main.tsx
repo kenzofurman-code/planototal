@@ -1381,8 +1381,9 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
                 </g>
               );
             })}
-            {showDeps &&
-              dependencies.map((dependency) => {
+            {dependencies
+              .filter((dependency) => showDeps || dependency.from === selectedTask?.id || dependency.to === selectedTask?.id)
+              .map((dependency) => {
                 const from = taskLayout.get(dependency.from);
                 const to = taskLayout.get(dependency.to);
                 if (!from || !to) return null;
@@ -1953,6 +1954,8 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
     });
   const mediumRowLayout = new Map<string, { top: number; height: number }>();
   const mediumUnitLayout = new Map<string, { x: number; y: number; width: number; height: number; lane: number; truncatedStart: boolean; truncatedEnd: boolean }>();
+  const mediumUnitOwner = new Map<string, string>();
+  Object.entries(units).forEach(([taskId, list]) => list.forEach((unit) => mediumUnitOwner.set(unit.id, taskId)));
   const mediumGroupLayout = new Map<string, { top: number; height: number; laneCount: number; cardHeight: number }>();
   const mediumWindowStart = windowData?.startDate ?? analysisStart;
   let mediumRowTop = 80;
@@ -2199,11 +2202,12 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                     />
                   ) : null;
                 })}
-                {showMediumDependencies && (
+                {(showMediumDependencies || selectedMediumTaskIds.length > 0) && (
                   <svg className="medium-dependencies" width={timelineWidth} height={mediumRowTop}>
                     {windowData.tasks.flatMap((task) =>
                       (task.predecessors ?? []).map((fromId) => {
                         const fromTask = windowData.tasks.find((item) => item.id === fromId);
+                        if (!showMediumDependencies && !selectedMediumTaskIds.includes(task.id) && !selectedMediumTaskIds.includes(fromTask?.id ?? '')) return null;
                         const fromRow = fromTask && mediumRowLayout.get(fromTask.id);
                         const toRow = mediumRowLayout.get(task.id);
                         const fromUnit = fromTask && leafUnits(fromTask.id)[0];
@@ -2221,6 +2225,9 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                       .flat()
                       .flatMap((unit) =>
                         (unit.predecessors ?? []).map((fromId) => {
+                          const fromOwner = mediumUnitOwner.get(fromId);
+                          const toOwner = mediumUnitOwner.get(unit.id);
+                          if (!showMediumDependencies && !selectedMediumTaskIds.includes(fromOwner ?? '') && !selectedMediumTaskIds.includes(toOwner ?? '')) return null;
                           const from = mediumUnitLayout.get(fromId);
                           const to = mediumUnitLayout.get(unit.id);
                           if (!from || !to) return null;
@@ -2256,7 +2263,7 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                       if (width <= 0) return null;
                       return (
                         <button
-                          className={`medium-task-card ${layout.height < 36 || width < 90 ? 'compact' : ''} ${layout.truncatedStart ? 'truncated-start' : ''} ${layout.truncatedEnd ? 'truncated-end' : ''} ${selectedMediumTaskIds.includes(task.id) ? 'selected' : ''} ${mediumDrag?.target === unit.id ? 'target' : ''}`}
+                          className={`medium-task-card ${layout.height < 36 || width < 90 ? 'compact' : ''} ${layout.height < 24 || width < 55 ? 'tiny' : ''} ${layout.truncatedStart ? 'truncated-start' : ''} ${layout.truncatedEnd ? 'truncated-end' : ''} ${selectedMediumTaskIds.includes(task.id) ? 'selected' : ''} ${mediumDrag?.target === unit.id ? 'target' : ''}`}
                           data-medium-task-id={task.id}
                           data-medium-unit-id={unit.id}
                           key={unit.id}
@@ -2271,10 +2278,10 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                           onClick={(event) => selectMediumTask(event, task.id)}
                         >
                           <i style={{ background: task.color }} />
-                          <strong>{unit.name}</strong>
-                          <span>{task.packageName}</span>
+                          <strong>{task.packageName}</strong>
+                          <span>{unit.responsible || task.responsible || 'Sem responsável'}</span>
                           <small>
-                            {unit.weight}% · {unit.quantity || '—'} {task.unit ?? ''} · {unit.responsible || 'Sem responsável'}
+                            {unit.name} · {unit.weight}% · {unit.quantity || '—'} {task.unit ?? ''}
                           </small>
                           <em title="Alterar duração" onPointerDown={(event) => beginMediumDrag(event, task.id, unit, 'resize')} />
                         </button>
