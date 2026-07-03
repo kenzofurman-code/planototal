@@ -67,9 +67,15 @@ export async function loadWorkspace(projectKey: string): Promise<WorkspaceSnapsh
     supabase.from('schedule_tasks').select('*').order('created_at', { ascending: true }),
     supabase.from('calendar_events').select('*').order('created_at', { ascending: true })
   ]);
-  if (projectsRes.error) throw projectsRes.error;
-  if (tasksRes.error) throw tasksRes.error;
-  if (calendarRes.error) throw calendarRes.error;
+  if (projectsRes.error) {
+    throw new Error(`projects: ${projectsRes.error.message}${projectsRes.error.hint ? ` (${projectsRes.error.hint})` : ''} [${projectsRes.error.code}]`);
+  }
+  if (tasksRes.error) {
+    throw new Error(`schedule_tasks: ${tasksRes.error.message}${tasksRes.error.hint ? ` (${tasksRes.error.hint})` : ''} [${tasksRes.error.code}]`);
+  }
+  if (calendarRes.error) {
+    throw new Error(`calendar_events: ${calendarRes.error.message}${calendarRes.error.hint ? ` (${calendarRes.error.hint})` : ''} [${calendarRes.error.code}]`);
+  }
   return {
     projects: (projectsRes.data ?? []).map(mapProject),
     tasks: (tasksRes.data ?? []).map(mapTask),

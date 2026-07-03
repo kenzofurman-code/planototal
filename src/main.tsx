@@ -97,7 +97,14 @@ function App() {
         setProjectList([]);
         setProject(null);
         setTasks([]);
-        setWorkspaceError(error instanceof Error ? error.message : 'Não foi possível carregar o workspace.');
+        const supabaseError = error as { message?: string; details?: string; hint?: string; code?: string } | null;
+        const detail = [
+          supabaseError?.message,
+          supabaseError?.details,
+          supabaseError?.hint,
+          supabaseError?.code ? `Código: ${supabaseError.code}` : ''
+        ].filter(Boolean).join(' · ');
+        setWorkspaceError(detail || 'Não foi possível carregar o workspace.');
         setWorkspaceLoaded(true);
       });
     return () => {
