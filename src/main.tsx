@@ -2499,6 +2499,10 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
   const [history, setHistory] = useState<Array<{ week: string; ppc: number; planned: number; completed: number }>>([]);
   const [persistenceReady, setPersistenceReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'local' | 'saving' | 'saved' | 'error'>('local');
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [showFinalizeModal, setShowFinalizeModal] = useState(false);
+  const [selectedTeam, setSelectedTeam] = useState('');
+  const [weekMessage, setWeekMessage] = useState('');
   useEffect(() => {
     let active = true;
     setPersistenceReady(false);
@@ -2546,6 +2550,7 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
   const completed = weeklyTasks.filter(({ item }) => item.measured >= item.planned).length;
   const ppc = weeklyTasks.length ? (completed / weeklyTasks.length) * 100 : 0;
   const measuredAverage = weeklyTasks.length ? weeklyTasks.reduce((sum, entry) => sum + entry.item.measured, 0) / weeklyTasks.length : 0;
+  const activeTeamItems = selectedTeam ? weeklyTasks.filter(({ item }) => item.team === selectedTeam) : weeklyTasks;
   function addTask(task: Task) {
     if (currentWeekly.some((item) => item.taskId === task.id)) return;
     setWeekly([
@@ -2567,6 +2572,10 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
   }
   function finalizeWeek() {
     setHistory([...history.filter((item) => item.week !== weekStart), { week: weekStart, ppc, planned: weeklyTasks.length, completed }]);
+    setShowFinalizeModal(false);
+  }
+  function sendWeekMessage() {
+    setShowWhatsAppModal(false);
   }
   const tabLabels: Array<[ShortTab, string]> = [
     ['dashboard', 'Painel'],
@@ -2591,73 +2600,113 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
       {tab === 'dashboard' && (
         <>
           <div className="short-hero card">
-            <div>
-              <small>CURTO PRAZO</small>
-              <h3>Planejamento operacional da semana</h3>
-              <p>Baseado nas atividades reorganizadas no último médio prazo criado.</p>
+            <div className="short-hero-copy">
+              <span className="short-hero-chip">KPI PRODUTIVIDADE</span>
+              <h3>PPC - Percentual de Planos Concluídos</h3>
+              <p>Percentual de serviços planejados executados integralmente conforme a meta semanal ativa.</p>
             </div>
-            <div className="short-hero-stats">
-              <span>
-                <b>{weeklyTasks.length}</b>
-                Planejadas
-              </span>
-              <span>
-                <b>{completed}</b>
-                Concluídas
-              </span>
-              <span>
-                <b>{ppc.toFixed(1)}%</b>
-                PPC
-              </span>
+            <div className="short-hero-card">
+              <strong>{ppc.toFixed(1)}%</strong>
+              <span>{completed} de {weeklyTasks.length} concluídos</span>
             </div>
           </div>
           <div className="metric-grid">
-            <Metric label="PPC da semana" value={`${ppc.toFixed(1)}%`} />
-            <Metric label="Atividades planejadas" value={String(weeklyTasks.length)} />
-            <Metric label="Concluídas" value={String(completed)} />
-            <Metric label="Avanço médio" value={`${measuredAverage.toFixed(1)}%`} />
+            <Metric label="Avanço físico real" value={`${measuredAverage.toFixed(2)}%`} />
+            <Metric label="Meta semanal ativa" value={`${weeklyTasks.length} Serviços`} />
+            <Metric label="Média de PPC" value={`${ppc.toFixed(1)}%`} />
+            <Metric label="Equipes registradas" value={String(teams.length)} />
           </div>
-          <div className="short-dashboard-grid">
-            <div className="card">
-              <h3>Resumo da semana</h3>
-              <div className="ppc-ring" style={{ '--ppc': `${ppc * 3.6}deg` } as React.CSSProperties}>
-                <strong>{ppc.toFixed(0)}%</strong>
-                <span>PPC</span>
+          <div className="short-dashboard-stack">
+            <div className="card short-analysis-card">
+              <div className="short-section-head">
+                <div>
+                  <h3>Situação da obra em {new Date(weekStart).toLocaleDateString('pt-BR', { month: 'long' })}</h3>
+                  <small>Mapeamento físico semanal por pavimento e pacote</small>
+                </div>
+                <div className="short-week-chip">
+                  <span>Semana ativa</span>
+                  <b>{parseDate(weekStart).toLocaleDateString('pt-BR')} - {parseDate(weekEnd).toLocaleDateString('pt-BR')}</b>
+                </div>
+              </div>
+              <div className="short-analysis-empty">
+                <p>Nenhum dado na semana para analisar.</p>
+                <div className="short-analysis-actions">
+                  <button onClick={() => setTab('planning')}>Reavaliar semana</button>
+                  <button className="primary" onClick={() => setTab('planning')}>Análise em tempo real</button>
+                </div>
               </div>
             </div>
-            <div className="card">
-              <h3>Pendências por motivo</h3>
-              {reasons.map((reason) => (
-                <div className="reason-row" key={reason}>
-                  <span>{reason}</span>
-                  <b>{currentWeekly.filter((item) => item.reason === reason).length}</b>
+            <div className="short-dashboard-grid">
+              <div className="card short-chart-card">
+                <h3>Evolução do PPC</h3>
+                <p>Percentual de Planos Concluídos ao longo das semanas.</p>
+                <div className="ppc-ring" style={{ '--ppc': `${ppc * 3.6}deg` } as React.CSSProperties}>
+                  <strong>{ppc.toFixed(0)}%</strong>
+                  <span>PPC</span>
                 </div>
-              ))}
+              </div>
+              <div className="card short-chart-card">
+                <h3>Principais causas de atraso (top 5)</h3>
+                <p>Frequência e percentual acumulado dos motivos de desvio.</p>
+                {reasons.map((reason) => (
+                  <div className="reason-row" key={reason}>
+                    <span>{reason}</span>
+                    <b>{currentWeekly.filter((item) => item.reason === reason).length}</b>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </>
       )}
       {tab === 'planning' && (
         <>
-          <div className="weekly-toolbar card short-toolbar">
+          <div className="short-planning-header card">
+            <div className="short-week-nav">
+              <button onClick={() => setWeekStart(toIsoDate(addDays(parseDate(weekStart), -7)))}>◀</button>
+              <div>
+                <small>Semana selecionada</small>
+                <strong>{parseDate(weekStart).toLocaleDateString('pt-BR')} - {parseDate(weekEnd).toLocaleDateString('pt-BR')}</strong>
+              </div>
+              <button onClick={() => setWeekStart(toIsoDate(addDays(parseDate(weekStart), 7)))}>▶</button>
+            </div>
+            <div className="short-planning-actions">
+              <button onClick={() => setShowWhatsAppModal(true)}>WhatsApp</button>
+              <button className="primary" onClick={() => setShowFinalizeModal(true)}>Finalizar semana</button>
+              <button className="primary ghost" onClick={() => setTab('dashboard')}>Reavaliar semana</button>
+              <button className="primary ghost" onClick={() => setTab('planning')}>Adicionar atividades</button>
+            </div>
+          </div>
+          <div className="short-filter-bar card">
             <label>
-              Início da semana
-              <input type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} />
+              Pesquisa
+              <input placeholder="Atividade, pavimento, observação..." />
             </label>
-            <span>
-              {parseDate(weekStart).toLocaleDateString('pt-BR')} a {parseDate(weekEnd).toLocaleDateString('pt-BR')}
-            </span>
-            <button className="primary" onClick={finalizeWeek}>
-              Finalizar semana
-            </button>
+            <label>
+              Equipe
+              <select value={selectedTeam} onChange={(event) => setSelectedTeam(event.target.value)}>
+                <option value="">-- Todas --</option>
+                {teams.map((team) => (
+                  <option key={team}>{team}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Estado
+              <select>
+                <option>-- Todos --</option>
+                <option>Planejada</option>
+                <option>Concluída</option>
+                <option>Pendente</option>
+              </select>
+            </label>
           </div>
           <div className="short-planning-grid">
             <div className="card candidate-list short-panel">
               <div className="short-panel-head">
-                <h3>Atividades disponíveis</h3>
+                <h3>Serviços disponíveis</h3>
                 <small>{candidates.length} atividades no período</small>
               </div>
-              <small>{candidates.length} atividades no período</small>
               {candidates.map((task) => (
                 <button key={task.id} disabled={currentWeekly.some((item) => item.taskId === task.id)} onClick={() => addTask(task)}>
                   <span>
@@ -2675,67 +2724,76 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
                 <h3>Plano semanal</h3>
                 <small>{currentWeekly.length} itens selecionados</small>
               </div>
+              <div className="short-table-wrap">
+                <table className="short-planning-table">
+                  <thead>
+                    <tr>
+                      <th>Serviço / Pavimento</th>
+                      <th>Responsável / Equipe</th>
+                      <th>Efetivo</th>
+                      <th>Meta planejada</th>
+                      <th>Dias trabalhados</th>
+                      <th>Progresso</th>
+                      <th>Motivo de atraso</th>
+                      <th>Observações</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
               {weeklyTasks.map(({ item, task }) => (
-                <article key={item.id}>
-                  <header>
-                    <div>
-                      <b>{task.packageName}</b>
-                      <small>
-                        {task.lotMother} · {task.lot}
-                      </small>
-                    </div>
-                    <button onClick={() => setWeekly(weekly.filter((entry) => entry.id !== item.id))}>×</button>
-                  </header>
-                  <div className="weekly-fields">
-                    <label>
-                      Meta %
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={item.planned}
-                        onChange={(event) =>
-                          updateWeekly(item.id, {
-                            planned: Number(event.target.value)
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Realizado %
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={item.measured}
-                        onChange={(event) =>
-                          updateWeekly(item.id, {
-                            measured: Number(event.target.value)
-                          })
-                        }
-                      />
-                    </label>
-                    <label>
-                      Equipe
-                      <select value={item.team} onChange={(event) => updateWeekly(item.id, { team: event.target.value })}>
-                        {teams.map((team) => (
-                          <option key={team}>{team}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      Motivo
-                      <select value={item.reason} onChange={(event) => updateWeekly(item.id, { reason: event.target.value })}>
-                        <option value="">Sem restrição</option>
-                        {reasons.map((reason) => (
-                          <option key={reason}>{reason}</option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <textarea placeholder="Observações da semana" value={item.notes} onChange={(event) => updateWeekly(item.id, { notes: event.target.value })} />
-                </article>
+                <tr key={item.id}>
+                  <td>
+                    <strong>{task.packageName}</strong>
+                    <small>{task.lotMother} · {task.lot}</small>
+                  </td>
+                  <td>
+                    <select value={item.team} onChange={(event) => updateWeekly(item.id, { team: event.target.value })}>
+                      {teams.map((team) => (
+                        <option key={team}>{team}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>4</td>
+                  <td>
+                    <select value={String(item.planned)} onChange={(event) => updateWeekly(item.id, { planned: Number(event.target.value) })}>
+                      <option value="25">25%</option>
+                      <option value="50">50%</option>
+                      <option value="75">75%</option>
+                      <option value="100">100%</option>
+                    </select>
+                  </td>
+                  <td>
+                    <div className="days-pill">S T Q Q S</div>
+                  </td>
+                  <td>
+                    <select value={String(item.measured)} onChange={(event) => updateWeekly(item.id, { measured: Number(event.target.value) })}>
+                      <option value="0">0%</option>
+                      <option value="25">25%</option>
+                      <option value="50">50%</option>
+                      <option value="75">75%</option>
+                      <option value="100">100%</option>
+                    </select>
+                  </td>
+                  <td>
+                    <select value={item.reason} onChange={(event) => updateWeekly(item.id, { reason: event.target.value })}>
+                      <option value="">-</option>
+                      {reasons.map((reason) => (
+                        <option key={reason}>{reason}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td>
+                    <input value={item.notes} onChange={(event) => updateWeekly(item.id, { notes: event.target.value })} placeholder="Observações..." />
+                  </td>
+                  <td>
+                    <span className={`short-status ${item.measured >= item.planned ? 'ok' : 'late'}`}>{item.measured >= item.planned ? 'Concluída' : 'Atrasado'}</span>
+                    <button className="short-row-remove" onClick={() => setWeekly(weekly.filter((entry) => entry.id !== item.id))}>×</button>
+                  </td>
+                </tr>
               ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </>
@@ -2851,6 +2909,62 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
             >
               Adicionar motivo
             </button>
+          </div>
+        </div>
+      )}
+      {showWhatsAppModal && (
+        <div className="short-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setShowWhatsAppModal(false)}>
+          <div className="short-modal">
+            <div className="short-modal-head">
+              <div>
+                <h3>Enviar para WhatsApp</h3>
+                <small>Selecionar equipe</small>
+              </div>
+              <button onClick={() => setShowWhatsAppModal(false)}>×</button>
+            </div>
+            <div className="short-modal-body">
+              <label>
+                <span>Equipe</span>
+                <select value={selectedTeam} onChange={(event) => setSelectedTeam(event.target.value)}>
+                  <option value="">-- Todas --</option>
+                  {teams.map((team) => (
+                    <option key={team}>{team}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Conteúdo da mensagem</span>
+                <textarea rows={8} value={weekMessage || `*PLANEJAMENTO SEMANAL (${parseDate(weekStart).toLocaleDateString('pt-BR')} a ${parseDate(weekEnd).toLocaleDateString('pt-BR')})*\n\n*Equipe:* ${selectedTeam || 'Todas'}\n\n*Serviços a executar nesta semana:*\n${activeTeamItems.map(({ task }) => `- ${task.packageName} · ${task.lot}`).join('\n') || 'Nenhuma atividade ativa planejada para esta semana.'}`} onChange={(event) => setWeekMessage(event.target.value)} />
+              </label>
+              <div className="short-modal-actions">
+                <button onClick={() => setShowWhatsAppModal(false)}>Voltar</button>
+                <button className="primary" onClick={sendWeekMessage}>Enviar via WhatsApp</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {showFinalizeModal && (
+        <div className="short-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setShowFinalizeModal(false)}>
+          <div className="short-modal short-modal-small">
+            <div className="short-modal-head">
+              <div>
+                <h3>Finalizar semana</h3>
+                <small>Confirmação do encerramento</small>
+              </div>
+              <button onClick={() => setShowFinalizeModal(false)}>×</button>
+            </div>
+            <div className="short-modal-body">
+              <p>Ao finalizar, o PPC da semana será consolidado no histórico.</p>
+              <label className="short-check">
+                <input type="checkbox" />
+                Transferir atividades não concluídas para a próxima semana
+              </label>
+              <div className="short-modal-actions">
+                <button onClick={() => setShowFinalizeModal(false)}>Cancelar</button>
+                <button className="primary" onClick={finalizeWeek}>Finalizar</button>
+              </div>
+            </div>
           </div>
         </div>
       )}
