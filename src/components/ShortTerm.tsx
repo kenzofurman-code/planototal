@@ -80,7 +80,7 @@ function DaysSelector({ dailyWork, disabled, onChange }: { dailyWork: number[]; 
           className={`w-6 h-6 rounded-full text-[9px] font-black flex items-center justify-center transition active:scale-95 cursor-pointer border ${
             dailyWork[idx] === 1
               ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
-              : 'bg-slate-50 text-slate-350 border-slate-200 hover:border-slate-405'
+              : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-slate-405'
           } disabled:opacity-50 disabled:cursor-default`}
         >
           {day}
@@ -238,6 +238,82 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
   const allPossibleMacros = useMemo(() => {
     return Array.from(new Set(cronogramaInicial.map(c => c.macro))).sort();
   }, [cronogramaInicial]);
+
+  // --- Memoizations para Detalhamento PPC ---
+  const contractorsInPeriod = useMemo(() => {
+    return Array.from(new Set(planning.map(t => t.responsible))).filter(Boolean).sort() as string[];
+  }, [planning]);
+
+  const availableWeeks = useMemo(() => {
+    return Array.from(new Set(planning.map(t => t.weekId))).sort();
+  }, [planning]);
+
+  useEffect(() => {
+    if (contractorsInPeriod.length > 0 && !ppcSelectedContractor) {
+      setPpcSelectedContractor(contractorsInPeriod[0]);
+    }
+    if (availableWeeks.length > 0) {
+      if (!ppcStartWeek) setPpcStartWeek(availableWeeks[0]);
+      if (!ppcEndWeek) setPpcEndWeek(availableWeeks[availableWeeks.length - 1]);
+    }
+  }, [contractorsInPeriod, availableWeeks, ppcSelectedContractor, ppcStartWeek, ppcEndWeek]);
+
+  const contractorWeeklyPpcData = useMemo(() => {
+    if (!ppcSelectedContractor || !ppcStartWeek || !ppcEndWeek) return [];
+    const periodWeeks = availableWeeks.filter(w => w >= ppcStartWeek && w <= ppcEndWeek);
+
+    return periodWeeks.map(wId => {
+      const weekTasksList = planning.filter(t => t.weekId === wId && t.responsible === ppcSelectedContractor);
+      const totalP = weekTasksList.length;
+      if (totalP === 0) return { weekId: wId, startDateStr: formatDateBR(wId), ppc: null };
+      const comp = weekTasksList.filter(t => t.progressThisWeek >= t.plannedThisWeek).length;
+      return { weekId: wId, startDateStr: formatDateBR(wId), ppc: Math.round((comp / totalP) * 100) };
+    });
+  }, [planning, ppcSelectedContractor, ppcStartWeek, ppcEndWeek, availableWeeks]);
+
+  const averagePpc = useMemo(() => {
+    const valids = contractorWeeklyPpcData.filter(d => d.ppc !== null);
+    if (valids.length === 0) return 0;
+    return Math.round(valids.reduce((acc, d) => acc + (d.ppc || 0), 0) / valids.length);
+  }, [contractorWeeklyPpcData]);
+
+  const ppcEvolutionChart = useMemo(() => {
+    const data = contractorWeeklyPpcData.filter(d => d.ppc !== null);
+    if (data.length === 0) return null;
+    const width = 500;
+    const height = 220;
+    const mLeft = 40;
+    const chartW = width - mLeft - 20;
+    const chartH = height - 40 - 20;
+    const getY = (val: number) => height - 40 - (val / 100) * chartH;
+    const xStep = data.length > 1 ? chartW / (data.length - 1) : chartW;
+    
+    const points = data.map((d, idx) => ({
+      x: mLeft + idx * xStep,
+      y: getY(d.ppc || 0),
+      ppc: d.ppc,
+      label: d.startDateStr.slice(0, 5)
+    }));
+
+    const pathD = points.length > 0 ? `M ${points[0].x} ${points[0].y} ` + points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ') : '';
+    return { width, height, mLeft, getY, validPoints: points, pathD };
+  }, [contractorWeeklyPpcData]);
+
+  const delayStatsContractor = useMemo(() => {
+    if (!ppcSelectedContractor || !ppcStartWeek || !ppcEndWeek) return [];
+    const counts: { [key: string]: number } = {};
+    planning.forEach(t => {
+      if (t.weekId >= ppcStartWeek && t.weekId <= ppcEndWeek && t.responsible === ppcSelectedContractor) {
+        if (t.progressThisWeek < t.plannedThisWeek && t.delayReason) {
+          counts[t.delayReason] = (counts[t.delayReason] || 0) + 1;
+        }
+      }
+    });
+    const list = Object.entries(counts).map(([reason, count]) => ({ reason, count }));
+    list.sort((a, b) => b.count - a.count);
+    const total = list.reduce((acc, i) => acc + i.count, 0);
+    return list.map(item => ({ ...item, percent: total > 0 ? (item.count / total) * 100 : 0 }));
+  }, [planning, ppcSelectedContractor, ppcStartWeek, ppcEndWeek]);
 
   // --- CARREGAMENTO DO SUPABASE ---
   useEffect(() => {
@@ -1078,10 +1154,10 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
         <div className="flex items-center gap-2">
           <span className={`px-3 py-1.5 text-[9px] font-black uppercase rounded-lg border transition ${
             syncStatus === 'saved' 
-              ? 'bg-emerald-50 border-emerald-250 text-emerald-700' 
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
               : syncStatus === 'saving' 
-              ? 'bg-amber-50 border-amber-250 text-amber-700 animate-pulse'
-              : 'bg-rose-50 border-rose-250 text-rose-700'
+              ? 'bg-amber-50 border-amber-300 text-amber-800 animate-pulse'
+              : 'bg-rose-50 border-rose-300 text-rose-800'
           }`}>
             {syncStatus === 'saved' ? 'Supabase sincronizado' : syncStatus === 'saving' ? 'Salvando...' : 'Erro de sincronização'}
           </span>
@@ -1096,7 +1172,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
             className={`px-4 py-3 text-xs font-black uppercase tracking-wider rounded-t-xl transition-all duration-200 ${
               activeTab === value 
                 ? 'bg-indigo-600 text-white shadow-md' 
-                : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
             }`}
             onClick={() => setActiveTab(value)}
           >
@@ -1336,7 +1412,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                 </button>
               )}
               {teams.length > 0 && weeklyTasks.length > 0 && (
-                <button onClick={() => setWhatsappModal(true)} className="flex-1 md:flex-none px-4 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-750 font-black rounded-xl text-[10px] uppercase tracking-wider border border-indigo-200 cursor-pointer">
+                <button onClick={() => setWhatsappModal(true)} className="flex-1 md:flex-none px-4 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-black rounded-xl text-[10px] uppercase tracking-wider border border-indigo-200 cursor-pointer">
                   💬 WhatsApp
                 </button>
               )}
@@ -1349,7 +1425,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
               </button>
               <button 
                 onClick={() => { setDrawerMacro(allPossibleMacros[0] || ''); setDrawerWarning(''); setIsDrawerOpen(true); }}
-                className="flex-1 md:flex-none px-4 py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] uppercase tracking-wider hover:bg-indigo-750 cursor-pointer"
+                className="flex-1 md:flex-none px-4 py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] uppercase tracking-wider hover:bg-indigo-700 cursor-pointer"
               >
                 ➕ Programar Tarefas
               </button>
@@ -1358,19 +1434,19 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 p-3 bg-slate-50 rounded-xl border border-slate-200">
             <div>
-              <label className="block text-[8px] font-black uppercase text-slate-450 mb-1">🔍 Pesquisa</label>
-              <input type="text" className="w-full p-2 border border-slate-250 bg-white rounded-lg text-xs outline-none" placeholder="Serviço, pavimento, notas..." value={planningSearch} onChange={e => setPlanningSearch(e.target.value)} />
+              <label className="block text-[8px] font-black uppercase text-slate-600 mb-1">🔍 Pesquisa</label>
+              <input type="text" className="w-full p-2 border border-slate-200 bg-white rounded-lg text-xs outline-none" placeholder="Serviço, pavimento, notas..." value={planningSearch} onChange={e => setPlanningSearch(e.target.value)} />
             </div>
             <div>
-              <label className="block text-[8px] font-black uppercase text-slate-450 mb-1">Equipe Responsável</label>
-              <select className="w-full p-2 border border-slate-250 bg-white rounded-lg text-xs font-bold outline-none" value={planningTeamFilter} onChange={e => setPlanningTeamFilter(e.target.value)}>
+              <label className="block text-[8px] font-black uppercase text-slate-600 mb-1">Equipe Responsável</label>
+              <select className="w-full p-2 border border-slate-200 bg-white rounded-lg text-xs font-bold outline-none" value={planningTeamFilter} onChange={e => setPlanningTeamFilter(e.target.value)}>
                 <option value="">-- Todas --</option>
                 {teams.map(team => <option key={team} value={team}>{team}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-[8px] font-black uppercase text-slate-450 mb-1">Estado de Progresso</label>
-              <select className="w-full p-2 border border-slate-250 bg-white rounded-lg text-xs font-bold outline-none" value={planningStatusFilter} onChange={e => setPlanningStatusFilter(e.target.value)}>
+              <label className="block text-[8px] font-black uppercase text-slate-600 mb-1">Estado de Progresso</label>
+              <select className="w-full p-2 border border-slate-200 bg-white rounded-lg text-xs font-bold outline-none" value={planningStatusFilter} onChange={e => setPlanningStatusFilter(e.target.value)}>
                 <option value="">-- Todos --</option>
                 <option value="ok">✅ Conforme</option>
                 <option value="delayed">⚠️ Com Atraso</option>
@@ -1399,7 +1475,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                           if (e.target.checked) setSelectedTaskIds(prev => Array.from(new Set([...prev, ...filteredWeeklyTasks.map(t => t.id)])));
                           else setSelectedTaskIds(prev => prev.filter(id => !filteredWeeklyTasks.map(t => t.id).includes(id)));
                         }}
-                        className="w-3 h-3 text-indigo-650 rounded cursor-pointer"
+                        className="w-3 h-3 text-indigo-600 rounded cursor-pointer"
                       />
                       <button onClick={handleBulkDelete} disabled={selectedTaskIds.length === 0} className="text-red-400 hover:text-red-300 font-bold text-xs disabled:opacity-30">🗑️</button>
                     </div>
@@ -1420,7 +1496,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                           {t.isManual && <span className="px-1 py-0.5 bg-amber-100 text-amber-800 text-[7px] font-black rounded uppercase tracking-tighter shrink-0 mt-0.5">Extra</span>}
                           <div className="flex-1 leading-tight">{t.activityName}</div>
                           {!t.finalized && !t.serviceComplement && editingComplementTaskId !== t.id && (
-                            <button onClick={(e) => { e.stopPropagation(); setEditingComplementTaskId(t.id); }} className="w-3.5 h-3.5 border border-slate-300 hover:border-indigo-650 hover:bg-indigo-50 text-slate-400 hover:text-indigo-650 flex items-center justify-center rounded-full font-bold text-[9px] cursor-pointer">+</button>
+                            <button onClick={(e) => { e.stopPropagation(); setEditingComplementTaskId(t.id); }} className="w-3.5 h-3.5 border border-slate-300 hover:border-indigo-600 hover:bg-indigo-50 text-slate-400 hover:text-indigo-600 flex items-center justify-center rounded-full font-bold text-[9px] cursor-pointer">+</button>
                           )}
                         </div>
                         {(t.serviceComplement || editingComplementTaskId === t.id) && (
@@ -1430,22 +1506,22 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                               type="text" 
                               disabled={t.finalized}
                               placeholder="Complemento..." 
-                              className="p-1 border border-slate-200 bg-slate-50 rounded text-[9px] font-bold text-slate-700 w-36 outline-none focus:bg-white focus:border-indigo-500"
+                              className="p-1 border border-slate-300 bg-slate-50 rounded text-[9px] font-bold text-slate-700 w-36 outline-none focus:bg-white focus:border-indigo-500"
                               value={t.serviceComplement || ''}
                               onChange={e => setPlanning(planning.map(p => p.id === t.id ? { ...p, serviceComplement: e.target.value } : p))}
                               onBlur={() => { if (!t.serviceComplement) setEditingComplementTaskId(null); }}
                               autoFocus={editingComplementTaskId === t.id}
                             />
                             {!t.finalized && (
-                              <button onClick={() => handleServiceComplementVoiceInput(t.id)} className={`p-1 rounded-full transition text-[9px] ${listeningComplementTaskId === t.id ? 'bg-red-600 text-white animate-pulse' : 'bg-indigo-100 text-indigo-750 hover:bg-indigo-200'}`} title="Voz">🎙️</button>
+                              <button onClick={() => handleServiceComplementVoiceInput(t.id)} className={`p-1 rounded-full transition text-[9px] ${listeningComplementTaskId === t.id ? 'bg-red-600 text-white animate-pulse' : 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200'}`} title="Voz">🎙️</button>
                             )}
                           </div>
                         )}
-                        <div className="text-[8px] font-bold text-indigo-550 mt-1">{t.floor}</div>
+                        <div className="text-[8px] font-bold text-indigo-500 mt-1">{t.floor}</div>
                       </td>
 
                       <td className="p-3 border-r text-center">
-                        <div className="relative inline-block w-full min-h-[26px] bg-slate-50 border border-slate-200 rounded-lg hover:bg-slate-100 transition">
+                        <div className="relative inline-block w-full min-h-[26px] bg-slate-50 border border-slate-300 rounded-lg hover:bg-slate-100 transition">
                           <span className="block text-[9px] font-black text-slate-700 py-1 uppercase">{t.responsible || 'ESCOLHER'}</span>
                           <select disabled={t.finalized} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed" value={t.responsible || ''} onChange={e => handleUpdateTaskField(t.id, 'responsible', e.target.value)}>
                             <option value="">-- Equipe --</option>
@@ -1455,7 +1531,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                       </td>
 
                       <td className="p-3 border-r text-center">
-                        <input type="number" min="0" disabled={t.finalized} className="w-12 p-1 border border-slate-200 bg-slate-50 text-center font-bold rounded-lg text-xs outline-none focus:bg-white focus:border-indigo-500" value={t.efetivo ?? ''} onChange={e => handleUpdateTaskField(t.id, 'efetivo', e.target.value === '' ? null : parseInt(e.target.value, 10))} />
+                        <input type="number" min="0" disabled={t.finalized} className="w-12 p-1 border border-slate-300 bg-slate-50 text-center font-bold rounded-lg text-xs outline-none focus:bg-white focus:border-indigo-500" value={t.efetivo ?? ''} onChange={e => handleUpdateTaskField(t.id, 'efetivo', e.target.value === '' ? null : parseInt(e.target.value, 10))} />
                       </td>
 
                       <td className="p-3 border-r align-middle bg-emerald-50/5">
@@ -1465,9 +1541,9 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                             const isPlanned = currentPlan === val;
                             const isExecuted = execBefore > 0 && val === execBefore;
 
-                            let btnClass = 'bg-slate-100 text-slate-400 hover:bg-emerald-55 hover:text-emerald-700';
+                            let btnClass = 'bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700';
                             if (isPlanned) btnClass = 'bg-emerald-600 text-white font-black scale-110 shadow-xs border-emerald-600';
-                            else if (isExecuted) btnClass = 'bg-slate-350 text-white border-slate-350';
+                            else if (isExecuted) btnClass = 'bg-slate-300 text-slate-800 border-slate-300';
 
                             return (
                               <button key={val} disabled={t.finalized} onClick={() => handlePlannedChange(t.id, val)} className={`w-7 h-7 rounded-full text-[9px] font-black flex items-center justify-center border border-transparent transition active:scale-90 cursor-pointer ${btnClass}`}>
@@ -1489,12 +1565,12 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                               const isActive = progVal === val;
                               const isPrefilled = t.preFilledProgress === val;
                               const isOk = val >= currentPlan;
-                              const btnColor = isOk ? 'bg-indigo-650 border-indigo-650' : 'bg-rose-600 border-rose-600';
-                              const prefillClass = (isPrefilled && !isActive) ? 'ring-2 ring-dashed ring-purple-400 text-purple-750 bg-purple-50' : '';
+                              const btnColor = isOk ? 'bg-indigo-600 border-indigo-600' : 'bg-rose-600 border-rose-600';
+                              const prefillClass = (isPrefilled && !isActive) ? 'ring-2 ring-dashed ring-purple-400 text-purple-700 bg-purple-50' : '';
 
                               return (
                                 <button key={val} disabled={t.finalized} onClick={() => handleWeeklyProgressChange(t.id, val)} className={`w-7 h-7 rounded-full text-[9px] font-black flex items-center justify-center border border-transparent transition active:scale-90 cursor-pointer ${
-                                  isActive ? `${btnColor} text-white scale-110 shadow-xs` : prefillClass ? prefillClass : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                                  isActive ? `${btnColor} text-white scale-110 shadow-xs` : prefillClass ? prefillClass : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800'
                                 }`}>
                                   {val}%
                                 </button>
@@ -1502,7 +1578,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                             })}
                           </div>
                           {t.preFilledProgress !== undefined && (
-                            <span className="text-[7px] font-black text-purple-750 bg-purple-100 border border-purple-250 px-1 rounded mt-0.5 animate-pulse">
+                            <span className="text-[7px] font-black text-purple-700 bg-purple-100 border border-purple-200 px-1 rounded mt-0.5 animate-pulse">
                               📲 Campo: {t.preFilledProgress}%
                             </span>
                           )}
@@ -1512,14 +1588,14 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                       <td className="p-3 border-r align-middle text-center">
                         {showDelayAlert ? (
                           <div className="space-y-1">
-                            <div className="relative inline-block w-full min-h-[26px] bg-rose-50 border border-rose-200 text-rose-805 rounded-lg hover:bg-rose-100 transition">
+                            <div className="relative inline-block w-full min-h-[26px] bg-rose-50 border border-rose-200 text-rose-800 rounded-lg hover:bg-rose-100 transition">
                               <span className="block text-[8px] font-black py-1 px-1 text-center truncate">{t.delayReason || '⚠️ MOTIVO...'}</span>
                               <select disabled={t.finalized} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" value={t.delayReason || ''} onChange={e => handleUpdateTaskField(t.id, 'delayReason', e.target.value)}>
                                 <option value="">⚠️ Escolha o Motivo</option>
                                 {delayReasons.map(r => <option key={r} value={r}>{r}</option>)}
                               </select>
                             </div>
-                            {t.preFilledDelayReason && <div className="text-[7px] text-purple-650 font-black italic block">Sugerido: "{t.preFilledDelayReason}"</div>}
+                            {t.preFilledDelayReason && <div className="text-[7px] text-purple-700 font-black italic block">Sugerido: "{t.preFilledDelayReason}"</div>}
                           </div>
                         ) : (
                           <span className="text-[10px] font-black text-emerald-600 uppercase">✓ Conforme</span>
@@ -1528,23 +1604,23 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
 
                       <td className="p-3 border-r align-middle">
                         <div className="flex gap-1.5 items-start">
-                          <textarea disabled={t.finalized} className="flex-1 p-1 bg-slate-50 border border-slate-200 rounded-lg text-[9px] font-bold text-slate-800 outline-none focus:bg-white focus:border-indigo-500 resize-none min-h-[30px]" placeholder="Anotações..." value={t.observations || ''} onChange={e => setPlanning(planning.map(p => p.id === t.id ? { ...p, observations: e.target.value } : p))} />
+                          <textarea disabled={t.finalized} className="flex-1 p-1 bg-slate-50 border border-slate-300 rounded-lg text-[9px] font-bold text-slate-800 outline-none focus:bg-white focus:border-indigo-500 resize-none min-h-[30px]" placeholder="Anotações..." value={t.observations || ''} onChange={e => setPlanning(planning.map(p => p.id === t.id ? { ...p, observations: e.target.value } : p))} />
                           {!t.finalized && (
-                            <button onClick={() => handleVoiceInput(t.id)} className={`p-1 rounded-full transition ${listeningTaskId === t.id ? 'bg-red-650 text-white animate-pulse' : 'bg-indigo-50 text-indigo-700'}`}>🎙️</button>
+                            <button onClick={() => handleVoiceInput(t.id)} className={`p-1 rounded-full transition ${listeningTaskId === t.id ? 'bg-red-600 text-white animate-pulse' : 'bg-indigo-50 text-indigo-700'}`}>🎙️</button>
                           )}
                         </div>
-                        {t.preFilledObservations && <div className="text-[7px] text-purple-650 font-bold italic mt-0.5">📲 Campo: "{t.preFilledObservations}"</div>}
+                        {t.preFilledObservations && <div className="text-[7px] text-purple-700 font-bold italic mt-0.5">📲 Campo: "{t.preFilledObservations}"</div>}
                       </td>
 
                       <td className="p-3 text-center align-middle">
                         <div className="flex items-center justify-center gap-1.5">
                           {t.preFilledProgress !== undefined && (
-                            <button onClick={() => handleAcceptPreFill(t.id)} className="p-1 border border-emerald-250 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-black transition cursor-pointer animate-bounce" title="Aceitar">✅</button>
+                            <button onClick={() => handleAcceptPreFill(t.id)} className="p-1 border border-emerald-300 bg-emerald-50 text-emerald-700 rounded-lg text-xs font-black transition cursor-pointer animate-bounce" title="Aceitar">✅</button>
                           )}
                           <input type="checkbox" disabled={t.finalized} checked={selectedTaskIds.includes(t.id)} onChange={e => {
                             if (e.target.checked) setSelectedTaskIds(prev => [...prev, t.id]);
                             else setSelectedTaskIds(prev => prev.filter(id => id !== t.id));
-                          }} className="w-3.5 h-3.5 border-slate-300 text-indigo-650 rounded cursor-pointer disabled:opacity-30" />
+                          }} className="w-3.5 h-3.5 border-slate-300 text-indigo-600 rounded cursor-pointer disabled:opacity-30" />
                         </div>
                       </td>
                     </tr>
@@ -1574,7 +1650,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
             <div className="bg-slate-50 p-4 border-b border-slate-200 flex justify-between items-center">
               <input 
                 type="text" 
-                className="font-black text-xs uppercase text-slate-850 bg-transparent focus:bg-white focus:ring-2 focus:ring-indigo-500 rounded px-2 py-1 outline-none border border-transparent focus:border-slate-350"
+                className="font-black text-xs uppercase text-slate-800 bg-transparent focus:bg-white focus:ring-2 focus:ring-indigo-500 rounded px-2 py-1 outline-none border border-transparent focus:border-slate-300"
                 value={matrix.name}
                 onChange={e => setMatrices(prev => prev.map(m => m.id === matrix.id ? { ...m, name: e.target.value.toUpperCase() } : m))}
                 onBlur={() => setNotification({ message: 'Nome atualizado!', type: 'success' })}
@@ -1632,8 +1708,8 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
 
                         let cellClass = 'text-slate-400';
                         if (isCompleted) cellClass = 'bg-emerald-100 text-emerald-800 border-emerald-200';
-                        else if (isHalf) cellClass = 'bg-indigo-50 text-indigo-850 border-indigo-200';
-                        else if (isStarted) cellClass = 'bg-orange-50 text-orange-850 border-orange-200';
+                        else if (isHalf) cellClass = 'bg-indigo-50 text-indigo-800 border-indigo-200';
+                        else if (isStarted) cellClass = 'bg-orange-50 text-orange-800 border-orange-200';
 
                         const relevant = cronogramaInicial.filter(c => c.floor === fId && slugify(c.macro) === slugify(mId));
                         const tooltip = relevant.map(r => `• ${r.service}: ${r.progress.toFixed(0)}%`).join('\n') || 'Nenhuma tarefa';
@@ -1656,7 +1732,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                     <td 
                       colSpan={matrix.macros.length + 2}
                       onClick={() => setMatrixSelection({ isOpen: true, matrixId: matrix.id, type: 'floor' })}
-                      className="p-3 text-center text-[10px] font-black uppercase text-indigo-650 bg-slate-50 hover:bg-indigo-100/50 cursor-pointer border-t border-dashed border-slate-300 transition"
+                      className="p-3 text-center text-[10px] font-black uppercase text-indigo-600 bg-slate-50 hover:bg-indigo-100/50 cursor-pointer border-t border-dashed border-slate-300 transition"
                     >
                       + Adicionar Pavimento
                     </td>
@@ -1699,7 +1775,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                         setMatrixSelection(null);
                       }}
                       className={`w-full p-2.5 rounded-xl border text-left text-[10px] font-black uppercase transition flex justify-between items-center ${
-                        isAlreadyIn ? 'bg-slate-50 border-slate-200 text-slate-350 cursor-not-allowed' : 'bg-white border-slate-250 text-slate-700 hover:bg-slate-50'
+                        isAlreadyIn ? 'bg-slate-50 border-slate-200 text-slate-500 cursor-not-allowed' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
                       }`}
                     >
                       <span>{item}</span>
@@ -1716,100 +1792,27 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
   }
 
   function renderDetalhamentoPpc() {
-    const contractorsInPeriod = useMemo(() => {
-      return Array.from(new Set(planning.map(t => t.responsible))).filter(Boolean).sort() as string[];
-    }, [planning]);
-
-    const availableWeeks = useMemo(() => {
-      return Array.from(new Set(planning.map(t => t.weekId))).sort();
-    }, [planning]);
-
-    useEffect(() => {
-      if (contractorsInPeriod.length > 0 && !ppcSelectedContractor) setPpcSelectedContractor(contractorsInPeriod[0]);
-      if (availableWeeks.length > 0) {
-        if (!ppcStartWeek) setPpcStartWeek(availableWeeks[0]);
-        if (!ppcEndWeek) setPpcEndWeek(availableWeeks[availableWeeks.length - 1]);
-      }
-    }, [contractorsInPeriod, availableWeeks]);
-
-    const contractorWeeklyPpcData = useMemo(() => {
-      if (!ppcSelectedContractor || !ppcStartWeek || !ppcEndWeek) return [];
-      const periodWeeks = availableWeeks.filter(w => w >= ppcStartWeek && w <= ppcEndWeek);
-
-      return periodWeeks.map(wId => {
-        const weekTasksList = planning.filter(t => t.weekId === wId && t.responsible === ppcSelectedContractor);
-        const totalP = weekTasksList.length;
-        if (totalP === 0) return { weekId: wId, startDateStr: formatDateBR(wId), ppc: null };
-        const comp = weekTasksList.filter(t => t.progressThisWeek >= t.plannedThisWeek).length;
-        return { weekId: wId, startDateStr: formatDateBR(wId), ppc: Math.round((comp / totalP) * 100) };
-      });
-    }, [planning, ppcSelectedContractor, ppcStartWeek, ppcEndWeek, availableWeeks]);
-
-    const averagePpc = useMemo(() => {
-      const valids = contractorWeeklyPpcData.filter(d => d.ppc !== null);
-      if (valids.length === 0) return 0;
-      return Math.round(valids.reduce((acc, d) => acc + (d.ppc || 0), 0) / valids.length);
-    }, [contractorWeeklyPpcData]);
-
-    const ppcEvolutionChart = useMemo(() => {
-      const data = contractorWeeklyPpcData.filter(d => d.ppc !== null);
-      if (data.length === 0) return null;
-      const width = 500;
-      const height = 220;
-      const mLeft = 40;
-      const chartW = width - mLeft - 20;
-      const chartH = height - 40 - 20;
-      const getY = (val: number) => height - 40 - (val / 100) * chartH;
-      const xStep = data.length > 1 ? chartW / (data.length - 1) : chartW;
-      
-      const points = data.map((d, idx) => ({
-        x: mLeft + idx * xStep,
-        y: getY(d.ppc || 0),
-        ppc: d.ppc,
-        label: d.startDateStr.slice(0, 5)
-      }));
-
-      const pathD = points.length > 0 ? `M ${points[0].x} ${points[0].y} ` + points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ') : '';
-      return { width, height, mLeft, getY, validPoints: points, pathD };
-    }, [contractorWeeklyPpcData]);
-
-    const delayStatsContractor = useMemo(() => {
-      if (!ppcSelectedContractor || !ppcStartWeek || !ppcEndWeek) return [];
-      const counts: { [key: string]: number } = {};
-      planning.forEach(t => {
-        if (t.weekId >= ppcStartWeek && t.weekId <= ppcEndWeek && t.responsible === ppcSelectedContractor) {
-          if (t.progressThisWeek < t.plannedThisWeek && t.delayReason) {
-            counts[t.delayReason] = (counts[t.delayReason] || 0) + 1;
-          }
-        }
-      });
-      const list = Object.entries(counts).map(([reason, count]) => ({ reason, count }));
-      list.sort((a, b) => b.count - a.count);
-      const total = list.reduce((acc, i) => acc + i.count, 0);
-      return list.map(item => ({ ...item, percent: total > 0 ? (item.count / total) * 100 : 0 }));
-    }, [planning, ppcSelectedContractor, ppcStartWeek, ppcEndWeek]);
-
     return (
       <div className="space-y-6 animate-in fade-in duration-300 pb-12">
         <div className="bg-white p-5 rounded-2xl border border-slate-200">
           <h2 className="text-xs font-black text-indigo-900 uppercase tracking-tight mb-4">Análise de Desempenho por Equipe</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-[8px] font-black uppercase text-slate-450 mb-1">Equipe / Empreiteiro</label>
-              <select className="w-full p-2.5 bg-slate-50 border border-slate-250 rounded-lg text-xs font-bold outline-none text-slate-800 font-mono" value={ppcSelectedContractor} onChange={e => setPpcSelectedContractor(e.target.value)}>
+              <label className="block text-[8px] font-black uppercase text-slate-600 mb-1">Equipe / Empreiteiro</label>
+              <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none text-slate-800 font-mono" value={ppcSelectedContractor} onChange={e => setPpcSelectedContractor(e.target.value)}>
                 <option value="">-- Selecione --</option>
                 {contractorsInPeriod.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-[8px] font-black uppercase text-slate-450 mb-1">Semana Inicial</label>
-              <select className="w-full p-2.5 bg-slate-50 border border-slate-250 rounded-lg text-xs font-bold outline-none text-slate-800" value={ppcStartWeek} onChange={e => setPpcStartWeek(e.target.value)}>
+              <label className="block text-[8px] font-black uppercase text-slate-600 mb-1">Semana Inicial</label>
+              <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none text-slate-800" value={ppcStartWeek} onChange={e => setPpcStartWeek(e.target.value)}>
                 {availableWeeks.map(w => <option key={w} value={w}>{formatDateBR(w)}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-[8px] font-black uppercase text-slate-450 mb-1">Semana Final</label>
-              <select className="w-full p-2.5 bg-slate-50 border border-slate-250 rounded-lg text-xs font-bold outline-none text-slate-800" value={ppcEndWeek} onChange={e => setPpcEndWeek(e.target.value)}>
+              <label className="block text-[8px] font-black uppercase text-slate-600 mb-1">Semana Final</label>
+              <select className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold outline-none text-slate-800" value={ppcEndWeek} onChange={e => setPpcEndWeek(e.target.value)}>
                 {availableWeeks.map(w => <option key={w} value={w}>{formatDateBR(w)}</option>)}
               </select>
             </div>
@@ -1921,7 +1924,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
               </div>
             ))}
             {(ppcHistory || []).length === 0 && (
-              <div className="col-span-full py-8 text-center text-xs text-slate-450 font-bold uppercase italic">Nenhuma semana finalizada.</div>
+              <div className="col-span-full py-8 text-center text-xs text-slate-600 font-bold uppercase italic">Nenhuma semana finalizada.</div>
             )}
           </div>
         </div>
@@ -1939,25 +1942,25 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
 
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
             <div>
-              <label className="block text-[8px] font-black uppercase text-slate-450 mb-1">Pesquisa</label>
+              <label className="block text-[8px] font-black uppercase text-slate-600 mb-1">Pesquisa</label>
               <input type="text" className="w-full p-2 border rounded-lg text-xs bg-white outline-none" placeholder="Buscar..." value={giantSearch} onChange={e => setHistorySearch(e.target.value)} />
             </div>
             <div>
-              <label className="block text-[8px] font-black uppercase text-slate-450 mb-1">Pavimento</label>
+              <label className="block text-[8px] font-black uppercase text-slate-600 mb-1">Pavimento</label>
               <select className="w-full p-2 border rounded-lg text-xs bg-white outline-none font-bold text-slate-800" value={giantFloorFilter} onChange={e => setHistoryFloorFilter(e.target.value)}>
                 <option value="">-- Todos --</option>
                 {floors.map(f => <option key={f} value={f}>{f}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-[8px] font-black uppercase text-slate-450 mb-1">Macroatividade</label>
+              <label className="block text-[8px] font-black uppercase text-slate-600 mb-1">Macroatividade</label>
               <select className="w-full p-2 border rounded-lg text-xs bg-white outline-none font-bold text-slate-800" value={giantMacroFilter} onChange={e => setHistoryMacroFilter(e.target.value)}>
                 <option value="">-- Todas --</option>
                 {allPossibleMacros.map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-[8px] font-black uppercase text-slate-450 mb-1">Estado</label>
+              <label className="block text-[8px] font-black uppercase text-slate-600 mb-1">Estado</label>
               <select className="w-full p-2 border rounded-lg text-xs bg-white outline-none font-bold text-slate-850" value={giantStatusFilter} onChange={e => setHistoryStatusFilter(e.target.value)}>
                 <option value="">-- Todos --</option>
                 <option value="finalized">🔒 Finalizadas</option>
@@ -2034,7 +2037,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
             <h2 className="text-xs font-black uppercase border-b pb-2 text-slate-850 tracking-wider">1. Cadastro de Equipes</h2>
             <div className="flex gap-2">
               <input type="text" placeholder="EX: EQUIPE ALFA..." className="flex-1 p-2.5 text-xs border border-slate-200 rounded-xl outline-none bg-slate-50 focus:bg-white uppercase font-bold text-slate-800" value={newTeamName} onChange={e => setNewTeamName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddTeam()} />
-              <button onClick={handleAddTeam} className="bg-indigo-650 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer">Registrar</button>
+              <button onClick={handleAddTeam} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer">Registrar</button>
             </div>
             <div className="space-y-2">
               {teams.map(team => (
@@ -2054,7 +2057,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
             <h2 className="text-xs font-black uppercase border-b pb-2 text-slate-850 tracking-wider">2. Padronização de Causas de Atraso</h2>
             <div className="flex gap-2">
               <input type="text" placeholder="EX: FALTA DE MATERIAL..." className="flex-1 p-2.5 text-xs border border-slate-200 rounded-xl outline-none bg-slate-50 focus:bg-white uppercase font-bold text-slate-800" value={newDelayReason} onChange={e => setNewDelayReason(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddDelayReason()} />
-              <button onClick={handleAddDelayReason} className="bg-indigo-650 hover:bg-indigo-755 text-white px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer">Registrar</button>
+              <button onClick={handleAddDelayReason} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer">Registrar</button>
             </div>
             <div className="space-y-2">
               {delayReasons.map(reason => (
@@ -2072,11 +2075,11 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-bold text-slate-700">
             <div>
               <label className="block text-[8px] uppercase mb-1">Cidade da Obra</label>
-              <input type="text" className="w-full p-2.5 border border-slate-250 bg-slate-50 focus:bg-white rounded-xl text-xs" placeholder="Ex: Curitiba, PR" value={projectCity} onChange={e => setProjectCity(e.target.value)} />
+              <input type="text" className="w-full p-2.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-xl text-xs" placeholder="Ex: Curitiba, PR" value={projectCity} onChange={e => setProjectCity(e.target.value)} />
             </div>
             <div>
               <label className="block text-[8px] uppercase mb-1">Visual Crossing API Key</label>
-              <input type="password" className="w-full p-2.5 border border-slate-250 bg-slate-50 focus:bg-white rounded-xl text-xs" placeholder="API Key..." value={weatherApiKey} onChange={e => setWeatherApiKey(e.target.value)} />
+              <input type="password" className="w-full p-2.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-xl text-xs" placeholder="API Key..." value={weatherApiKey} onChange={e => setWeatherApiKey(e.target.value)} />
             </div>
           </div>
         </div>
@@ -2113,11 +2116,11 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
             Isto fechará o PPC semanal ativo e integrará o progresso acumulado de volta ao cronograma geral.
           </p>
           <label className="flex items-center gap-2 text-xs font-black text-slate-700 cursor-pointer">
-            <input type="checkbox" checked={finalizeModal?.carryOverUnfinished ?? true} onChange={e => setFinalizeModal(prev => prev ? { ...prev, carryOverUnfinished: e.target.checked } : null)} className="w-4 h-4 rounded text-indigo-650 cursor-pointer" />
+            <input type="checkbox" checked={finalizeModal?.carryOverUnfinished ?? true} onChange={e => setFinalizeModal(prev => prev ? { ...prev, carryOverUnfinished: e.target.checked } : null)} className="w-4 h-4 rounded text-indigo-600 cursor-pointer" />
             <span>Reprogramar tarefas não concluídas</span>
           </label>
           <div className="flex justify-end gap-2 text-[10px] font-black uppercase pt-2">
-            <button onClick={() => setFinalizeModal(null)} className="px-4 py-2 border border-slate-250 rounded-xl cursor-pointer">Cancelar</button>
+            <button onClick={() => setFinalizeModal(null)} className="px-4 py-2 border border-slate-200 rounded-xl cursor-pointer">Cancelar</button>
             <button onClick={() => handleFinalizeWeek(finalizeModal?.carryOverUnfinished ?? true)} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl cursor-pointer">Finalizar</button>
           </div>
         </div>
@@ -2167,46 +2170,46 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
           <div className="space-y-6">
             <div className="flex justify-between items-center border-b pb-4">
               <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight">➕ Programar Novas Atividades</h3>
-              <button onClick={() => setIsDrawerOpen(false)} className="text-slate-450 hover:text-slate-700 font-bold text-xl cursor-pointer">&times;</button>
+              <button onClick={() => setIsDrawerOpen(false)} className="text-slate-600 hover:text-slate-700 font-bold text-xl cursor-pointer">&times;</button>
             </div>
 
-            <div className="space-y-2.5 p-3 bg-slate-50 rounded-2xl border border-slate-200 text-[9px] font-black uppercase text-slate-450">
+            <div className="space-y-2.5 p-3 bg-slate-50 rounded-2xl border border-slate-200 text-[9px] font-black uppercase text-slate-600">
               <div>
                 <label className="block mb-1">Filtrar por Pacote (Macro)</label>
-                <select className="w-full p-2 border border-slate-250 bg-white rounded-lg text-xs font-bold outline-none text-slate-800 font-mono" value={drawerMacro} onChange={e => setDrawerMacro(e.target.value)}>
+                <select className="w-full p-2 border border-slate-200 bg-white rounded-lg text-xs font-bold outline-none text-slate-800 font-mono" value={drawerMacro} onChange={e => setDrawerMacro(e.target.value)}>
                   <option value="">-- Todos --</option>
                   {allPossibleMacros.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block mb-1">Filtrar por Pavimento</label>
-                <select className="w-full p-2 border border-slate-250 bg-white rounded-lg text-xs font-bold outline-none text-slate-800" value={drawerFloor} onChange={e => setDrawerFloor(e.target.value)}>
+                <select className="w-full p-2 border border-slate-200 bg-white rounded-lg text-xs font-bold outline-none text-slate-800" value={drawerFloor} onChange={e => setDrawerFloor(e.target.value)}>
                   <option value="">-- Todos --</option>
                   {floors.map(f => <option key={f} value={f}>{f}</option>)}
                 </select>
               </div>
               <div>
                 <label className="block mb-1">Pesquisar por Serviço</label>
-                <input type="text" placeholder="Pesquisar..." className="w-full p-2 border border-slate-250 bg-white rounded-lg text-xs outline-none text-slate-800" value={drawerSearch} onChange={e => setDrawerSearch(e.target.value)} />
+                <input type="text" placeholder="Pesquisar..." className="w-full p-2 border border-slate-200 bg-white rounded-lg text-xs outline-none text-slate-800" value={drawerSearch} onChange={e => setDrawerSearch(e.target.value)} />
               </div>
             </div>
 
             <div className="space-y-1">
               <label className="block text-[8px] font-black text-slate-400 uppercase">Equipe de Execução</label>
-              <select id="drawerTeamSelect" className="w-full p-2.5 border border-slate-250 bg-slate-50 focus:bg-white rounded-xl text-xs font-bold outline-none text-slate-800">
+              <select id="drawerTeamSelect" className="w-full p-2.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-xl text-xs font-bold outline-none text-slate-800">
                 <option value="">-- Sem Equipe --</option>
                 {teams.map(team => <option key={team} value={team}>{team}</option>)}
               </select>
             </div>
 
             <div className="space-y-2">
-              <span className="block text-[8px] font-black text-slate-450 uppercase tracking-widest">Serviços Disponíveis ({candidates.length})</span>
+              <span className="block text-[8px] font-black text-slate-600 uppercase tracking-widest">Serviços Disponíveis ({candidates.length})</span>
               <div className="max-h-[220px] overflow-y-auto space-y-1.5">
                 {candidates.map(c => (
                   <div key={c.id} className="flex justify-between items-center p-2.5 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 transition">
                     <div className="min-w-0 flex-1 pr-2">
                       <span className="block text-[11px] font-bold text-slate-800 uppercase leading-tight truncate">{c.service}</span>
-                      <span className="block text-[8px] text-slate-450 uppercase mt-0.5">{c.floor} | {c.macro}</span>
+                      <span className="block text-[8px] text-slate-600 uppercase mt-0.5">{c.floor} | {c.macro}</span>
                     </div>
                     <button 
                       onClick={() => handleAddTasksFromDrawer([{ id: c.id, serviceName: c.service, lot: c.floor, packageName: c.macro }], (document.getElementById('drawerTeamSelect') as HTMLSelectElement).value)}
