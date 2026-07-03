@@ -2577,11 +2577,11 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
     ['config', 'Configurações']
   ];
   return (
-    <section className="page short-term">
+    <section className="page short-term short-term-shell">
       <PageHeader title="Curto prazo" subtitle="Planejamento semanal, medição física e acompanhamento da obra.">
-        <span className={`sync-pill ${syncStatus}`}>{syncStatus === 'saved' ? 'Supabase sincronizado' : syncStatus === 'saving' ? 'Salvando…' : syncStatus === 'error' ? 'Falha na sincronização' : 'Modo local'}</span>
+        <span className={`sync-pill ${syncStatus}`}>{syncStatus === 'saved' ? 'Supabase sincronizado' : syncStatus === 'saving' ? 'Salvando...' : syncStatus === 'error' ? 'Falha na sincronização' : 'Modo local'}</span>
       </PageHeader>
-      <nav className="short-tabs">
+      <nav className="short-tabs short-tabs-compact">
         {tabLabels.map(([value, label]) => (
           <button className={tab === value ? 'active' : ''} onClick={() => setTab(value)} key={value}>
             {label}
@@ -2590,6 +2590,27 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
       </nav>
       {tab === 'dashboard' && (
         <>
+          <div className="short-hero card">
+            <div>
+              <small>CURTO PRAZO</small>
+              <h3>Planejamento operacional da semana</h3>
+              <p>Baseado nas atividades reorganizadas no último médio prazo criado.</p>
+            </div>
+            <div className="short-hero-stats">
+              <span>
+                <b>{weeklyTasks.length}</b>
+                Planejadas
+              </span>
+              <span>
+                <b>{completed}</b>
+                Concluídas
+              </span>
+              <span>
+                <b>{ppc.toFixed(1)}%</b>
+                PPC
+              </span>
+            </div>
+          </div>
           <div className="metric-grid">
             <Metric label="PPC da semana" value={`${ppc.toFixed(1)}%`} />
             <Metric label="Atividades planejadas" value={String(weeklyTasks.length)} />
@@ -2618,7 +2639,7 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
       )}
       {tab === 'planning' && (
         <>
-          <div className="weekly-toolbar card">
+          <div className="weekly-toolbar card short-toolbar">
             <label>
               Início da semana
               <input type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} />
@@ -2631,8 +2652,11 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
             </button>
           </div>
           <div className="short-planning-grid">
-            <div className="card candidate-list">
-              <h3>Atividades do cronograma</h3>
+            <div className="card candidate-list short-panel">
+              <div className="short-panel-head">
+                <h3>Atividades disponíveis</h3>
+                <small>{candidates.length} atividades no período</small>
+              </div>
               <small>{candidates.length} atividades no período</small>
               {candidates.map((task) => (
                 <button key={task.id} disabled={currentWeekly.some((item) => item.taskId === task.id)} onClick={() => addTask(task)}>
@@ -2643,11 +2667,14 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
                     </small>
                   </span>
                   <i>＋</i>
-                </button>
-              ))}
+                  </button>
+                ))}
             </div>
-            <div className="card weekly-list">
-              <h3>Plano semanal</h3>
+            <div className="card weekly-list short-panel">
+              <div className="short-panel-head">
+                <h3>Plano semanal</h3>
+                <small>{currentWeekly.length} itens selecionados</small>
+              </div>
               {weeklyTasks.map(({ item, task }) => (
                 <article key={item.id}>
                   <header>
@@ -2714,7 +2741,7 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
         </>
       )}
       {tab === 'matrix' && (
-        <div className="card table-wrap">
+        <div className="card table-wrap short-table-card">
           <table>
             <thead>
               <tr>
@@ -2744,7 +2771,7 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
         </div>
       )}
       {tab === 'ppc' && (
-        <div className="short-team-grid">
+        <div className="short-team-grid short-team-grid-alt">
           {teams.map((team) => {
             const teamItems = weeklyTasks.filter(({ item }) => item.team === team);
             const teamDone = teamItems.filter(({ item }) => item.measured >= item.planned).length;
@@ -2763,7 +2790,7 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
         </div>
       )}
       {tab === 'history' && (
-        <div className="card table-wrap">
+        <div className="card table-wrap short-table-card">
           <table>
             <thead>
               <tr>
@@ -2791,7 +2818,7 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
       )}
       {tab === 'config' && (
         <div className="short-config-grid">
-          <div className="card">
+          <div className="card short-config-card">
             <h3>Equipes</h3>
             {teams.map((team) => (
               <div className="config-chip" key={team}>
@@ -2804,11 +2831,11 @@ function ShortTerm({ tasks, projectId }: { tasks: Task[]; projectId: string }) {
                 const name = window.prompt('Nome da equipe');
                 if (name?.trim()) setTeams([...teams, name.trim()]);
               }}
-            >
-              Adicionar equipe
-            </button>
-          </div>
-          <div className="card">
+              >
+                Adicionar equipe
+              </button>
+            </div>
+          <div className="card short-config-card">
             <h3>Motivos de atraso</h3>
             {reasons.map((reason) => (
               <div className="config-chip" key={reason}>
