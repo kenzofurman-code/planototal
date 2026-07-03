@@ -1568,6 +1568,10 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   const [mediumActivitySearch, setMediumActivitySearch] = useState('');
   const [mediumResponsibleSearch, setMediumResponsibleSearch] = useState('');
   const [mediumOnlyUnassigned, setMediumOnlyUnassigned] = useState(false);
+  const [mediumZoom, setMediumZoom] = useState(1);
+  const [mediumMotherSort, setMediumMotherSort] = useState<'import' | 'asc' | 'desc'>('import');
+  const [mediumLotSort, setMediumLotSort] = useState<'import' | 'asc' | 'desc'>('import');
+  const mediumPanRef = useRef<null | { x: number; y: number; left: number; top: number }>(null);
   function threeMonthsAfter(value: string) {
     const date = parseDate(value);
     date.setMonth(date.getMonth() + 3);
@@ -1589,22 +1593,32 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
       createdAt: new Date().toISOString(),
       tasks: snapshot
     });
+    const rootIds = new Map(snapshot.map((task) => [task.id, crypto.randomUUID()]));
+    const resolveTaskId = (reference: string) => {
+      if (rootIds.has(reference)) return reference;
+      const numeric = reference.match(/\d+/)?.[0];
+      return snapshot.find((task) => task.id === numeric || task.id.match(/\d+/)?.[0] === numeric)?.id;
+    };
     setUnits(
       Object.fromEntries(
-        snapshot.map((task) => [
-          task.id,
-          [
-            {
-              id: crypto.randomUUID(),
-              name: task.lot,
-              weight: 100,
-              quantity: task.quantity ?? 0,
-              startDate: task.startDate,
-              endDate: task.endDate,
-              responsible: task.responsible ?? ''
-            }
-          ]
-        ])
+        snapshot.map((task) => {
+          const predecessorUnits = (task.predecessors ?? []).map(resolveTaskId).filter((id): id is string => Boolean(id)).map((id) => rootIds.get(id)!).filter(Boolean);
+          return [
+            task.id,
+            [
+              {
+                id: rootIds.get(task.id)!,
+                name: task.lot,
+                weight: 100,
+                quantity: task.quantity ?? 0,
+                startDate: task.startDate,
+                endDate: task.endDate,
+                responsible: task.responsible ?? '',
+                predecessors: predecessorUnits
+              }
+            ]
+          ];
+        })
       )
     );
     setSelectedTaskId(null);
@@ -1747,6 +1761,19 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   function mediumPointerY(event: React.PointerEvent) {
     return event.clientY - (mediumTimelineRef.current?.getBoundingClientRect().top ?? 0);
   }
+  function startMediumPan(event: React.PointerEvent<HTMLDivElement>) {
+    if ((event.target as Element).closest('.medium-task-card,.medium-time-head')) return;
+    mediumPanRef.current = { x: event.clientX, y: event.clientY, left: event.currentTarget.scrollLeft, top: event.currentTarget.scrollTop };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function moveMediumPan(event: React.PointerEvent<HTMLDivElement>) {
+    if (!mediumPanRef.current) return;
+    event.currentTarget.scrollLeft = mediumPanRef.current.left - (event.clientX - mediumPanRef.current.x);
+    event.currentTarget.scrollTop = mediumPanRef.current.top - (event.clientY - mediumPanRef.current.y);
+  }
+  function finishMediumPan() {
+    mediumPanRef.current = null;
+  }
   function clearMediumLongPress() {
     if (mediumLongPressRef.current !== null) window.clearTimeout(mediumLongPressRef.current);
     mediumLongPressRef.current = null;
@@ -1855,7 +1882,7 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
   const selectedTask = windowData?.tasks.find((task) => task.id === selectedTaskId);
   const activeUnitParentId = selectedTask ? ((units[selectedTask.id] ?? []).some((unit) => unit.id === unitParentId) ? unitParentId! : units[selectedTask.id]?.[0]?.id) : undefined;
   const activeSiblingWeight = selectedTask ? (units[selectedTask.id] ?? []).filter((unit) => unit.parentId === activeUnitParentId).reduce((sum, unit) => sum + unit.weight, 0) : 0;
-  const dayWidth = 13;
+  const dayWidth = [0, 13, 18, 24][mediumZoom];
   const timelineWidth = windowData ? Math.max(1100, (diffDays(parseDate(windowData.startDate), parseDate(windowData.endDate)) + 1) * dayWidth) : 0;
   function leafUnits(taskId: string) {
     const list = units[taskId] ?? [];
@@ -1885,7 +1912,7 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
     if (!firstTaskByLot.has(key)) firstTaskByLot.set(key, task.id);
   });
   const maxSublotDepth = Math.max(0, ...visibleMediumTasks.flatMap((task) => leafUnits(task.id).map((unit) => unitPath(task.id, unit).length)), 0);
-  const labelColumnWidth = 170 + maxSublotDepth * 145;
+  const labelColumnWidth = 182 + maxSublotDepth * 145;
   const mediumLotGroups = Array.from(
     visibleMediumTasks.reduce((map, task) => {
       const key = `${task.lotMother}||${task.lot}`;
@@ -1894,7 +1921,19 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
       map.set(key, group);
       return map;
     }, new Map<string, { key: string; lotMother: string; lot: string; tasks: Task[] }>())
-  ).map(([, group]) => group);
+  )
+    .map(([, group]) => group)
+    .sort((a, b) => {
+      const numericCompare = (left: string, right: string, direction: 'import' | 'asc' | 'desc') => {
+        if (direction === 'import') return 0;
+        const leftMatch = left.match(/\d+/)?.[0];
+        const rightMatch = right.match(/\d+/)?.[0];
+        const comparison = leftMatch && rightMatch ? Number(leftMatch) - Number(rightMatch) : left.localeCompare(right, 'pt-BR');
+        return direction === 'asc' ? comparison : -comparison;
+      };
+      const mother = numericCompare(a.lotMother, b.lotMother, mediumMotherSort);
+      return mother || numericCompare(a.lot, b.lot, mediumLotSort);
+    });
   const mediumRowLayout = new Map<string, { top: number; height: number }>();
   const mediumUnitLayout = new Map<string, { x: number; y: number; width: number; height: number; lane: number }>();
   const mediumGroupLayout = new Map<string, { top: number; height: number; laneCount: number; cardHeight: number }>();
@@ -1994,6 +2033,29 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
               </button>
             )}
           </div>
+          <div className="medium-view-controls">
+            <label>
+              Lotes-mãe
+              <select value={mediumMotherSort} onChange={(event) => setMediumMotherSort(event.target.value as typeof mediumMotherSort)}>
+                <option value="import">Ordem da janela</option>
+                <option value="asc">Numérica crescente</option>
+                <option value="desc">Numérica decrescente</option>
+              </select>
+            </label>
+            <label>
+              Lotes/pavimentos
+              <select value={mediumLotSort} onChange={(event) => setMediumLotSort(event.target.value as typeof mediumLotSort)}>
+                <option value="import">Ordem da janela</option>
+                <option value="asc">Numérica crescente</option>
+                <option value="desc">Numérica decrescente</option>
+              </select>
+            </label>
+            <label>
+              Zoom
+              <input type="range" min="1" max="3" value={mediumZoom} onChange={(event) => setMediumZoom(Number(event.target.value))} />
+            </label>
+            <small>Arraste o fundo do cronograma para navegar.</small>
+          </div>
           <div
             className="medium-timeline-shell"
             style={{
@@ -2010,9 +2072,10 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
               <div
                 className="medium-label-head medium-location-grid"
                 style={{
-                  gridTemplateColumns: `170px repeat(${maxSublotDepth},145px)`
+                  gridTemplateColumns: `32px 150px repeat(${maxSublotDepth},145px)`
                 }}
               >
+                <b title="Lote-mãe">LM</b>
                 <b>Lote</b>
                 {Array.from({ length: maxSublotDepth }).map((_, index) => (
                   <b key={index}>Sublote {index + 1}</b>
@@ -2031,8 +2094,10 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
                   onDrop={() => reorderMediumTask(group.tasks[0].id)}
                   onDragEnd={() => setMediumOrdering(null)}
                 >
+                  <span className="medium-parent-mother">{group.lotMother}</span>
                   <span className="medium-parent-lot">⠿ {group.lot}</span>
-                  <div className="medium-location-grid medium-location-line" style={{ gridTemplateColumns: `170px repeat(${maxSublotDepth},145px)` }}>
+                  <div className="medium-location-grid medium-location-line" style={{ gridTemplateColumns: `32px 150px repeat(${maxSublotDepth},145px)` }}>
+                    <span />
                     <span />
                     {Array.from({ length: maxSublotDepth }).map((_, index) => (
                       <span key={index}>{Array.from(new Set(paths.map((path) => path[index]?.name).filter(Boolean))).join(', ') || '—'}</span>
@@ -2053,11 +2118,15 @@ function MediumPlan({ tasks }: { tasks: Task[] }) {
             </div>
             <div
               className="medium-timeline-scroll"
+              onPointerDown={startMediumPan}
+              onPointerMove={moveMediumPan}
+              onPointerUp={finishMediumPan}
+              onPointerCancel={finishMediumPan}
               onScroll={(event) => {
                 if (mediumLabelsRef.current) mediumLabelsRef.current.scrollTop = event.currentTarget.scrollTop;
               }}
             >
-              <div ref={mediumTimelineRef} className="medium-timeline" style={{ width: timelineWidth }} onPointerMove={moveMediumItem} onPointerUp={finishMediumDrag} onPointerCancel={finishMediumDrag}>
+              <div ref={mediumTimelineRef} className="medium-timeline" style={{ width: timelineWidth, '--medium-day-width': `${dayWidth}px` } as React.CSSProperties} onPointerMove={moveMediumItem} onPointerUp={finishMediumDrag} onPointerCancel={finishMediumDrag}>
                 <div className="medium-time-head">
                   <div className="medium-week-head">
                     {Array.from({ length: 14 }).map((_, index) => {
