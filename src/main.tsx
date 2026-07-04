@@ -8,6 +8,7 @@ import { saveCalendarEvents } from './lib/calendarRepository';
 import { loadLineBalanceData, saveLineBalanceData } from './lib/lineBalanceRepository';
 import { saveProject, uploadProjectImage } from './lib/projectRepository';
 import { deleteProjectBudget, saveScheduleTasks } from './lib/scheduleRepository';
+import { loadBudgetRevisionName, saveBudgetRevisionName } from './lib/budgetRepository';
 import { createScheduleVersion, deleteScheduleVersion, loadScheduleVersions, selectScheduleVersion, updateActiveScheduleVersion, type SavedScheduleVersion } from './lib/scheduleVersionRepository';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
@@ -986,6 +987,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
       })
       .filter((task): task is Task => task !== null);
     const parents: Task[] = [];
+    const sourceToParent = new Map<string, string>();
     let currentParent: Task | null = null;
     parsed.forEach((task) => {
       const isParent = !task.service || task.service === '-';
@@ -993,14 +995,20 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
       if (isParent) {
         currentParent = { ...task, service: undefined, services: [] };
         parents.push(currentParent);
+        sourceToParent.set(task.id, currentParent.id);
       } else if (sameContext && currentParent) {
         currentParent.services = Array.from(new Set([...(currentParent.services ?? []), task.service!]));
+        currentParent.predecessors = Array.from(new Set([...(currentParent.predecessors ?? []), ...(task.predecessors ?? [])]));
+        currentParent.successors = Array.from(new Set([...(currentParent.successors ?? []), ...(task.successors ?? [])]));
+        sourceToParent.set(task.id, currentParent.id);
       } else {
         currentParent = { ...task, services: [task.service!] };
         parents.push(currentParent);
+        sourceToParent.set(task.id, currentParent.id);
       }
     });
     const consolidated = new Map<string, Task>();
+    const parentToConsolidated = new Map<string, string>();
     parents.forEach((task) => {
       const key = `${task.lotMother}||${task.lot}||${task.packageName}`.toLocaleLowerCase('pt-BR');
       const existing = consolidated.get(key);
@@ -1009,14 +1017,32 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
           ...task,
           services: [...(task.services ?? [])]
         });
+        parentToConsolidated.set(task.id, task.id);
         return;
       }
+      parentToConsolidated.set(task.id, existing.id);
       existing.services = Array.from(new Set([...(existing.services ?? []), ...(task.services ?? [])]));
       if (parseDate(task.startDate) < parseDate(existing.startDate)) existing.startDate = task.startDate;
       if (parseDate(task.endDate) > parseDate(existing.endDate)) existing.endDate = task.endDate;
       existing.duration = diffDays(parseDate(existing.startDate), parseDate(existing.endDate)) + 1;
       existing.predecessors = Array.from(new Set([...(existing.predecessors ?? []), ...(task.predecessors ?? [])]));
       existing.successors = Array.from(new Set([...(existing.successors ?? []), ...(task.successors ?? [])]));
+    });
+    const resolveImportedId = (id: string) => parentToConsolidated.get(sourceToParent.get(id) ?? id) ?? sourceToParent.get(id) ?? id;
+    consolidated.forEach((task) => {
+      task.predecessors = Array.from(new Set((task.predecessors ?? []).map(resolveImportedId))).filter((id) => id !== task.id);
+      task.successors = Array.from(new Set((task.successors ?? []).map(resolveImportedId))).filter((id) => id !== task.id);
+    });
+    const consolidatedById = new Map(Array.from(consolidated.values()).map((task) => [task.id, task]));
+    consolidated.forEach((task) => {
+      task.predecessors?.forEach((predecessorId) => {
+        const predecessor = consolidatedById.get(predecessorId);
+        if (predecessor) predecessor.successors = Array.from(new Set([...(predecessor.successors ?? []), task.id]));
+      });
+      task.successors?.forEach((successorId) => {
+        const successor = consolidatedById.get(successorId);
+        if (successor) successor.predecessors = Array.from(new Set([...(successor.predecessors ?? []), task.id]));
+      });
     });
     const palette = ['#4f46e5', '#f97316', '#0f766e', '#a855f7', '#2563eb', '#ca8a04', '#dc2626', '#059669', '#7c3aed', '#475569'];
     const packageIndexes = new Map<string, Map<string, number>>();
@@ -3085,6 +3111,8 @@ function Financial({ projectKey, tasks, setTasks }: { projectKey: string; tasks:
         ];
   });
   const [budgetId, setBudgetId] = useState<string | null>(null);
+  const [budgetRevisionName, setBudgetRevisionName] = useState('Orçamento vigente');
+  const [editingBudgetName, setEditingBudgetName] = useState(false);
   const [activityIds, setActivityIds] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [mappingOpen, setMappingOpen] = useState(false);
@@ -3095,6 +3123,15 @@ function Financial({ projectKey, tasks, setTasks }: { projectKey: string; tasks:
   const selectedTasks = tasks.filter((task) => activityIds.includes(task.id));
   const linkedTasks = new Set(allocations.map((item) => item.taskId));
   const visibleTasks = tasks.filter((task) => `${task.packageName} ${task.lot} ${task.lotMother}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')));
+  useEffect(() => {
+    void loadBudgetRevisionName(projectKey).then(setBudgetRevisionName);
+  }, [projectKey]);
+  async function persistBudgetName() {
+    const name = budgetRevisionName.trim() || 'Orçamento vigente';
+    setBudgetRevisionName(name);
+    await saveBudgetRevisionName(projectKey, name);
+    setEditingBudgetName(false);
+  }
   function openMapping() {
     if (!selectedBudget || !selectedTasks.length) return;
     const basis = selectedTasks.map((task) => (method === 'duration' ? diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1 : method === 'quantity' ? (task.quantity ?? 0) : 1));
@@ -3135,6 +3172,15 @@ function Financial({ projectKey, tasks, setTasks }: { projectKey: string; tasks:
     <section className="page financial-mapping">
       <PageHeader title="Mapeamento físico-financeiro" subtitle="Vincule a EAP orçamentária às atividades do cronograma." />
       <div className="financial-delete-action">
+        {editingBudgetName ? (
+          <label className="budget-name-editor">
+            Nome da revisão
+            <input autoFocus value={budgetRevisionName} onChange={(event) => setBudgetRevisionName(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void persistBudgetName()} />
+            <button className="primary" onClick={() => void persistBudgetName()}>Salvar nome</button>
+          </label>
+        ) : (
+          <button onClick={() => setEditingBudgetName(true)}>Editar nome: {budgetRevisionName}</button>
+        )}
         <button className="danger-button" onClick={() => void deleteBudget()} disabled={!budgetItems.length}>
           <Trash2 size={16} /> Excluir orçamento
         </button>
@@ -3155,7 +3201,7 @@ function Financial({ projectKey, tasks, setTasks }: { projectKey: string; tasks:
         <div className="mapping-panel">
           <div className="mapping-panel-head">
             <small>ORIGEM FINANCEIRA</small>
-            <h3>EAP orçamentária</h3>
+            <h3>{budgetRevisionName}</h3>
             <span>{budgetItems.length} itens</span>
           </div>
           <div className="mapping-table-wrap">

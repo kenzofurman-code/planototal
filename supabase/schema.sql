@@ -548,6 +548,15 @@ create table if not exists app_users (
   created_at timestamptz not null default now()
 );
 
+create table if not exists budget_revisions (
+  project_key text primary key,
+  name text not null default 'Orçamento vigente',
+  updated_at timestamptz not null default now()
+);
+alter table budget_revisions enable row level security;
+drop policy if exists "budget_revisions_access" on budget_revisions;
+create policy "budget_revisions_access" on budget_revisions for all to anon, authenticated using (true) with check (true);
+
 create or replace function public.register_app_user()
 returns trigger
 language plpgsql

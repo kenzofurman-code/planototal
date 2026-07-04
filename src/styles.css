@@ -276,6 +276,8 @@ th { background: #f8fafc; color: #475569; }
 .version-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; }
 .version-row > div:first-child { display: grid; gap: 3px; }
 .version-row small { color: #64748b; }
+.budget-name-editor { display: flex; align-items: center; gap: 8px; }
+.budget-name-editor input { min-width: 240px; }
 .version-kind.planned { color: #9a3412; background: #ffedd5; }
 .version-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .version-actions button { font-size: 11px; }
