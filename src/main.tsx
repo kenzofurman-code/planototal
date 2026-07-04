@@ -1188,6 +1188,7 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
   const [dependencyMode, setDependencyMode] = useState(true);
   const [showDeps, setShowDeps] = useState(true);
   const [snapWeek, setSnapWeek] = useState(false);
+  const [allowDependencyGaps, setAllowDependencyGaps] = useState(true);
   const [dependencies, setDependencies] = useState<ScheduleDependency[]>(() =>
     tasks.flatMap((task) =>
       (task.predecessors ?? []).map((from) => ({
@@ -1267,6 +1268,7 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
           setDependencyMode(data.settings.dependencyMode ?? true);
           setShowDeps(data.settings.showDeps ?? true);
           setSnapWeek(data.settings.snapWeek ?? false);
+          setAllowDependencyGaps(data.settings.allowDependencyGaps ?? true);
           setMonthFormat(data.settings.monthFormat ?? 'numeric');
           setWeekFormat(data.settings.weekFormat ?? 'day');
           setGroupLines((data.settings.groupLines as Record<string, number>) ?? {});
@@ -1315,6 +1317,7 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
         dependencyMode,
         showDeps,
         snapWeek,
+        allowDependencyGaps,
         monthFormat,
         weekFormat,
         groupLines,
@@ -1334,6 +1337,7 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
     dependencyMode,
     showDeps,
     snapWeek,
+    allowDependencyGaps,
     monthFormat,
     weekFormat,
     groupLines,
@@ -1418,9 +1422,11 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
       if (!predecessorEnds.length) return null;
       return addDays(new Date(Math.max(...predecessorEnds.map((date) => date.getTime()))), 1);
     };
-    const enforceTaskStart = (task: Task) => {
+    const enforceTaskStart = (task: Task, useEarliestStart = false) => {
       const requiredStart = requiredStartFor(task.id);
-      if (!requiredStart || parseDate(task.startDate) >= requiredStart) return false;
+      if (!requiredStart) return false;
+      const currentStart = parseDate(task.startDate);
+      if (currentStart >= requiredStart && (!useEarliestStart || currentStart.getTime() === requiredStart.getTime())) return false;
       const duration = diffDays(parseDate(task.startDate), parseDate(task.endDate));
       task.startDate = toIsoDate(requiredStart);
       task.endDate = toIsoDate(addDays(requiredStart, duration));
@@ -1436,7 +1442,7 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
         .forEach((dependency) => {
           const successor = next.find((task) => task.id === dependency.to);
           if (!successor) return;
-          enforceTaskStart(successor);
+          enforceTaskStart(successor, !allowDependencyGaps);
           propagate(successor.id, visited);
         });
     };
@@ -1638,6 +1644,9 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
         </label>
         <label>
           <input type="checkbox" checked={showDeps} onChange={(e) => setShowDeps(e.target.checked)} /> mostrar dependências
+        </label>
+        <label title="Desmarque para trazer a cadeia posterior para a menor data permitida">
+          <input type="checkbox" checked={allowDependencyGaps} onChange={(e) => setAllowDependencyGaps(e.target.checked)} /> permitir folgas entre dependências
         </label>
         <label>
           <input type="checkbox" checked={snapWeek} onChange={(e) => setSnapWeek(e.target.checked)} /> encaixar por semana

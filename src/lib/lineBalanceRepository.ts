@@ -15,6 +15,7 @@ export type LineBalanceSettings = {
   dependencyMode: boolean;
   showDeps: boolean;
   snapWeek: boolean;
+  allowDependencyGaps: boolean;
   monthFormat: 'index' | 'numeric';
   weekFormat: 'short' | 'numeric' | 'day';
   groupLines: Record<string, number>;
