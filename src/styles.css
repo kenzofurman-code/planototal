@@ -284,6 +284,7 @@ th { background: #f8fafc; color: #475569; }
 .financial-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
 .budget-upload { display:inline-flex; gap:7px; align-items:center; cursor:pointer; }
 .budget-upload input { display:none; }
+.budget-import-mode { min-height:36px; padding:0 10px; border:1px solid var(--border); border-radius:8px; background:var(--surface); color:inherit; }
 .financial-message { padding:10px 12px; border-radius:8px; background:#eef2ff; color:#3730a3; }
 .empty-state { text-align:center; padding:42px 20px; color:#64748b; }
 .weight-lock-cell { display:flex; align-items:center; gap:6px; }

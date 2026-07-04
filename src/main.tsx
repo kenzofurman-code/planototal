@@ -3493,6 +3493,7 @@ function LegacyFinancial({ projectKey, tasks, setTasks }: { projectKey: string; 
 }
 
 type BudgetImportField = 'level' | 'code' | 'description' | 'material' | 'labor' | 'total' | 'taskId' | 'packageName' | 'service' | 'lot' | 'divisionType' | 'weight';
+type BudgetImportMode = 'budget' | 'links' | 'budget-links';
 const budgetImportFields: Array<{ key: BudgetImportField; label: string; required: boolean; aliases: string[] }> = [
   { key: 'level', label: 'Nível', required: false, aliases: ['nível', 'nivel'] },
   { key: 'code', label: 'Código', required: true, aliases: ['código', 'codigo'] },
@@ -3517,7 +3518,8 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const [activitySearch, setActivitySearch] = useState('');
   const [editingName, setEditingName] = useState(false);
   const [message, setMessage] = useState('');
-  const [importData, setImportData] = useState<{ fileName: string; rows: unknown[][]; headerRow: number; type: BudgetType } | null>(null);
+  const [importMode, setImportMode] = useState<BudgetImportMode>('budget');
+  const [importData, setImportData] = useState<{ fileName: string; rows: unknown[][]; headerRow: number; type: BudgetType; mode: BudgetImportMode } | null>(null);
   const [mapping, setMapping] = useState<Partial<Record<BudgetImportField, number>>>({});
   const [weightModalOpen, setWeightModalOpen] = useState(false);
   const [weightMethod, setWeightMethod] = useState<'duration' | 'quantity' | 'area' | 'percentage'>('duration');
@@ -3544,13 +3546,19 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     return result;
   }
   async function readBudgetFile(file: File) {
+    if (importMode === 'links' && !current) {
+      setMessage('Importe um orçamento antes de importar somente os vínculos.');
+      return;
+    }
     const workbook = XLSX.read(await file.arrayBuffer(), { cellDates: true });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: false });
     const headerRow = 1;
-    setImportData({ fileName: file.name, rows, headerRow, type });
+    setImportData({ fileName: file.name, rows, headerRow, type, mode: importMode });
     setMapping(detectBudgetMapping(rows[0] ?? []));
   }
+  const importFieldRequired = (field: typeof budgetImportFields[number], mode = importData?.mode) =>
+    field.key === 'code' || (mode !== 'links' && field.required);
   function updateBudgetHeaderRow(value: number) {
     if (!importData) return;
     const headerRow = Math.max(1, value);
@@ -3563,11 +3571,14 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     return Number(clean.includes(',') ? clean.replace(/\./g, '').replace(',', '.') : clean) || 0;
   };
   async function confirmImport() {
-    if (!importData || budgetImportFields.some((field) => field.required && mapping[field.key] === undefined)) return;
+    if (!importData || budgetImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)) return;
     const get = (row: unknown[], key: BudgetImportField) => mapping[key] === undefined ? '' : row[mapping[key]!];
     const sourceRows = importData.rows.slice(importData.headerRow);
+    const old = budgets.find((budget) => budget.type === importData.type);
+    if (importData.mode === 'links' && !old) return setMessage('Não há orçamento ativo para receber os vínculos.');
     const importedByCode = new Map<string, BudgetItem>();
-    sourceRows.forEach((row) => {
+    if (importData.mode === 'links') old!.items.forEach((item) => importedByCode.set(item.code, item));
+    else sourceRows.forEach((row) => {
       const code = String(get(row, 'code')).trim();
       const description = String(get(row, 'description')).trim();
       if (!code || !description || importedByCode.has(code)) return;
@@ -3579,7 +3590,6 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     });
     const imported = Array.from(importedByCode.values());
     if (!imported.length) return setMessage('Nenhum item válido foi encontrado.');
-    const old = budgets.find((budget) => budget.type === importData.type);
     const sameEap = old && old.items.length === imported.length && old.items.every((item, index) => item.code === imported[index]?.code);
     if (old && !sameEap && !window.confirm('A EAP está diferente. Esta será uma nova importação e todos os vínculos atuais deste orçamento serão perdidos. Continuar?')) return;
     // Cada versão possui seus próprios itens. Mesmo com EAP idêntica, reutilizar
@@ -3619,6 +3629,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         weight, value: item.total * weight / 100
       }];
     });
+    if (importData.mode === 'links' && !importedAllocations.length) return setMessage('Nenhum vínculo válido foi encontrado. Confira o código do item e a identificação da atividade.');
     const invalidWeights = normalized.filter((item) => {
       const links = importedAllocations.filter((allocation) => allocation.budgetId === item.id);
       if (!links.length) return false;
@@ -3630,12 +3641,13 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       type: importData.type,
       name: old?.name ?? (importData.type === 'contractor' ? 'Orçamento da construtora' : 'Orçamento de financiamento'),
       items: normalized,
-      allocations: importedAllocations.length ? importedAllocations : (sameEap ? old.allocations : [])
+      allocations: importData.mode === 'budget' ? (sameEap ? old?.allocations ?? [] : []) : importedAllocations
     };
     try {
       await saveBudget(next);
       setBudgets([...budgets.filter((budget) => budget.type !== next.type), next]);
-      setType(next.type); setImportData(null); setBudgetId(null); setMessage('Orçamento importado com sucesso.');
+      setType(next.type); setImportData(null); setBudgetId(null);
+      setMessage(importData.mode === 'links' ? 'Vínculos importados com sucesso.' : importData.mode === 'budget-links' ? 'Orçamento e vínculos importados com sucesso.' : 'Orçamento importado com sucesso.');
     } catch (error) { setMessage((error as Error).message); }
   }
   async function persistName(name: string) {
@@ -3712,7 +3724,8 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
           <button className={type === 'contractor' ? 'active' : ''} onClick={() => { setType('contractor'); setBudgetId(null); }}>Construtora · saídas</button>
           <button className={type === 'financing' ? 'active' : ''} onClick={() => { setType('financing'); setBudgetId(null); }}>Financiamento · entradas</button>
         </div>
-        <label className="primary budget-upload"><Upload size={15} /> Importar orçamento / vínculos<input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readBudgetFile(file); event.currentTarget.value = ''; }} /></label>
+        <select className="budget-import-mode" value={importMode} onChange={(event) => setImportMode(event.target.value as BudgetImportMode)} aria-label="Tipo de importação"><option value="budget">Importar orçamento</option><option value="links">Importar vínculos</option><option value="budget-links">Importar orçamento + vínculos</option></select>
+        <label className="primary budget-upload"><Upload size={15} /> Selecionar arquivo<input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readBudgetFile(file); event.currentTarget.value = ''; }} /></label>
         <button className="danger-button" disabled={!current} onClick={() => void removeBudget()}><Trash2 size={15} /> Excluir</button>
       </div>
       {message && <p className="financial-message">{message}</p>}
@@ -3743,10 +3756,11 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <aside className="mapping-total"><span>Valor a distribuir</span><strong>{selected.total.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><p>Soma dos pesos <b>{activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0).toFixed(2)}%</b></p><button disabled={Math.abs(activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0)-100) > .05} onClick={() => void linkSelected()}>Confirmar vínculo</button></aside>
       </div></div></div>}
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
+        <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>
         <label className="import-header-row">Tipo de orçamento<select value={importData.type} onChange={(e) => setImportData({ ...importData, type: e.target.value as BudgetType })}><option value="contractor">Construtora (saída)</option><option value="financing">Financiamento (entrada)</option></select></label>
         <label className="import-header-row">Linha dos títulos<input type="number" min={1} value={importData.headerRow} onChange={(e) => updateBudgetHeaderRow(Number(e.target.value))}/></label><p className="import-help">Informe em qual coluna está cada informação. Os campos com * são obrigatórios.</p>
-        <div className="mapping-grid">{budgetImportFields.map((field) => <label key={field.key}>{field.label}{field.required ? ' *' : ''}<select value={mapping[field.key] ?? ''} onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value === '' ? undefined : Number(e.target.value) })}><option value="">Não importar</option>{(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => <option key={index} value={index}>{String(header) || `Coluna ${index + 1}`}</option>)}</select></label>)}</div>
-        <div className="import-summary"><strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong><span>{budgetImportFields.some((field) => field.required && mapping[field.key] === undefined) ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para importar.'}</span></div><button className="primary import-confirm" disabled={budgetImportFields.some((field) => field.required && mapping[field.key] === undefined)} onClick={() => void confirmImport()}>Confirmar importação</button>
+        <div className="mapping-grid">{budgetImportFields.map((field) => <label key={field.key}>{field.label}{importFieldRequired(field, importData.mode) ? ' *' : ''}<select value={mapping[field.key] ?? ''} onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value === '' ? undefined : Number(e.target.value) })}><option value="">Não importar</option>{(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => <option key={index} value={index}>{String(header) || `Coluna ${index + 1}`}</option>)}</select></label>)}</div>
+        <div className="import-summary"><strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong><span>{budgetImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined) ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para importar.'}</span></div><button className="primary import-confirm" disabled={budgetImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)} onClick={() => void confirmImport()}>Confirmar importação</button>
       </div></>}</aside>
     </section>
   );
