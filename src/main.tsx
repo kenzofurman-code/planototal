@@ -1860,6 +1860,7 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
               </div>
             ))}
           </div>
+          <div className="line-time-header-wrap" style={{ width }}>
           <svg className="line-time-header" width={width} height={90} aria-hidden="true">
             <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
             {Array.from({ length: chartDayCount }).map((_, i) => {
@@ -1896,6 +1897,7 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
               );
             })}
           </svg>
+          </div>
           <svg ref={svgRef} width={width} height={height} onPointerDown={closeDrawersOnEmpty} onPointerMove={onMove} onPointerUp={finishDrag} onPointerCancel={finishDrag}>
             <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
             {Array.from({ length: chartDayCount }).map((_, index) => {

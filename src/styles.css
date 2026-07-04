@@ -113,8 +113,9 @@ th { background: #f8fafc; color: #475569; }
 .link-mode-banner.show { display: block; }
 .settings-panel label { display: grid; gap: 4px; font-size: 12px; color: #475569; margin-bottom: 10px; }
 .chart-scroll { position: absolute; inset: 0; overflow: auto; }
-.line-time-header { position: sticky; z-index: 10; top: 0; display: block; pointer-events: none; }
-.line-time-header + svg { display: block; margin-top: -90px; }
+.line-time-header-wrap { position: sticky; z-index: 10; top: 0; height: 90px; pointer-events: none; }
+.line-time-header { display: block; }
+.line-time-header-wrap + svg { display: block; margin-top: -90px; }
 .chart-settings-button { position: absolute; z-index: 12; top: 8px; right: 8px; display: grid; place-items: center; padding: 7px; box-shadow: 0 4px 12px rgba(15,23,42,.14); }
 .chart-drawer { position: absolute; z-index: 20; top: 0; right: 0; width: min(390px, 94%); height: 100%; overflow: auto; background: #f8fafc; border-left: 1px solid #dbe1ea; box-shadow: -12px 0 32px rgba(15,23,42,.18); transform: translateX(105%); transition: transform .22s ease; }
 .chart-drawer.open { transform: translateX(0); }
