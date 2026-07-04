@@ -557,6 +557,157 @@ alter table budget_revisions enable row level security;
 drop policy if exists "budget_revisions_access" on budget_revisions;
 create policy "budget_revisions_access" on budget_revisions for all to anon, authenticated using (true) with check (true);
 
+create table if not exists financial_budgets (
+  project_key text not null references projects(project_key) on delete cascade,
+  type text not null check (type in ('contractor', 'financing')),
+  name text not null,
+  items jsonb not null default '[]'::jsonb,
+  allocations jsonb not null default '[]'::jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (project_key, type)
+);
+alter table financial_budgets enable row level security;
+drop policy if exists "financial_budgets_access" on financial_budgets;
+create policy "financial_budgets_access" on financial_budgets
+  for all to anon, authenticated using (true) with check (true);
+
+-- Cada importação gera uma versão. Somente uma versão fica ativa por tipo,
+-- mas versões anteriores, seus itens e vínculos permanecem para auditoria.
+create table if not exists financial_budget_versions (
+  id uuid primary key default uuid_generate_v4(),
+  project_key text not null references projects(project_key) on delete cascade,
+  budget_type text not null check (budget_type in ('contractor', 'financing')),
+  version_number integer not null,
+  name text not null,
+  status text not null default 'active' check (status in ('draft', 'active', 'archived')),
+  source_file_name text,
+  source_file_hash text,
+  eap_fingerprint text,
+  header_row integer,
+  mapping_config jsonb not null default '{}'::jsonb,
+  import_summary jsonb not null default '{}'::jsonb,
+  change_reason text,
+  created_at timestamptz not null default now(),
+  created_by uuid references auth.users(id) on delete set null,
+  activated_at timestamptz,
+  archived_at timestamptz,
+  unique (project_key, budget_type, version_number)
+);
+create unique index if not exists idx_financial_budget_active_version
+  on financial_budget_versions(project_key, budget_type) where status = 'active';
+create index if not exists idx_financial_budget_versions_history
+  on financial_budget_versions(project_key, budget_type, version_number desc);
+
+alter table financial_budgets add column if not exists active_version_id uuid
+  references financial_budget_versions(id) on delete set null;
+
+-- Itens e vínculos normalizados pertencem sempre a uma versão.
+create table if not exists financial_budget_items (
+  id uuid primary key default uuid_generate_v4(),
+  version_id uuid not null references financial_budget_versions(id) on delete cascade,
+  project_key text not null references projects(project_key) on delete cascade,
+  budget_type text not null check (budget_type in ('contractor', 'financing')),
+  level text,
+  code text not null,
+  description text not null,
+  material_cost numeric not null default 0,
+  labor_cost numeric not null default 0,
+  total_cost numeric not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (version_id, code)
+);
+
+create table if not exists financial_budget_allocations (
+  id uuid primary key default uuid_generate_v4(),
+  version_id uuid not null references financial_budget_versions(id) on delete cascade,
+  project_key text not null references projects(project_key) on delete cascade,
+  budget_type text not null check (budget_type in ('contractor', 'financing')),
+  budget_item_id uuid not null references financial_budget_items(id) on delete cascade,
+  schedule_task_external_id text not null,
+  parent_schedule_task_external_id text,
+  package_name text,
+  service_name text,
+  lot_name text,
+  division_type text not null default 'manual'
+    check (division_type in ('manual', 'equal', 'duration', 'quantity', 'inherited')),
+  item_weight_percent numeric not null default 0
+    check (item_weight_percent >= 0 and item_weight_percent <= 100),
+  allocated_cost numeric not null default 0,
+  inherited_from_allocation_id uuid references financial_budget_allocations(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (version_id, budget_item_id, schedule_task_external_id)
+);
+
+-- Migração idempotente para instalações que já possuíam itens/vínculos sem versão.
+alter table financial_budget_items add column if not exists version_id uuid
+  references financial_budget_versions(id) on delete cascade;
+alter table financial_budget_allocations add column if not exists version_id uuid
+  references financial_budget_versions(id) on delete cascade;
+insert into financial_budget_versions (
+  project_key, budget_type, version_number, name, status, change_reason, activated_at
+)
+select budget.project_key, budget.type, 1, budget.name, 'active',
+       'Versão inicial criada na migração do histórico', now()
+from financial_budgets budget
+where not exists (
+  select 1 from financial_budget_versions version
+  where version.project_key = budget.project_key and version.budget_type = budget.type
+);
+update financial_budget_items item
+set version_id = version.id
+from financial_budget_versions version
+where item.version_id is null
+  and version.project_key = item.project_key
+  and version.budget_type = item.budget_type
+  and version.status = 'active';
+update financial_budget_allocations allocation
+set version_id = version.id
+from financial_budget_versions version
+where allocation.version_id is null
+  and version.project_key = allocation.project_key
+  and version.budget_type = allocation.budget_type
+  and version.status = 'active';
+update financial_budgets budget
+set active_version_id = version.id
+from financial_budget_versions version
+where budget.project_key = version.project_key
+  and budget.type = version.budget_type
+  and version.status = 'active'
+  and budget.active_version_id is null;
+alter table financial_budget_items alter column version_id set not null;
+alter table financial_budget_allocations alter column version_id set not null;
+alter table financial_budget_items
+  drop constraint if exists financial_budget_items_project_key_budget_type_code_key;
+alter table financial_budget_allocations
+  drop constraint if exists financial_budget_allocations_project_key_budget_type_budget_item_id_schedule_task_external_id_key;
+create unique index if not exists idx_financial_budget_item_version_code
+  on financial_budget_items(version_id, code);
+create unique index if not exists idx_financial_allocation_version_task
+  on financial_budget_allocations(version_id, budget_item_id, schedule_task_external_id);
+
+create index if not exists idx_financial_budget_items_project
+  on financial_budget_items(project_key, budget_type, version_id);
+create index if not exists idx_financial_allocations_task
+  on financial_budget_allocations(project_key, version_id, schedule_task_external_id);
+create index if not exists idx_financial_allocations_parent
+  on financial_budget_allocations(project_key, parent_schedule_task_external_id);
+
+alter table financial_budget_items enable row level security;
+alter table financial_budget_allocations enable row level security;
+alter table financial_budget_versions enable row level security;
+drop policy if exists "financial_budget_versions_access" on financial_budget_versions;
+create policy "financial_budget_versions_access" on financial_budget_versions
+  for all to anon, authenticated using (true) with check (true);
+drop policy if exists "financial_budget_items_access" on financial_budget_items;
+create policy "financial_budget_items_access" on financial_budget_items
+  for all to anon, authenticated using (true) with check (true);
+drop policy if exists "financial_budget_allocations_access" on financial_budget_allocations;
+create policy "financial_budget_allocations_access" on financial_budget_allocations
+  for all to anon, authenticated using (true) with check (true);
+
 create or replace function public.register_app_user()
 returns trigger
 language plpgsql

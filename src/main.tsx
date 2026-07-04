@@ -8,7 +8,7 @@ import { saveCalendarEvents } from './lib/calendarRepository';
 import { loadLineBalanceData, saveLineBalanceData } from './lib/lineBalanceRepository';
 import { saveProject, uploadProjectImage } from './lib/projectRepository';
 import { deleteProjectBudget, saveScheduleTasks } from './lib/scheduleRepository';
-import { loadBudgetRevisionName, saveBudgetRevisionName } from './lib/budgetRepository';
+import { deleteBudget as deleteSavedBudget, loadBudgetRevisionName, loadBudgets, saveBudget, saveBudgetRevisionName, type BudgetItem, type BudgetRevision, type BudgetType } from './lib/budgetRepository';
 import { createScheduleVersion, deleteScheduleVersion, loadScheduleVersions, selectScheduleVersion, updateActiveScheduleVersion, type SavedScheduleVersion } from './lib/scheduleVersionRepository';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
@@ -3181,7 +3181,7 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
   );
 }
 
-function Financial({ projectKey, tasks, setTasks }: { projectKey: string; tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
+function LegacyFinancial({ projectKey, tasks, setTasks }: { projectKey: string; tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
   const total = tasks.reduce((s, t) => s + (t.cost ?? 0), 0);
   const done = tasks.reduce((s, t) => s + ((t.cost ?? 0) * t.progress) / 100, 0);
   const [budgetItems, setBudgetItems] = useState(() => {
@@ -3488,6 +3488,215 @@ function Financial({ projectKey, tasks, setTasks }: { projectKey: string; tasks:
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+type BudgetImportField = 'level' | 'code' | 'description' | 'material' | 'labor' | 'total' | 'taskId' | 'packageName' | 'service' | 'lot' | 'divisionType' | 'weight';
+const budgetImportFields: Array<{ key: BudgetImportField; label: string; required: boolean; aliases: string[] }> = [
+  { key: 'level', label: 'Nível', required: true, aliases: ['nível', 'nivel'] },
+  { key: 'code', label: 'Código', required: true, aliases: ['código', 'codigo'] },
+  { key: 'description', label: 'Descrição', required: true, aliases: ['descrição', 'descricao'] },
+  { key: 'material', label: 'Material (R$)', required: false, aliases: ['material (r$)', 'material'] },
+  { key: 'labor', label: 'Mão de Obra (R$)', required: false, aliases: ['mão de obra (r$)', 'mao de obra (r$)', 'mão de obra'] },
+  { key: 'total', label: 'Custo / Total (R$)', required: true, aliases: ['custo', 'custo (r$)', 'total (r$)', 'total'] },
+  { key: 'taskId', label: 'ID da atividade', required: false, aliases: ['id da atividade', 'id atividade'] },
+  { key: 'packageName', label: 'Pacote de trabalho/tarefas', required: false, aliases: ['pacote de trabalho/tarefas', 'pacote de trabalho', 'tarefas'] },
+  { key: 'service', label: 'Serviço', required: false, aliases: ['serviço', 'servico'] },
+  { key: 'lot', label: 'Lote', required: false, aliases: ['lote'] },
+  { key: 'divisionType', label: 'Tipo de divisão', required: false, aliases: ['tipo de divisão', 'tipo de divisao'] },
+  { key: 'weight', label: 'Peso (% Item)', required: false, aliases: ['peso (% item)', 'peso', 'peso item'] }
+];
+
+function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
+  const [budgets, setBudgets] = useState<BudgetRevision[]>([]);
+  const [type, setType] = useState<BudgetType>('contractor');
+  const [budgetId, setBudgetId] = useState<string | null>(null);
+  const [activityIds, setActivityIds] = useState<string[]>([]);
+  const [budgetSearch, setBudgetSearch] = useState('');
+  const [activitySearch, setActivitySearch] = useState('');
+  const [editingName, setEditingName] = useState(false);
+  const [message, setMessage] = useState('');
+  const [importData, setImportData] = useState<{ fileName: string; rows: unknown[][]; headerRow: number; type: BudgetType } | null>(null);
+  const [mapping, setMapping] = useState<Partial<Record<BudgetImportField, number>>>({});
+  const current = budgets.find((budget) => budget.type === type);
+  const items = current?.items ?? [];
+  const allocations = current?.allocations ?? [];
+  const selected = items.find((item) => item.id === budgetId);
+  const linkedTasks = new Set(allocations.map((item) => item.taskId));
+  const visibleItems = items.filter((item) => `${item.code} ${item.description}`.toLocaleLowerCase('pt-BR').includes(budgetSearch.toLocaleLowerCase('pt-BR')));
+  const visibleTasks = tasks.filter((task) => `${task.packageName} ${task.service ?? ''} ${task.lot} ${task.lotMother}`.toLocaleLowerCase('pt-BR').includes(activitySearch.toLocaleLowerCase('pt-BR')));
+
+  useEffect(() => {
+    loadBudgets(projectKey).then(setBudgets).catch((error) => setMessage((error as Error).message));
+  }, [projectKey]);
+
+  function detectBudgetMapping(headers: unknown[]) {
+    const result: Partial<Record<BudgetImportField, number>> = {};
+    budgetImportFields.forEach((field) => {
+      const index = headers.findIndex((header) => field.aliases.includes(String(header).trim().toLocaleLowerCase('pt-BR')));
+      if (index >= 0) result[field.key] = index;
+    });
+    return result;
+  }
+  async function readBudgetFile(file: File) {
+    const workbook = XLSX.read(await file.arrayBuffer(), { cellDates: true });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: false });
+    const headerRow = 1;
+    setImportData({ fileName: file.name, rows, headerRow, type });
+    setMapping(detectBudgetMapping(rows[0] ?? []));
+  }
+  function updateBudgetHeaderRow(value: number) {
+    if (!importData) return;
+    const headerRow = Math.max(1, value);
+    setImportData({ ...importData, headerRow });
+    setMapping(detectBudgetMapping(importData.rows[headerRow - 1] ?? []));
+  }
+  const money = (input: unknown) => {
+    if (typeof input === 'number') return input;
+    const clean = String(input ?? '').replace(/[^\d,.-]/g, '');
+    return Number(clean.includes(',') ? clean.replace(/\./g, '').replace(',', '.') : clean) || 0;
+  };
+  async function confirmImport() {
+    if (!importData || budgetImportFields.some((field) => field.required && mapping[field.key] === undefined)) return;
+    const get = (row: unknown[], key: BudgetImportField) => mapping[key] === undefined ? '' : row[mapping[key]!];
+    const sourceRows = importData.rows.slice(importData.headerRow);
+    const imported: BudgetItem[] = sourceRows.map((row) => ({
+      id: crypto.randomUUID(),
+      level: String(get(row, 'level')).trim(),
+      code: String(get(row, 'code')).trim(),
+      description: String(get(row, 'description')).trim(),
+      material: money(get(row, 'material')),
+      labor: money(get(row, 'labor')),
+      total: money(get(row, 'total'))
+    })).filter((item) => item.code && item.description);
+    if (!imported.length) return setMessage('Nenhum item válido foi encontrado.');
+    const old = budgets.find((budget) => budget.type === importData.type);
+    const sameEap = old && old.items.length === imported.length && old.items.every((item, index) => item.code === imported[index]?.code);
+    if (old && !sameEap && !window.confirm('A EAP está diferente. Esta será uma nova importação e todos os vínculos atuais deste orçamento serão perdidos. Continuar?')) return;
+    const oldByCode = new Map(old?.items.map((item) => [item.code, item]));
+    const normalized = sameEap ? imported.map((item) => ({ ...item, id: oldByCode.get(item.code)?.id ?? item.id })) : imported;
+    const matchTask = (row: unknown[]) => {
+      const explicitId = String(get(row, 'taskId')).trim();
+      if (explicitId) return tasks.filter((task) => task.id === explicitId);
+      const packageName = String(get(row, 'packageName')).trim().toLocaleLowerCase('pt-BR');
+      const service = String(get(row, 'service')).trim().toLocaleLowerCase('pt-BR');
+      const lot = String(get(row, 'lot')).trim().toLocaleLowerCase('pt-BR');
+      if (!packageName && !service && !lot) return [];
+      return tasks.filter((task) =>
+        (!packageName || task.packageName.toLocaleLowerCase('pt-BR') === packageName) &&
+        (!service || (task.service ?? '').toLocaleLowerCase('pt-BR') === service) &&
+        (!lot || task.lot.toLocaleLowerCase('pt-BR') === lot)
+      );
+    };
+    const ambiguous = sourceRows.filter((row) => matchTask(row).length > 1);
+    if (ambiguous.length) return setMessage(`${ambiguous.length} linha(s) encontram mais de uma atividade. Informe o ID da atividade para concluir.`);
+    const itemByCode = new Map(normalized.map((item) => [item.code, item]));
+    const importedAllocations = sourceRows.flatMap((row) => {
+      const task = matchTask(row)[0];
+      const item = itemByCode.get(String(get(row, 'code')).trim());
+      if (!task || !item) return [];
+      const rawWeight = money(get(row, 'weight'));
+      const weight = rawWeight || 100;
+      const rawDivision = String(get(row, 'divisionType')).trim().toLocaleLowerCase('pt-BR');
+      const divisionType = rawDivision.includes('dura') ? 'duration' : rawDivision.includes('quant') ? 'quantity' : rawDivision.includes('igual') ? 'equal' : 'manual';
+      return [{
+        budgetId: item.id, taskId: task.id, packageName: task.packageName, serviceName: task.service,
+        lotName: task.lot, divisionType: divisionType as 'manual' | 'equal' | 'duration' | 'quantity',
+        weight, value: item.total * weight / 100
+      }];
+    });
+    const next: BudgetRevision = {
+      projectKey,
+      type: importData.type,
+      name: old?.name ?? (importData.type === 'contractor' ? 'Orçamento da construtora' : 'Orçamento de financiamento'),
+      items: normalized,
+      allocations: importedAllocations.length ? importedAllocations : (sameEap ? old.allocations : [])
+    };
+    try {
+      await saveBudget(next);
+      setBudgets([...budgets.filter((budget) => budget.type !== next.type), next]);
+      setType(next.type); setImportData(null); setBudgetId(null); setMessage('Orçamento importado com sucesso.');
+    } catch (error) { setMessage((error as Error).message); }
+  }
+  async function persistName(name: string) {
+    if (!current) return;
+    const next = { ...current, name: name.trim() || current.name };
+    try {
+      await saveBudget(next);
+      setBudgets(budgets.map((budget) => budget.type === type ? next : budget));
+      setEditingName(false); setMessage('Nome salvo.');
+    } catch (error) { setMessage(`Não foi possível salvar: ${(error as Error).message}`); }
+  }
+  async function removeBudget() {
+    if (!current || !window.confirm(`Excluir "${current.name}" e todos os seus vínculos?`)) return;
+    try {
+      await deleteSavedBudget(projectKey, type);
+      setBudgets(budgets.filter((budget) => budget.type !== type)); setBudgetId(null); setMessage('Orçamento excluído.');
+    } catch (error) { setMessage((error as Error).message); }
+  }
+  async function linkSelected() {
+    if (!current || !selected || !activityIds.length) return;
+    const weight = 100 / activityIds.length;
+    const next: BudgetRevision = {
+      ...current,
+      allocations: [
+        ...allocations.filter((item) => item.budgetId !== selected.id),
+        ...activityIds.map((taskId) => {
+          const task = tasks.find((candidate) => candidate.id === taskId);
+          return {
+            budgetId: selected.id, taskId, packageName: task?.packageName,
+            serviceName: task?.service, lotName: task?.lot, divisionType: 'equal' as const,
+            weight, value: selected.total / activityIds.length
+          };
+        })
+      ]
+    };
+    try {
+      await saveBudget(next);
+      setBudgets(budgets.map((budget) => budget.type === type ? next : budget)); setActivityIds([]); setMessage('Vínculo salvo.');
+    } catch (error) { setMessage((error as Error).message); }
+  }
+
+  return (
+    <section className="page financial-mapping">
+      <PageHeader title="Mapeamento físico-financeiro" subtitle="Vincule os orçamentos de despesas e financiamento às atividades do cronograma." />
+      <div className="financial-toolbar">
+        <div className="mapping-methods">
+          <button className={type === 'contractor' ? 'active' : ''} onClick={() => { setType('contractor'); setBudgetId(null); }}>Construtora · saídas</button>
+          <button className={type === 'financing' ? 'active' : ''} onClick={() => { setType('financing'); setBudgetId(null); }}>Financiamento · entradas</button>
+        </div>
+        <label className="primary budget-upload"><Upload size={15} /> Importar orçamento<input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readBudgetFile(file); event.currentTarget.value = ''; }} /></label>
+        <button className="danger-button" disabled={!current} onClick={() => void removeBudget()}><Trash2 size={15} /> Excluir</button>
+      </div>
+      {message && <p className="financial-message">{message}</p>}
+      {!current ? <div className="card empty-state"><h3>Nenhum orçamento de {type === 'contractor' ? 'construtora' : 'financiamento'} importado</h3><p>Importe uma planilha para começar. Projetos novos permanecem sem orçamento até essa etapa.</p></div> : <>
+        <div className="financial-delete-action">
+          {editingName ? <label className="budget-name-editor">Nome <input autoFocus defaultValue={current.name} onKeyDown={(event) => { if (event.key === 'Enter') void persistName(event.currentTarget.value); }} /><button className="primary" onClick={(event) => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) void persistName(input.value); }}>Salvar nome</button></label> : <button onClick={() => setEditingName(true)}>Editar nome: {current.name}</button>}
+        </div>
+        <div className="metric-grid financial-metrics">
+          <Metric label={type === 'contractor' ? 'Total de despesas' : 'Total de entradas'} value={items.reduce((sum, item) => sum + item.total, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} />
+          <Metric label="Itens da EAP" value={String(items.length)} /><Metric label="Atividades vinculadas" value={`${linkedTasks.size}/${tasks.length}`} />
+        </div>
+        <div className="mapping-shell">
+          <div className="mapping-panel"><div className="mapping-panel-head"><small>ORÇAMENTO</small><h3>{current.name}</h3><span>{visibleItems.length} itens</span></div>
+            <label className="mapping-search"><Search size={15}/><input value={budgetSearch} onChange={(e) => setBudgetSearch(e.target.value)} placeholder="Buscar código ou descrição..." /></label>
+            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código / descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linked = allocations.some((link) => link.budgetId === item.id); return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => setBudgetId(item.id)}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={linked ? 'mapping-status linked' : 'mapping-status'}>{linked ? 'Vinculado' : 'Livre'}</span></td></tr>; })}</tbody></table></div>
+          </div>
+          <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FÍSICA</small><h3>Cronograma da obra</h3><span>{visibleTasks.length} atividades</span></div>
+            <label className="mapping-search"><Search size={15}/><input value={activitySearch} onChange={(e) => setActivitySearch(e.target.value)} placeholder="Buscar atividade, serviço, lote ou grupo..." /></label>
+            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Atividade</th><th>Lote</th><th>Prazo</th><th>Status</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id} className={activityIds.includes(task.id) ? 'mapping-selected' : ''} onClick={() => setActivityIds(activityIds.includes(task.id) ? activityIds.filter((id) => id !== task.id) : [...activityIds, task.id])}><td><input type="checkbox" checked={activityIds.includes(task.id)} readOnly /></td><td><small>{task.service || task.lotMother}</small><strong>{task.packageName}</strong></td><td>{task.lot}</td><td>{diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1}d</td><td><span className={linkedTasks.has(task.id) ? 'mapping-status linked' : 'mapping-status'}>{linkedTasks.has(task.id) ? 'Vinculada' : 'Livre'}</span></td></tr>)}</tbody></table></div>
+          </div>
+        </div>
+        <div className="mapping-action"><Link2 size={18}/><div><strong>{selected?.code ?? 'Selecione um item'} · {activityIds.length} atividade(s)</strong><small>O valor será distribuído igualmente entre as atividades selecionadas.</small></div><button className="primary" disabled={!selected || !activityIds.length} onClick={() => void linkSelected()}><ArrowLeftRight size={15}/> Vincular</button></div>
+      </>}
+      <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
+        <label className="import-header-row">Tipo de orçamento<select value={importData.type} onChange={(e) => setImportData({ ...importData, type: e.target.value as BudgetType })}><option value="contractor">Construtora (saída)</option><option value="financing">Financiamento (entrada)</option></select></label>
+        <label className="import-header-row">Linha dos títulos<input type="number" min={1} value={importData.headerRow} onChange={(e) => updateBudgetHeaderRow(Number(e.target.value))}/></label><p className="import-help">Informe em qual coluna está cada informação. Os campos com * são obrigatórios.</p>
+        <div className="mapping-grid">{budgetImportFields.map((field) => <label key={field.key}>{field.label}{field.required ? ' *' : ''}<select value={mapping[field.key] ?? ''} onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value === '' ? undefined : Number(e.target.value) })}><option value="">Não importar</option>{(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => <option key={index} value={index}>{String(header) || `Coluna ${index + 1}`}</option>)}</select></label>)}</div>
+        <div className="import-summary"><strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong><span>{budgetImportFields.some((field) => field.required && mapping[field.key] === undefined) ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para importar.'}</span></div><button className="primary import-confirm" disabled={budgetImportFields.some((field) => field.required && mapping[field.key] === undefined)} onClick={() => void confirmImport()}>Confirmar importação</button>
+      </div></>}</aside>
     </section>
   );
 }

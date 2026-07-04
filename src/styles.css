@@ -281,6 +281,11 @@ th { background: #f8fafc; color: #475569; }
 .version-row small { color: #64748b; }
 .budget-name-editor { display: flex; align-items: center; gap: 8px; }
 .budget-name-editor input { min-width: 240px; }
+.financial-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+.budget-upload { display:inline-flex; gap:7px; align-items:center; cursor:pointer; }
+.budget-upload input { display:none; }
+.financial-message { padding:10px 12px; border-radius:8px; background:#eef2ff; color:#3730a3; }
+.empty-state { text-align:center; padding:42px 20px; color:#64748b; }
 .version-kind.planned { color: #9a3412; background: #ffedd5; }
 .version-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .version-actions button { font-size: 11px; }
