@@ -15,27 +15,18 @@ export type ClimateImportRow = {
 
 export async function loadClimateCities(): Promise<ClimateCity[]> {
   if (!supabase) return [];
-  const [citiesResult, recordsResult] = await Promise.all([
-    supabase.from('climate_cities').select('id,name').order('name'),
-    supabase.from('climate_records').select('city_id,observation_date')
-  ]);
+  const citiesResult = await supabase
+    .from('climate_cities')
+    .select('id,name,start_date,end_date,record_count')
+    .order('name');
   if (citiesResult.error) throw citiesResult.error;
-  if (recordsResult.error) throw recordsResult.error;
-
-  return (citiesResult.data ?? []).map((city) => {
-    const dates = (recordsResult.data ?? [])
-      .filter((record) => record.city_id === city.id)
-      .map((record) => record.observation_date)
-      .filter(Boolean)
-      .sort();
-    return {
-      id: city.id,
-      name: city.name,
-      startDate: dates[0] ?? null,
-      endDate: dates[dates.length - 1] ?? null,
-      recordCount: dates.length
-    };
-  });
+  return (citiesResult.data ?? []).map((city) => ({
+    id: city.id,
+    name: city.name,
+    startDate: city.start_date ?? null,
+    endDate: city.end_date ?? null,
+    recordCount: Number(city.record_count ?? 0)
+  }));
 }
 
 export async function createClimateCity(name: string) {
@@ -64,4 +55,13 @@ export async function replaceClimateRecords(cityId: string, rows: ClimateImportR
     const { error } = await supabase.from('climate_records').insert(chunk);
     if (error) throw error;
   }
+
+  const dates = rows.map((row) => row.observationDate).sort();
+  const { error: summaryError } = await supabase.from('climate_cities').update({
+    start_date: dates[0],
+    end_date: dates[dates.length - 1],
+    record_count: rows.length,
+    updated_at: new Date().toISOString()
+  }).eq('id', cityId);
+  if (summaryError) throw summaryError;
 }
