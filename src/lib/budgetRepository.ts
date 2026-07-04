@@ -104,14 +104,19 @@ export async function saveBudget(revision: BudgetRevision) {
   })));
   if (itemResult.error) throw itemResult.error;
   if (revision.allocations.length) {
-    const allocationResult = await supabase.from('financial_budget_allocations').insert(revision.allocations.map((item) => ({
-      id: item.id, version_id: versionId, project_key: revision.projectKey, budget_type: revision.type,
-      budget_item_id: item.budgetId, schedule_task_external_id: item.taskId,
-      parent_schedule_task_external_id: item.parentTaskId ?? null, package_name: item.packageName ?? null,
-      service_name: item.serviceName ?? null, lot_name: item.lotName ?? null,
-      division_type: item.divisionType, item_weight_percent: item.weight, allocated_cost: item.value,
-      inherited_from_allocation_id: item.inheritedFromId ?? null, updated_at: new Date().toISOString()
-    })));
+    const allocationRows = revision.allocations.map((item) => {
+      const id = item.id ?? crypto.randomUUID();
+      item.id = id;
+      return {
+        id, version_id: versionId, project_key: revision.projectKey, budget_type: revision.type,
+        budget_item_id: item.budgetId, schedule_task_external_id: item.taskId,
+        parent_schedule_task_external_id: item.parentTaskId ?? null, package_name: item.packageName ?? null,
+        service_name: item.serviceName ?? null, lot_name: item.lotName ?? null,
+        division_type: item.divisionType, item_weight_percent: item.weight, allocated_cost: item.value,
+        inherited_from_allocation_id: item.inheritedFromId ?? null, updated_at: new Date().toISOString()
+      };
+    });
+    const allocationResult = await supabase.from('financial_budget_allocations').insert(allocationRows);
     if (allocationResult.error) throw allocationResult.error;
   }
 }
