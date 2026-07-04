@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import * as XLSX from 'xlsx';
-import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2, MapPin, Ruler, ImagePlus, Users, CloudRain, Plus, Upload } from 'lucide-react';
+import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2, MapPin, Ruler, ImagePlus, Users, CloudRain, Plus, Upload, Lock, Unlock } from 'lucide-react';
 import { procurement } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { saveCalendarEvents } from './lib/calendarRepository';
@@ -3494,7 +3494,7 @@ function LegacyFinancial({ projectKey, tasks, setTasks }: { projectKey: string; 
 
 type BudgetImportField = 'level' | 'code' | 'description' | 'material' | 'labor' | 'total' | 'taskId' | 'packageName' | 'service' | 'lot' | 'divisionType' | 'weight';
 const budgetImportFields: Array<{ key: BudgetImportField; label: string; required: boolean; aliases: string[] }> = [
-  { key: 'level', label: 'Nível', required: true, aliases: ['nível', 'nivel'] },
+  { key: 'level', label: 'Nível', required: false, aliases: ['nível', 'nivel'] },
   { key: 'code', label: 'Código', required: true, aliases: ['código', 'codigo'] },
   { key: 'description', label: 'Descrição', required: true, aliases: ['descrição', 'descricao'] },
   { key: 'material', label: 'Material (R$)', required: false, aliases: ['material (r$)', 'material'] },
@@ -3519,6 +3519,10 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const [message, setMessage] = useState('');
   const [importData, setImportData] = useState<{ fileName: string; rows: unknown[][]; headerRow: number; type: BudgetType } | null>(null);
   const [mapping, setMapping] = useState<Partial<Record<BudgetImportField, number>>>({});
+  const [weightModalOpen, setWeightModalOpen] = useState(false);
+  const [weightMethod, setWeightMethod] = useState<'duration' | 'quantity' | 'area' | 'percentage'>('duration');
+  const [linkWeights, setLinkWeights] = useState<Record<string, number>>({});
+  const [lockedWeights, setLockedWeights] = useState<Set<string>>(new Set());
   const current = budgets.find((budget) => budget.type === type);
   const items = current?.items ?? [];
   const allocations = current?.allocations ?? [];
@@ -3562,15 +3566,18 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     if (!importData || budgetImportFields.some((field) => field.required && mapping[field.key] === undefined)) return;
     const get = (row: unknown[], key: BudgetImportField) => mapping[key] === undefined ? '' : row[mapping[key]!];
     const sourceRows = importData.rows.slice(importData.headerRow);
-    const imported: BudgetItem[] = sourceRows.map((row) => ({
-      id: crypto.randomUUID(),
-      level: String(get(row, 'level')).trim(),
-      code: String(get(row, 'code')).trim(),
-      description: String(get(row, 'description')).trim(),
-      material: money(get(row, 'material')),
-      labor: money(get(row, 'labor')),
-      total: money(get(row, 'total'))
-    })).filter((item) => item.code && item.description);
+    const importedByCode = new Map<string, BudgetItem>();
+    sourceRows.forEach((row) => {
+      const code = String(get(row, 'code')).trim();
+      const description = String(get(row, 'description')).trim();
+      if (!code || !description || importedByCode.has(code)) return;
+      importedByCode.set(code, {
+        id: crypto.randomUUID(), level: String(get(row, 'level')).trim(),
+        code, description, material: money(get(row, 'material')),
+        labor: money(get(row, 'labor')), total: money(get(row, 'total'))
+      });
+    });
+    const imported = Array.from(importedByCode.values());
     if (!imported.length) return setMessage('Nenhum item válido foi encontrado.');
     const old = budgets.find((budget) => budget.type === importData.type);
     const sameEap = old && old.items.length === imported.length && old.items.every((item, index) => item.code === imported[index]?.code);
@@ -3601,13 +3608,23 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       const rawWeight = money(get(row, 'weight'));
       const weight = rawWeight || 100;
       const rawDivision = String(get(row, 'divisionType')).trim().toLocaleLowerCase('pt-BR');
-      const divisionType = rawDivision.includes('dura') ? 'duration' : rawDivision.includes('quant') ? 'quantity' : rawDivision.includes('igual') ? 'equal' : 'manual';
+      const divisionType = rawDivision.includes('dura') || rawDivision.includes('tempo') ? 'duration'
+        : rawDivision.includes('quant') ? 'quantity'
+        : rawDivision.includes('área') || rawDivision.includes('area') ? 'area'
+        : rawDivision.includes('percent') || rawDivision.includes('%') ? 'percentage'
+        : rawDivision.includes('igual') ? 'equal' : 'manual';
       return [{
         budgetId: item.id, taskId: task.id, packageName: task.packageName, serviceName: task.service,
-        lotName: task.lot, divisionType: divisionType as 'manual' | 'equal' | 'duration' | 'quantity',
+        lotName: task.lot, divisionType: divisionType as 'manual' | 'equal' | 'duration' | 'quantity' | 'area' | 'percentage',
         weight, value: item.total * weight / 100
       }];
     });
+    const invalidWeights = normalized.filter((item) => {
+      const links = importedAllocations.filter((allocation) => allocation.budgetId === item.id);
+      if (!links.length) return false;
+      return Math.abs(links.reduce((sum, allocation) => sum + allocation.weight, 0) - 100) > 0.05;
+    });
+    if (invalidWeights.length) return setMessage(`Os pesos não fecham 100% para: ${invalidWeights.map((item) => item.code).join(', ')}.`);
     const next: BudgetRevision = {
       projectKey,
       type: importData.type,
@@ -3637,9 +3654,36 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       setBudgets(budgets.filter((budget) => budget.type !== type)); setBudgetId(null); setMessage('Orçamento excluído.');
     } catch (error) { setMessage((error as Error).message); }
   }
+  function taskBasis(task: Task, method: typeof weightMethod) {
+    if (method === 'duration') return diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1;
+    if (method === 'quantity') return task.quantity ?? 0;
+    if (method === 'area') return /^(m2|m²|metro(s)? quadrado(s)?)$/i.test((task.unit ?? '').trim()) ? (task.quantity ?? 0) : 0;
+    return 1;
+  }
+  function distributeWeights(method: typeof weightMethod, locks = lockedWeights, source = linkWeights) {
+    const selectedTasks = tasks.filter((task) => activityIds.includes(task.id));
+    const lockedTotal = selectedTasks.reduce((sum, task) => sum + (locks.has(task.id) ? (source[task.id] ?? 0) : 0), 0);
+    const unlocked = selectedTasks.filter((task) => !locks.has(task.id));
+    const remaining = Math.max(0, 100 - lockedTotal);
+    const bases = unlocked.map((task) => method === 'percentage' ? 1 : taskBasis(task, method));
+    const basisTotal = bases.reduce((sum, value) => sum + value, 0);
+    const next = { ...source };
+    unlocked.forEach((task, index) => { next[task.id] = basisTotal ? remaining * bases[index] / basisTotal : remaining / Math.max(1, unlocked.length); });
+    setLinkWeights(next);
+  }
+  function openWeightModal() {
+    const selectedTasks = tasks.filter((task) => activityIds.includes(task.id));
+    const total = selectedTasks.reduce((sum, task) => sum + taskBasis(task, 'duration'), 0);
+    setLinkWeights(Object.fromEntries(selectedTasks.map((task) => [task.id, total ? taskBasis(task, 'duration') * 100 / total : 100 / selectedTasks.length])));
+    setLockedWeights(new Set()); setWeightMethod('duration'); setWeightModalOpen(true);
+  }
+  function changeManualWeight(taskId: string, value: number) {
+    const next = { ...linkWeights, [taskId]: Math.max(0, Math.min(100, value)) };
+    const locks = new Set(lockedWeights); locks.add(taskId);
+    setLockedWeights(locks); distributeWeights('percentage', locks, next);
+  }
   async function linkSelected() {
     if (!current || !selected || !activityIds.length) return;
-    const weight = 100 / activityIds.length;
     const next: BudgetRevision = {
       ...current,
       allocations: [
@@ -3648,15 +3692,15 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
           const task = tasks.find((candidate) => candidate.id === taskId);
           return {
             budgetId: selected.id, taskId, packageName: task?.packageName,
-            serviceName: task?.service, lotName: task?.lot, divisionType: 'equal' as const,
-            weight, value: selected.total / activityIds.length
+            serviceName: task?.service, lotName: task?.lot, divisionType: weightMethod,
+            weight: linkWeights[taskId] ?? 0, value: selected.total * (linkWeights[taskId] ?? 0) / 100
           };
         })
       ]
     };
     try {
       await saveBudget(next);
-      setBudgets(budgets.map((budget) => budget.type === type ? next : budget)); setActivityIds([]); setMessage('Vínculo salvo.');
+      setBudgets(budgets.map((budget) => budget.type === type ? next : budget)); setActivityIds([]); setWeightModalOpen(false); setMessage('Vínculo salvo.');
     } catch (error) { setMessage((error as Error).message); }
   }
 
@@ -3668,7 +3712,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
           <button className={type === 'contractor' ? 'active' : ''} onClick={() => { setType('contractor'); setBudgetId(null); }}>Construtora · saídas</button>
           <button className={type === 'financing' ? 'active' : ''} onClick={() => { setType('financing'); setBudgetId(null); }}>Financiamento · entradas</button>
         </div>
-        <label className="primary budget-upload"><Upload size={15} /> Importar orçamento<input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readBudgetFile(file); event.currentTarget.value = ''; }} /></label>
+        <label className="primary budget-upload"><Upload size={15} /> Importar orçamento / vínculos<input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readBudgetFile(file); event.currentTarget.value = ''; }} /></label>
         <button className="danger-button" disabled={!current} onClick={() => void removeBudget()}><Trash2 size={15} /> Excluir</button>
       </div>
       {message && <p className="financial-message">{message}</p>}
@@ -3690,8 +3734,14 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
             <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Atividade</th><th>Lote</th><th>Prazo</th><th>Status</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id} className={activityIds.includes(task.id) ? 'mapping-selected' : ''} onClick={() => setActivityIds(activityIds.includes(task.id) ? activityIds.filter((id) => id !== task.id) : [...activityIds, task.id])}><td><input type="checkbox" checked={activityIds.includes(task.id)} readOnly /></td><td><small>{task.service || task.lotMother}</small><strong>{task.packageName}</strong></td><td>{task.lot}</td><td>{diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1}d</td><td><span className={linkedTasks.has(task.id) ? 'mapping-status linked' : 'mapping-status'}>{linkedTasks.has(task.id) ? 'Vinculada' : 'Livre'}</span></td></tr>)}</tbody></table></div>
           </div>
         </div>
-        <div className="mapping-action"><Link2 size={18}/><div><strong>{selected?.code ?? 'Selecione um item'} · {activityIds.length} atividade(s)</strong><small>O valor será distribuído igualmente entre as atividades selecionadas.</small></div><button className="primary" disabled={!selected || !activityIds.length} onClick={() => void linkSelected()}><ArrowLeftRight size={15}/> Vincular</button></div>
+        <div className="mapping-action"><Link2 size={18}/><div><strong>{selected?.code ?? 'Selecione um item'} · {activityIds.length} atividade(s)</strong><small>Defina o critério de ponderação antes de confirmar.</small></div><button className="primary" disabled={!selected || !activityIds.length} onClick={openWeightModal}><ArrowLeftRight size={15}/> Vincular</button></div>
       </>}
+      {weightModalOpen && selected && <div className="mapping-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setWeightModalOpen(false)}><div className="mapping-modal"><div className="chart-drawer-head"><div><small>{selected.code}</small><h3>Ponderar vínculo</h3><span>{selected.description}</span></div><button className="drawer-close" onClick={() => setWeightModalOpen(false)}>×</button></div><div className="mapping-modal-body">
+        <div className="mapping-methods">{([['duration','Por tempo'],['quantity','Por quantidade'],['area','Por área'],['percentage','Percentual']] as const).map(([value,label]) => <button key={value} className={weightMethod === value ? 'active' : ''} onClick={() => { setWeightMethod(value); const locks = value === 'percentage' ? lockedWeights : new Set<string>(); setLockedWeights(locks); distributeWeights(value, locks); }}>{label}</button>)}</div>
+        {weightMethod === 'area' && !tasks.some((task) => activityIds.includes(task.id) && taskBasis(task, 'area') > 0) && <p className="financial-message">As atividades selecionadas não possuem quantidade com unidade de área (m²).</p>}
+        <table><thead><tr><th>Atividade / lote</th><th>Base</th><th>Peso</th><th>Valor</th></tr></thead><tbody>{tasks.filter((task) => activityIds.includes(task.id)).map((task) => <tr key={task.id}><td><small>{task.lot}</small><strong>{task.packageName}</strong></td><td>{weightMethod === 'duration' ? `${taskBasis(task, weightMethod)} dias` : weightMethod === 'area' ? `${taskBasis(task, weightMethod)} m²` : weightMethod === 'quantity' ? `${task.quantity ?? 0} ${task.unit ?? ''}` : 'Manual'}</td><td><div className="weight-lock-cell">{weightMethod === 'percentage' ? <input type="number" min="0" max="100" step=".01" value={(linkWeights[task.id] ?? 0).toFixed(2)} onChange={(e) => changeManualWeight(task.id, Number(e.target.value))}/> : <b>{(linkWeights[task.id] ?? 0).toFixed(2)}%</b>}{weightMethod === 'percentage' && <button title={lockedWeights.has(task.id) ? 'Destravar percentual' : 'Travar percentual'} onClick={() => { const locks = new Set(lockedWeights); lockedWeights.has(task.id) ? locks.delete(task.id) : locks.add(task.id); setLockedWeights(locks); distributeWeights('percentage', locks); }}>{lockedWeights.has(task.id) ? <Lock size={15}/> : <Unlock size={15}/>}</button>}</div></td><td>{(selected.total * (linkWeights[task.id] ?? 0) / 100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td></tr>)}</tbody></table>
+        <aside className="mapping-total"><span>Valor a distribuir</span><strong>{selected.total.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><p>Soma dos pesos <b>{activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0).toFixed(2)}%</b></p><button disabled={Math.abs(activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0)-100) > .05} onClick={() => void linkSelected()}>Confirmar vínculo</button></aside>
+      </div></div></div>}
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
         <label className="import-header-row">Tipo de orçamento<select value={importData.type} onChange={(e) => setImportData({ ...importData, type: e.target.value as BudgetType })}><option value="contractor">Construtora (saída)</option><option value="financing">Financiamento (entrada)</option></select></label>
         <label className="import-header-row">Linha dos títulos<input type="number" min={1} value={importData.headerRow} onChange={(e) => updateBudgetHeaderRow(Number(e.target.value))}/></label><p className="import-help">Informe em qual coluna está cada informação. Os campos com * são obrigatórios.</p>

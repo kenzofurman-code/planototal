@@ -631,7 +631,7 @@ create table if not exists financial_budget_allocations (
   service_name text,
   lot_name text,
   division_type text not null default 'manual'
-    check (division_type in ('manual', 'equal', 'duration', 'quantity', 'inherited')),
+    check (division_type in ('manual', 'equal', 'duration', 'quantity', 'area', 'percentage', 'inherited')),
   item_weight_percent numeric not null default 0
     check (item_weight_percent >= 0 and item_weight_percent <= 100),
   allocated_cost numeric not null default 0,
@@ -646,6 +646,11 @@ alter table financial_budget_items add column if not exists version_id uuid
   references financial_budget_versions(id) on delete cascade;
 alter table financial_budget_allocations add column if not exists version_id uuid
   references financial_budget_versions(id) on delete cascade;
+alter table financial_budget_allocations
+  drop constraint if exists financial_budget_allocations_division_type_check;
+alter table financial_budget_allocations
+  add constraint financial_budget_allocations_division_type_check
+  check (division_type in ('manual', 'equal', 'duration', 'quantity', 'area', 'percentage', 'inherited'));
 insert into financial_budget_versions (
   project_key, budget_type, version_number, name, status, change_reason, activated_at
 )

@@ -19,7 +19,7 @@ export type BudgetRevision = {
   items: BudgetItem[];
   allocations: BudgetAllocation[];
 };
-export type DivisionType = 'manual' | 'equal' | 'duration' | 'quantity' | 'inherited';
+export type DivisionType = 'manual' | 'equal' | 'duration' | 'quantity' | 'area' | 'percentage' | 'inherited';
 export type BudgetAllocation = {
   id?: string;
   budgetId: string;
