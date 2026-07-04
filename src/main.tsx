@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import * as XLSX from 'xlsx';
-import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2, MapPin, Ruler, ImagePlus, Users } from 'lucide-react';
+import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2, MapPin, Ruler, ImagePlus, Users, CloudRain, Plus, Upload } from 'lucide-react';
 import { procurement } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { saveCalendarEvents } from './lib/calendarRepository';
@@ -15,6 +15,7 @@ import { AuthGate } from './components/AuthGate';
 import { setProjectAccess } from './lib/accessRepository';
 import { loadMediumWindowState, loadPublishedMediumPlan, saveMediumWindowState, savePublishedMediumPlan } from './lib/mediumPlanRepository';
 import { loadWorkspace } from './lib/workspaceRepository';
+import { createClimateCity, deleteClimateCity, loadClimateCities, replaceClimateRecords, type ClimateCity, type ClimateImportRow } from './lib/climateRepository';
 import type { CalendarEvent, Page, Project, ScheduleDependency, Task } from './types';
 import './styles.css';
 
@@ -219,12 +220,14 @@ function App({ userId }: { userId: string }) {
             }}
             onCreate={handleCreateProject}
             onCalendar={() => setPage('globalCalendar')}
+            onClimate={() => setPage('climate')}
             onSelect={(p) => {
               setProject(p);
               setPage('dashboard');
             }}
           />
         )}
+        {page === 'climate' && <ClimateData onBack={() => setPage('projects')} />}
         {page === 'globalCalendar' && <AnnualCalendar projects={projectList} title="Calendário geral" subtitle="Feriados nacionais e datas compartilhadas entre todas as obras." events={calendarEvents.filter((event) => !event.projectId)} onChange={(events) => { const next = [...calendarEvents.filter((event) => event.projectId), ...events]; setCalendarEvents(next); void saveCalendarEvents('global', next); }} />}
         {page === 'workCalendar' && <AnnualCalendar projects={projectList} projectId={project.id} title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id))))} onChange={(events) => { const next = [...calendarEvents.filter((event) => event.projectId !== project.id && event.projectId), ...calendarEvents.filter((event) => !event.projectId), ...events.filter((event) => event.projectId === project.id)]; setCalendarEvents(next); void saveCalendarEvents(project.id, next); }} />}
         {page === 'dashboard' && <Dashboard tasks={tasks} />}
@@ -300,7 +303,7 @@ function ProjectForm({ onSubmit, submitting = false }: { onSubmit: (project: Pro
   );
 }
 
-function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate, onCreate }: { projects: Project[]; selected: Project; onSelect: (p: Project) => void; onCalendar: () => void; onUpdate: (p: Project) => void; onCreate: (p: Project) => void | Promise<void> }) {
+function Projects({ projects: items, selected, onSelect, onCalendar, onClimate, onUpdate, onCreate }: { projects: Project[]; selected: Project; onSelect: (p: Project) => void; onCalendar: () => void; onClimate: () => void; onUpdate: (p: Project) => void; onCreate: (p: Project) => void | Promise<void> }) {
   const [editing, setEditing] = useState<Project | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageError, setImageError] = useState('');
@@ -315,6 +318,9 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate, o
   return (
     <section className="page">
       <PageHeader title="Meus projetos" subtitle="Selecione uma obra abaixo para acessar as medições e o planejamento.">
+        <button onClick={onClimate}>
+          <CloudRain size={17} /> Dados Clima
+        </button>
         <button onClick={onCalendar}>
           <CalendarRange size={17} /> Calendário
         </button>
@@ -454,6 +460,135 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate, o
           </form>
         )}
       </aside>
+    </section>
+  );
+}
+
+function climateDate(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof value === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    return parsed ? `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}` : null;
+  }
+  const text = String(value ?? '').trim();
+  const br = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (br) return `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}`;
+  const iso = text.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
+  return null;
+}
+
+function displayClimateDate(value: string | null) {
+  if (!value) return '—';
+  const [year, month, day] = value.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function ClimateData({ onBack }: { onBack: () => void }) {
+  const [cities, setCities] = useState<ClimateCity[]>([]);
+  const [cityName, setCityName] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busyCity, setBusyCity] = useState('');
+  const [error, setError] = useState('');
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      setCities(await loadClimateCities());
+      setError('');
+    } catch (caught) {
+      setError((caught as { message?: string })?.message ?? 'Não foi possível carregar os dados climáticos.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void refresh(); }, []);
+
+  async function addCity(event: React.FormEvent) {
+    event.preventDefault();
+    if (!cityName.trim()) return;
+    try {
+      await createClimateCity(cityName);
+      setCityName('');
+      await refresh();
+    } catch (caught) {
+      setError((caught as { message?: string })?.message ?? 'Não foi possível adicionar a cidade.');
+    }
+  }
+
+  async function importFile(city: ClimateCity, file: File) {
+    setBusyCity(city.id);
+    setError('');
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: null, raw: true });
+      if (!rawRows.length) throw new Error('A planilha não contém registros.');
+      const dateColumn = Object.keys(rawRows[0]).find((key) => key.trim().toLocaleLowerCase('pt-BR') === 'data');
+      if (!dateColumn) throw new Error('A coluna "Data" não foi encontrada na primeira linha da planilha.');
+      const rows: ClimateImportRow[] = rawRows.map((row) => ({
+        observationDate: climateDate(row[dateColumn]),
+        data: row
+      })).filter((row): row is ClimateImportRow => Boolean(row.observationDate));
+      if (!rows.length) throw new Error('Nenhuma data válida foi encontrada na coluna "Data".');
+      await replaceClimateRecords(city.id, rows);
+      await refresh();
+    } catch (caught) {
+      setError((caught as { message?: string })?.message ?? 'Não foi possível importar a planilha.');
+    } finally {
+      setBusyCity('');
+    }
+  }
+
+  return (
+    <section className="page climate-page">
+      <PageHeader title="Dados Clima" subtitle="Cadastre cidades e mantenha o histórico climático importado por Excel.">
+        <button onClick={onBack}><ChevronLeft size={17} /> Meus projetos</button>
+      </PageHeader>
+      <form className="climate-add" onSubmit={(event) => void addCity(event)}>
+        <label>Nova cidade<input placeholder="Ex.: Curitiba" value={cityName} onChange={(event) => setCityName(event.target.value)} /></label>
+        <button className="primary" type="submit" disabled={!cityName.trim()}><Plus size={17} /> Adicionar linha</button>
+      </form>
+      {error && <p className="form-error climate-error">{error}</p>}
+      <div className="card climate-table-wrap">
+        <table className="climate-table">
+          <thead><tr><th>Cidade</th><th>Início Banco</th><th>Término Banco</th><th>Registros</th><th>Ações</th></tr></thead>
+          <tbody>
+            {cities.map((city) => (
+              <tr key={city.id}>
+                <td><strong>{city.name}</strong></td>
+                <td>{displayClimateDate(city.startDate)}</td>
+                <td>{displayClimateDate(city.endDate)}</td>
+                <td>{city.recordCount.toLocaleString('pt-BR')}</td>
+                <td className="climate-actions">
+                  <label className={`file-button ${busyCity === city.id ? 'disabled' : ''}`}>
+                    <Upload size={16} /> {busyCity === city.id ? 'Importando...' : 'Importar'}
+                    <input type="file" accept=".xlsx,.xls,.csv" disabled={Boolean(busyCity)} onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void importFile(city, file);
+                      event.target.value = '';
+                    }} />
+                  </label>
+                  <button className="danger-button" disabled={Boolean(busyCity)} onClick={async () => {
+                    if (!window.confirm(`Excluir ${city.name} e todos os seus dados climáticos?`)) return;
+                    try {
+                      await deleteClimateCity(city.id);
+                      await refresh();
+                    } catch (caught) {
+                      setError((caught as { message?: string })?.message ?? 'Não foi possível excluir a cidade.');
+                    }
+                  }}><Trash2 size={16} /> Excluir</button>
+                </td>
+              </tr>
+            ))}
+            {!loading && !cities.length && <tr><td colSpan={5} className="climate-empty">Nenhuma cidade cadastrada.</td></tr>}
+            {loading && <tr><td colSpan={5} className="climate-empty">Carregando...</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }

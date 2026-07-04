@@ -47,6 +47,19 @@ main { flex: 1; min-width: 0; }
 .project-image-upload input[type="file"] { display: none; }
 .project-upload-preview { height: 135px; border: 1px dashed #a5b4fc; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; color: #4f46e5; background: #f5f7ff; cursor: pointer; }
 .project-upload-preview img { width: 100%; height: 100%; object-fit: cover; }
+.climate-add { display: flex; align-items: end; gap: 10px; margin-bottom: 18px; }
+.climate-add label { display: grid; gap: 6px; width: min(380px, 100%); color: #475569; font-size: 13px; font-weight: 650; }
+.climate-add input { border: 1px solid #dbe2ea; border-radius: 10px; padding: 10px 12px; background: #fff; }
+.climate-add button, .climate-actions button, .climate-actions label { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.climate-error { padding: 10px 12px; border: 1px solid #fecaca; border-radius: 10px; background: #fff7f7; }
+.climate-table-wrap { padding: 0; overflow: auto; }
+.climate-table { min-width: 760px; }
+.climate-table th { padding: 14px 16px; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; }
+.climate-table td { padding: 14px 16px; }
+.climate-actions { display: flex; gap: 8px; }
+.climate-actions .file-button { margin: 0; font-size: 13px; }
+.file-button.disabled { opacity: .55; pointer-events: none; }
+.climate-empty { height: 130px; text-align: center; color: #94a3b8; }
 .project-form { display: grid; gap: 14px; margin-top: 22px; }
 .project-form label { display: grid; gap: 6px; color: #475569; font-size: 13px; font-weight: 650; }
 .project-form input { width: 100%; border: 1px solid #dbe2ea; border-radius: 10px; padding: 11px 12px; background: #fff; }
@@ -331,5 +344,6 @@ svg { user-select: none; touch-action: none; -webkit-user-select: none; -webkit-
   .lot-labels, .lot-label-header, .lot-label { width: 170px; }
   .chart-scroll svg { left: 170px; }
   .page-header { flex-direction: column; }
+  .climate-add { align-items: stretch; flex-direction: column; }
   .year-calendar { grid-template-columns: 1fr; }
 }
