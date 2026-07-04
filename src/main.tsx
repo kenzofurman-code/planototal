@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import * as XLSX from 'xlsx';
-import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2 } from 'lucide-react';
+import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2, MapPin, Ruler, ImagePlus, Users } from 'lucide-react';
 import { procurement } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { saveCalendarEvents } from './lib/calendarRepository';
 import { loadLineBalanceData, saveLineBalanceData } from './lib/lineBalanceRepository';
-import { saveProject } from './lib/projectRepository';
+import { saveProject, uploadProjectImage } from './lib/projectRepository';
 import { deleteProjectBudget, saveScheduleTasks } from './lib/scheduleRepository';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
@@ -302,6 +302,8 @@ function ProjectForm({ onSubmit, submitting = false }: { onSubmit: (project: Pro
 
 function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate, onCreate }: { projects: Project[]; selected: Project; onSelect: (p: Project) => void; onCalendar: () => void; onUpdate: (p: Project) => void; onCreate: (p: Project) => void | Promise<void> }) {
   const [editing, setEditing] = useState<Project | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageError, setImageError] = useState('');
   const cityOptions = [
     { city: 'Curitiba', state: 'PR', ibge: '4106902' },
     { city: 'São Paulo', state: 'SP', ibge: '3550308' },
@@ -312,7 +314,7 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate, o
   ];
   return (
     <section className="page">
-      <PageHeader title="Projetos" subtitle="Selecione uma obra para abrir o planejamento integrado.">
+      <PageHeader title="Meus projetos" subtitle="Selecione uma obra abaixo para acessar as medições e o planejamento.">
         <button onClick={onCalendar}>
           <CalendarRange size={17} /> Calendário
         </button>
@@ -321,16 +323,21 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate, o
       <div className="project-grid">
         {items.map((p) => (
           <article className={`project-card ${selected.id === p.id ? 'selected' : ''}`} key={p.id}>
-            <img src={p.imageUrl} />
-            <div>
-              <span className="pill">{p.status}</span>
+            <header className="project-card-header">
               <h2>{p.name}</h2>
-              <p>{p.address}</p>
-              <small>
-                {p.area.toLocaleString('pt-BR')} m² · {p.startDate} até {p.plannedEndDate}
-              </small>
-              <button onClick={() => onSelect(p)}>Selecionar</button>
-              <button
+              <span>Obra</span>
+            </header>
+            {p.imageUrl ? <img src={p.imageUrl} alt={`Foto da obra ${p.name}`} /> : (
+              <div className="project-image-placeholder"><Building2 size={38} /><span>Adicione uma foto da obra</span></div>
+            )}
+            <div className="project-card-details">
+              <p><Ruler size={17} /><strong>{p.area.toLocaleString('pt-BR')} m²</strong></p>
+              <p><Users size={17} /><span>Equipe da obra</span></p>
+              <p><MapPin size={17} /><span>{p.address || 'Endereço não informado'}</span></p>
+            </div>
+            <footer className="project-card-actions">
+              <button className="primary project-select" onClick={() => onSelect(p)}>Selecionar</button>
+              <button className="project-edit"
                 onClick={() =>
                   setEditing({
                     ...p,
@@ -341,7 +348,7 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate, o
               >
                 Editar projeto
               </button>
-            </div>
+            </footer>
           </article>
         ))}
       </div>
@@ -351,18 +358,40 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate, o
         </button>
         {editing && (
           <form
-            onSubmit={(event) => {
+            onSubmit={async (event) => {
               event.preventDefault();
               const saved = {
                 ...editing,
                 address: `${editing.city ?? ''} - ${editing.state ?? ''}`
               };
               if (items.some((item) => item.id === editing.id)) onUpdate(saved);
-              else void onCreate(saved);
+              else await onCreate(saved);
               setEditing(null);
             }}
           >
             <h3>{items.some((item) => item.id === editing.id) ? 'Editar projeto' : 'Novo projeto'}</h3>
+            <label className="project-image-upload">
+              Foto da obra
+              <span className="project-upload-preview">
+                {editing.imageUrl ? <img src={editing.imageUrl} alt="Prévia da obra" /> : <><ImagePlus size={28} />Escolher imagem</>}
+              </span>
+              <input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingImage} onChange={async (event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                setImageError('');
+                setUploadingImage(true);
+                try {
+                  const imageUrl = await uploadProjectImage(editing.id, file);
+                  setEditing((current) => current ? { ...current, imageUrl } : current);
+                } catch (caught) {
+                  setImageError((caught as { message?: string })?.message ?? 'Não foi possível enviar a imagem.');
+                } finally {
+                  setUploadingImage(false);
+                }
+              }} />
+              <small>{uploadingImage ? 'Enviando imagem...' : 'JPG, PNG ou WebP · máximo 5 MB'}</small>
+              {imageError && <span className="form-error">{imageError}</span>}
+            </label>
             <label>
               Nome
               <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
@@ -419,8 +448,8 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate, o
               Término previsto
               <input type="date" value={editing.plannedEndDate} onChange={(e) => setEditing({ ...editing, plannedEndDate: e.target.value })} />
             </label>
-            <button className="primary" type="submit">
-              Salvar projeto
+            <button className="primary" type="submit" disabled={uploadingImage}>
+              {uploadingImage ? 'Aguarde o envio...' : 'Salvar projeto'}
             </button>
           </form>
         )}

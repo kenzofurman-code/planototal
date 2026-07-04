@@ -21,6 +21,18 @@ alter table projects add column if not exists city text;
 alter table projects add column if not exists state text;
 alter table projects add column if not exists ibge_code text;
 
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('project-images', 'project-images', true, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do update set public = true, file_size_limit = 5242880,
+  allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp'];
+
+drop policy if exists "public_project_images_read" on storage.objects;
+create policy "public_project_images_read" on storage.objects for select using (bucket_id = 'project-images');
+drop policy if exists "authenticated_project_images_insert" on storage.objects;
+create policy "authenticated_project_images_insert" on storage.objects for insert to authenticated with check (bucket_id = 'project-images');
+drop policy if exists "anon_project_images_insert" on storage.objects;
+create policy "anon_project_images_insert" on storage.objects for insert to anon with check (bucket_id = 'project-images');
+
 alter table projects enable row level security;
 drop policy if exists "authenticated_projects_select" on projects;
 create policy "authenticated_projects_select" on projects for select to authenticated using (true);
