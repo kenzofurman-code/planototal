@@ -234,7 +234,7 @@ function App({ userId }: { userId: string }) {
         {page === 'workCalendar' && <AnnualCalendar projects={projectList} projectId={project.id} title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id))))} onChange={(events) => { const next = [...calendarEvents.filter((event) => event.projectId !== project.id && event.projectId), ...calendarEvents.filter((event) => !event.projectId), ...events.filter((event) => event.projectId === project.id)]; setCalendarEvents(next); void saveCalendarEvents(project.id, next); }} />}
         {page === 'dashboard' && <Dashboard tasks={tasks} />}
         {page === 'schedule' && <Schedule projectKey={project.id} tasks={tasks} setTasks={setTasks} />}
-        {page === 'line' && <LineBalance projectKey={project.id} tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
+        {page === 'line' && <LineBalance projectKey={project.id} projectStartDate={project.startDate} plannedEndDate={project.plannedEndDate} tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'procurement' && <Procurement />}
         {page === 'medium' && <MediumPlan tasks={tasks} projectId={project.id} onPublish={handleMediumPublish} />}
         {page === 'short' && <ShortTerm tasks={latestMediumTasks.length ? latestMediumTasks : tasks} projectId={project.id} />}
@@ -1182,7 +1182,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
   );
 }
 
-function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: string; tasks: Task[]; setTasks: (tasks: Task[]) => void; holidays: CalendarEvent[] }) {
+function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setTasks, holidays }: { projectKey: string; projectStartDate: string; plannedEndDate: string; tasks: Task[]; setTasks: (tasks: Task[]) => void; holidays: CalendarEvent[] }) {
   const [zoom, setZoom] = useState(3);
   const [editMode, setEditMode] = useState(true);
   const [dependencyMode, setDependencyMode] = useState(true);
@@ -1399,7 +1399,19 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
     return result;
   }, [tasks, groupLines, groupOrder, lotOrder]);
 
-  const width = Math.max(1300, diffDays(projectStart, chartEnd) * zoomPx[zoom] + 160);
+  const validTaskStarts = tasks.map((task) => parseDate(task.startDate)).filter((date) => !Number.isNaN(date.getTime()));
+  const validTaskEnds = tasks.map((task) => parseDate(task.endDate)).filter((date) => !Number.isNaN(date.getTime()));
+  const configuredStart = parseDate(projectStartDate);
+  const configuredEnd = parseDate(plannedEndDate);
+  const projectStart = Number.isNaN(configuredStart.getTime())
+    ? (validTaskStarts.length ? new Date(Math.min(...validTaskStarts.map((date) => date.getTime()))) : new Date())
+    : configuredStart;
+  const lastTaskEnd = validTaskEnds.length ? new Date(Math.max(...validTaskEnds.map((date) => date.getTime()))) : projectStart;
+  const chartEnd = Number.isNaN(configuredEnd.getTime()) || configuredEnd < lastTaskEnd ? lastTaskEnd : configuredEnd;
+  const chartDayCount = Math.max(1, diffDays(projectStart, chartEnd) + 1);
+  const chartWeekCount = Math.ceil(chartDayCount / 7);
+  const chartMonthCount = Math.max(1, (chartEnd.getFullYear() - projectStart.getFullYear()) * 12 + chartEnd.getMonth() - projectStart.getMonth() + 1);
+  const width = Math.max(1300, chartDayCount * zoomPx[zoom] + 160);
   const height = 90 + rows.reduce((s, r) => s + r.height, 0) + 40;
 
   function xFor(d: Date) {
@@ -1848,9 +1860,45 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
               </div>
             ))}
           </div>
+          <svg className="line-time-header" width={width} height={90} aria-hidden="true">
+            <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
+            {Array.from({ length: chartDayCount }).map((_, i) => {
+              const date = addDays(projectStart, i);
+              const x = xFor(date);
+              return (
+                <g key={`sticky-day-${i}`}>
+                  <line x1={x} x2={x} y1={66} y2={90} stroke={date.getDay() === 0 ? '#cbd5e1' : '#eef0f4'} />
+                  <text x={x + 2} y={84} fontSize={9} fill="#64748b">{dayNames[date.getDay()]}</text>
+                </g>
+              );
+            })}
+            {Array.from({ length: chartWeekCount }).map((_, i) => {
+              const date = addDays(projectStart, i * 7);
+              const weekEnd = addDays(date, 6);
+              const format = (value: Date) => weekFormat === 'day'
+                ? value.toLocaleDateString('pt-BR', { day: '2-digit' })
+                : value.toLocaleDateString('pt-BR', weekFormat === 'numeric' ? { day: '2-digit', month: '2-digit' } : { day: '2-digit', month: 'short' });
+              return (
+                <g key={`sticky-week-${i}`}>
+                  <line x1={xFor(date)} x2={xFor(date)} y1={38} y2={90} stroke="#d9dde6" />
+                  <text x={xFor(date) + 3} y={59} fontSize={10}>{format(date)}–{format(weekEnd)}</text>
+                </g>
+              );
+            })}
+            {Array.from({ length: chartMonthCount }).map((_, i) => {
+              const date = new Date(projectStart.getFullYear(), projectStart.getMonth() + i, 1);
+              const label = monthFormat === 'index' ? `M${i + 1}` : date.toLocaleDateString('pt-BR', { month: '2-digit', year: '2-digit' });
+              return (
+                <g key={`sticky-month-${i}`}>
+                  <line x1={xFor(date)} x2={xFor(date)} y1={0} y2={90} stroke="#aeb4c2" />
+                  <text x={xFor(date) + 4} y={24} fontSize={12} fontWeight={700}>{label}</text>
+                </g>
+              );
+            })}
+          </svg>
           <svg ref={svgRef} width={width} height={height} onPointerDown={closeDrawersOnEmpty} onPointerMove={onMove} onPointerUp={finishDrag} onPointerCancel={finishDrag}>
             <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
-            {Array.from({ length: diffDays(projectStart, chartEnd) + 1 }).map((_, index) => {
+            {Array.from({ length: chartDayCount }).map((_, index) => {
               const date = addDays(projectStart, index);
               const iso = toIsoDate(date);
               const isWeekend = date.getDay() === 0 || date.getDay() === 6;
@@ -1862,7 +1910,7 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
                 </rect>
               );
             })}
-            {Array.from({ length: diffDays(projectStart, chartEnd) + 1 }).map((_, i) => {
+            {Array.from({ length: chartDayCount }).map((_, i) => {
               const date = addDays(projectStart, i);
               const x = xFor(date);
               return (
@@ -1874,7 +1922,7 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
                 </g>
               );
             })}
-            {Array.from({ length: 75 }).map((_, i) => {
+            {Array.from({ length: chartWeekCount }).map((_, i) => {
               const d = addDays(projectStart, i * 7);
               const weekEnd = addDays(d, 6);
               const x = xFor(d);
@@ -1891,7 +1939,7 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
                 </g>
               );
             })}
-            {Array.from({ length: 18 }).map((_, i) => {
+            {Array.from({ length: chartMonthCount }).map((_, i) => {
               const date = new Date(projectStart.getFullYear(), projectStart.getMonth() + i, 1);
               const label =
                 monthFormat === 'index'
