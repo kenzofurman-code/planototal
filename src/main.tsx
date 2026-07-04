@@ -954,7 +954,12 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
     const splitIds = (input: unknown) =>
       String(input ?? '')
         .split(/[;,]/)
-        .map((item) => item.trim())
+        .map((item) =>
+          item
+            .trim()
+            .replace(/\s*(FS|SS|FF|SF)\s*(?:[+-]\s*\d+\s*[a-z]*)?$/i, '')
+            .trim()
+        )
         .filter((item) => item && item !== '-');
     const parsed = importData.rows
       .slice(importData.headerRow)
@@ -1275,7 +1280,20 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
           setVersions(data.versions);
           setSelectedVersionId(data.versions[0].id);
         }
-        if (data.dependencies?.length) setDependencies(data.dependencies);
+        const taskIds = new Set(tasks.map((task) => task.id));
+        const importedDependencies: ScheduleDependency[] = tasks.flatMap((task) =>
+          (task.predecessors ?? [])
+            .filter((from) => taskIds.has(from) && from !== task.id)
+            .map((from) => ({ from, to: task.id, type: 'FS' as const }))
+        );
+        const storedDependencies = (data.dependencies ?? []).filter(
+          (dependency) => taskIds.has(dependency.from) && taskIds.has(dependency.to) && dependency.from !== dependency.to
+        );
+        const mergedDependencies = new Map<string, ScheduleDependency>();
+        [...storedDependencies, ...importedDependencies].forEach((dependency) => {
+          mergedDependencies.set(`${dependency.from}→${dependency.to}`, dependency);
+        });
+        setDependencies(Array.from(mergedDependencies.values()));
         lineBalanceReady.current = true;
       })
       .catch(() => {
