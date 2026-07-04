@@ -3,6 +3,9 @@ import type { Task } from '../types';
 
 export async function saveScheduleTasks(projectKey: string, tasks: Task[]) {
   if (!supabase) return;
+  const deleted = await supabase.from('schedule_tasks').delete().eq('project_key', projectKey);
+  if (deleted.error) throw deleted.error;
+  if (!tasks.length) return;
   const rows = tasks.map((task) => ({
     project_key: projectKey,
     external_id: task.id,

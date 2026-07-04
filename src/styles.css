@@ -272,6 +272,10 @@ th { background: #f8fafc; color: #475569; }
 .version-card small { color: #64748b; }
 .version-kind { width: fit-content; padding: 3px 7px; border-radius: 999px; color: #3730a3; background: #eef2ff; font-size: 10px; font-weight: 700; text-transform: uppercase; }
 .version-kind.baseline { color: #166534; background: #dcfce7; }
+.version-list { display: grid; gap: 10px; margin-top: 12px; }
+.version-row { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px; border: 1px solid #e2e8f0; border-radius: 10px; }
+.version-row > div:first-child { display: grid; gap: 3px; }
+.version-row small { color: #64748b; }
 .version-kind.planned { color: #9a3412; background: #ffedd5; }
 .version-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .version-actions button { font-size: 11px; }

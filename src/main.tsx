@@ -8,6 +8,7 @@ import { saveCalendarEvents } from './lib/calendarRepository';
 import { loadLineBalanceData, saveLineBalanceData } from './lib/lineBalanceRepository';
 import { saveProject, uploadProjectImage } from './lib/projectRepository';
 import { deleteProjectBudget, saveScheduleTasks } from './lib/scheduleRepository';
+import { createScheduleVersion, deleteScheduleVersion, loadScheduleVersions, selectScheduleVersion, updateActiveScheduleVersion, type SavedScheduleVersion } from './lib/scheduleVersionRepository';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
 import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
@@ -880,6 +881,37 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
     headerRow: number;
   } | null>(null);
   const [mapping, setMapping] = useState<Partial<Record<ImportField, number>>>({});
+  const [savedVersions, setSavedVersions] = useState<SavedScheduleVersion[]>([]);
+  const [versionMessage, setVersionMessage] = useState('');
+
+  async function refreshVersions() {
+    try {
+      setSavedVersions(await loadScheduleVersions(projectKey));
+      setVersionMessage('');
+    } catch (error) {
+      setVersionMessage((error as Error).message);
+    }
+  }
+  useEffect(() => { void refreshVersions(); }, [projectKey]);
+
+  async function createCopy() {
+    await createScheduleVersion(projectKey, `Cronograma V${String(savedVersions.length + 1).padStart(2, '0')}`, tasks, savedVersions.length === 0);
+    await refreshVersions();
+  }
+  async function chooseVersion(version: SavedScheduleVersion, field: 'is_active' | 'is_baseline') {
+    await selectScheduleVersion(projectKey, version.id, field);
+    if (field === 'is_active') {
+      const snapshot = version.tasks.map((task) => ({ ...task }));
+      setTasks(snapshot);
+      await saveScheduleTasks(projectKey, snapshot);
+    }
+    await refreshVersions();
+  }
+  async function removeVersion(version: SavedScheduleVersion) {
+    if (!window.confirm(`Excluir "${version.name}"?`)) return;
+    await deleteScheduleVersion(projectKey, version.id);
+    await refreshVersions();
+  }
 
   async function readFile(file: File) {
     const buffer = await file.arrayBuffer();
@@ -1001,6 +1033,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
     });
     setTasks(imported);
     void saveScheduleTasks(projectKey, imported);
+    void createScheduleVersion(projectKey, `Cronograma V${String(savedVersions.length + 1).padStart(2, '0')}`, imported, savedVersions.length === 0).then(refreshVersions);
     setImportData(null);
   }
 
@@ -1011,9 +1044,29 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
           Importar XLSX/CSV
           <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])} />
         </label>
-        <button>Criar cópia</button>
-        <button>Linha de base</button>
+        <button onClick={() => void createCopy()}>Criar cópia</button>
       </PageHeader>
+      <div className="card">
+        <h3>Versões salvas</h3>
+        {versionMessage && <p className="form-error">{versionMessage}</p>}
+        {!savedVersions.length && <p>Nenhuma versão salva.</p>}
+        <div className="version-list">
+          {savedVersions.map((version) => (
+            <div className="version-row" key={version.id}>
+              <div><strong>{version.name}</strong><small>{new Date(version.createdAt).toLocaleString('pt-BR')}</small></div>
+              <div className="actions">
+                <button className={version.isActive ? 'primary' : ''} onClick={() => void chooseVersion(version, 'is_active')}>
+                  {version.isActive ? 'Versão ativa' : 'Definir ativa'}
+                </button>
+                <button className={version.isBaseline ? 'primary' : ''} onClick={() => void chooseVersion(version, 'is_baseline')}>
+                  {version.isBaseline ? 'Linha de base' : 'Usar como linha de base'}
+                </button>
+                <button disabled={version.isActive} onClick={() => void removeVersion(version)}>Excluir</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
       <div className="card table-wrap">
         <table>
           <thead>
@@ -1246,6 +1299,14 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
     groupOrder,
     lotOrder
   ]);
+
+  useEffect(() => {
+    if (!projectKey || !lineBalanceReady.current) return;
+    const timer = window.setTimeout(() => {
+      void Promise.all([saveScheduleTasks(projectKey, tasks), updateActiveScheduleVersion(projectKey, tasks)]);
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [projectKey, tasks]);
 
   const taskGroups = Array.from(new Set(tasks.map((t) => t.lotMother)));
   const groups = [...groupOrder.filter((group) => taskGroups.includes(group)), ...taskGroups.filter((group) => !groupOrder.includes(group))];
