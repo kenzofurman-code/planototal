@@ -1409,20 +1409,34 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
   }
   function updateTask(id: string, patch: Partial<Task>) {
     const next = tasks.map((task) => (task.id === id ? { ...task, ...patch } : { ...task }));
+    const requiredStartFor = (taskId: string) => {
+      const predecessorEnds = dependencies
+        .filter((dependency) => dependency.to === taskId)
+        .map((dependency) => next.find((task) => task.id === dependency.from))
+        .filter((task): task is Task => Boolean(task))
+        .map((task) => parseDate(task.endDate));
+      if (!predecessorEnds.length) return null;
+      return addDays(new Date(Math.max(...predecessorEnds.map((date) => date.getTime()))), 1);
+    };
+    const enforceTaskStart = (task: Task) => {
+      const requiredStart = requiredStartFor(task.id);
+      if (!requiredStart || parseDate(task.startDate) >= requiredStart) return false;
+      const duration = diffDays(parseDate(task.startDate), parseDate(task.endDate));
+      task.startDate = toIsoDate(requiredStart);
+      task.endDate = toIsoDate(addDays(requiredStart, duration));
+      return true;
+    };
+    const editedTask = next.find((task) => task.id === id);
+    if (editedTask) enforceTaskStart(editedTask);
     const propagate = (fromId: string, visited = new Set<string>()) => {
       if (visited.has(fromId)) return;
       visited.add(fromId);
-      const predecessor = next.find((task) => task.id === fromId);
-      if (!predecessor) return;
       dependencies
         .filter((dependency) => dependency.from === fromId)
         .forEach((dependency) => {
           const successor = next.find((task) => task.id === dependency.to);
           if (!successor) return;
-          const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
-          const requiredStart = addDays(parseDate(predecessor.endDate), 1);
-          successor.startDate = toIsoDate(requiredStart);
-          successor.endDate = toIsoDate(addDays(requiredStart, duration));
+          enforceTaskStart(successor);
           propagate(successor.id, visited);
         });
     };
@@ -1509,7 +1523,12 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
         const successor = tasks.find((task) => task.id === drag.target);
         if (predecessor && successor) {
           const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
-          const start = addDays(parseDate(predecessor.endDate), 1);
+          const predecessorEnds = nextDependencies
+            .filter((dependency) => dependency.to === successor.id)
+            .map((dependency) => tasks.find((task) => task.id === dependency.from))
+            .filter((task): task is Task => Boolean(task))
+            .map((task) => parseDate(task.endDate).getTime());
+          const start = addDays(new Date(Math.max(...predecessorEnds)), 1);
           setTasks(
             tasks.map((task) =>
               task.id === successor.id
