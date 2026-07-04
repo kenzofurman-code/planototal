@@ -3575,8 +3575,9 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     const old = budgets.find((budget) => budget.type === importData.type);
     const sameEap = old && old.items.length === imported.length && old.items.every((item, index) => item.code === imported[index]?.code);
     if (old && !sameEap && !window.confirm('A EAP está diferente. Esta será uma nova importação e todos os vínculos atuais deste orçamento serão perdidos. Continuar?')) return;
-    const oldByCode = new Map(old?.items.map((item) => [item.code, item]));
-    const normalized = sameEap ? imported.map((item) => ({ ...item, id: oldByCode.get(item.code)?.id ?? item.id })) : imported;
+    // Cada versão possui seus próprios itens. Mesmo com EAP idêntica, reutilizar
+    // o UUID da versão anterior violaria a chave primária e misturaria auditorias.
+    const normalized = imported;
     const matchTask = (row: unknown[]) => {
       const explicitId = String(get(row, 'taskId')).trim();
       if (explicitId) return tasks.filter((task) => task.id === explicitId);

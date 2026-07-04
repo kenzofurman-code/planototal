@@ -82,6 +82,8 @@ export async function saveBudget(revision: BudgetRevision) {
     }).select('id').single();
     if (created.error) throw created.error;
     versionId = created.data.id;
+    revision.versionId = versionId;
+    revision.versionNumber = (last?.version_number ?? 0) + 1;
   }
   const { error } = await supabase.from('financial_budgets').upsert({
     project_key: revision.projectKey,
