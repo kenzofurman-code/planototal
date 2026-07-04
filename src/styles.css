@@ -249,7 +249,10 @@ th { background: #f8fafc; color: #475569; }
 .version-kind.planned { color: #9a3412; background: #ffedd5; }
 .version-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .version-actions button { font-size: 11px; }
-.package-config-list { display: grid; gap: 6px; max-height: 260px; overflow: auto; }
+.package-config-list { display: grid; gap: 6px; }
+.lot-label-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.lot-sort-actions { display: inline-flex; gap: 3px; margin-left: auto; }
+.lot-sort-actions button { padding: 1px 5px; border-color: #c7d2fe; color: #3730a3; background: #fff; font-size: 11px; }
 .package-config-row { display: grid; grid-template-columns: 30px minmax(0,1fr) 90px; gap: 7px; align-items: center; padding: 6px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; }
 .package-config-row input[type=color] { width: 28px; height: 28px; padding: 2px; border: 1px solid #d1d5db; border-radius: 6px; }
 .package-config-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }

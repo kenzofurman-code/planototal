@@ -1332,6 +1332,12 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
     }
     setOrdering(null);
   }
+  function sortLots(group: string, direction: 'asc' | 'desc') {
+    const lots = Array.from(new Set(tasks.filter((task) => task.lotMother === group).map((task) => task.lot)));
+    const collator = new Intl.Collator('pt-BR', { numeric: true, sensitivity: 'base' });
+    const sorted = [...lots].sort((left, right) => collator.compare(left, right) * (direction === 'asc' ? 1 : -1));
+    setLotOrder({ ...lotOrder, [group]: sorted });
+  }
   return (
     <section className="page">
       <PageHeader title="Linha de balanço" subtitle="Visualização e edição do cronograma." />
@@ -1394,26 +1400,6 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
                   <option value={2}>2 linhas</option>
                   <option value={3}>3 linhas</option>
                   <option value={4}>4 linhas</option>
-                </select>
-              </label>
-            ))}
-            <h4>Linha por família</h4>
-            {families.map((f) => (
-              <label key={f}>
-                {f}
-                <select
-                  value={familyLane[f] ?? 1}
-                  onChange={(e) =>
-                    setFamilyLane({
-                      ...familyLane,
-                      [f]: Number(e.target.value)
-                    })
-                  }
-                >
-                  <option value={1}>Linha 1</option>
-                  <option value={2}>Linha 2</option>
-                  <option value={3}>Linha 3</option>
-                  <option value={4}>Linha 4</option>
                 </select>
               </label>
             ))}
@@ -1535,7 +1521,33 @@ function LineBalance({ projectKey, tasks, setTasks, holidays }: { projectKey: st
                 onDragEnd={() => setOrdering(null)}
               >
                 <span className="drag-grip">⠿</span>
-                {row.label}
+                <span className="lot-label-text">{row.label}</span>
+                {row.type === 'group' && (
+                  <span className="lot-sort-actions">
+                    <button
+                      title="Classificar lotes em ordem ascendente"
+                      draggable={false}
+                      onDragStart={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        sortLots(row.key, 'asc');
+                      }}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      title="Classificar lotes em ordem descendente"
+                      draggable={false}
+                      onDragStart={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        sortLots(row.key, 'desc');
+                      }}
+                    >
+                      ↓
+                    </button>
+                  </span>
+                )}
               </div>
             ))}
           </div>
