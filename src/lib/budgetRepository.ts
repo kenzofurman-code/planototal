@@ -121,6 +121,46 @@ export async function saveBudget(revision: BudgetRevision) {
   }
 }
 
+export async function saveBudgetAllocations(revision: BudgetRevision) {
+  if (!supabase) return;
+  if (!revision.versionId) throw new Error('O orçamento ativo não possui uma versão válida para receber os vínculos.');
+
+  const removed = await supabase.from('financial_budget_allocations').delete().eq('version_id', revision.versionId);
+  if (removed.error) throw removed.error;
+
+  if (revision.allocations.length) {
+    const rows = revision.allocations.map((item) => {
+      const id = item.id ?? crypto.randomUUID();
+      item.id = id;
+      return {
+        id,
+        version_id: revision.versionId,
+        project_key: revision.projectKey,
+        budget_type: revision.type,
+        budget_item_id: item.budgetId,
+        schedule_task_external_id: item.taskId,
+        parent_schedule_task_external_id: item.parentTaskId ?? null,
+        package_name: item.packageName ?? null,
+        service_name: item.serviceName ?? null,
+        lot_name: item.lotName ?? null,
+        division_type: item.divisionType,
+        item_weight_percent: item.weight,
+        allocated_cost: item.value,
+        inherited_from_allocation_id: item.inheritedFromId ?? null,
+        updated_at: new Date().toISOString()
+      };
+    });
+    const inserted = await supabase.from('financial_budget_allocations').insert(rows);
+    if (inserted.error) throw inserted.error;
+  }
+
+  const updated = await supabase.from('financial_budgets').update({
+    allocations: revision.allocations,
+    updated_at: new Date().toISOString()
+  }).eq('project_key', revision.projectKey).eq('type', revision.type);
+  if (updated.error) throw updated.error;
+}
+
 export async function deleteBudget(projectKey: string, type: BudgetType) {
   if (!supabase) return;
   const { error } = await supabase.from('financial_budgets').delete().eq('project_key', projectKey).eq('type', type);

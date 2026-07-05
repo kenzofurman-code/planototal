@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import * as XLSX from 'xlsx';
-import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2, MapPin, Ruler, ImagePlus, Users, CloudRain, Plus, Upload, Lock, Unlock } from 'lucide-react';
+import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, Download, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2, MapPin, Ruler, ImagePlus, Users, CloudRain, Plus, Upload, Lock, Unlock } from 'lucide-react';
 import { procurement } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
 import { saveCalendarEvents } from './lib/calendarRepository';
 import { loadLineBalanceData, saveLineBalanceData } from './lib/lineBalanceRepository';
 import { saveProject, uploadProjectImage } from './lib/projectRepository';
 import { deleteProjectBudget, saveScheduleTasks } from './lib/scheduleRepository';
-import { deleteBudget as deleteSavedBudget, loadBudgetRevisionName, loadBudgets, saveBudget, saveBudgetRevisionName, type BudgetItem, type BudgetRevision, type BudgetType } from './lib/budgetRepository';
+import { deleteBudget as deleteSavedBudget, loadBudgetRevisionName, loadBudgets, saveBudget, saveBudgetAllocations, saveBudgetRevisionName, type BudgetItem, type BudgetRevision, type BudgetType } from './lib/budgetRepository';
 import { createScheduleVersion, deleteScheduleVersion, loadScheduleVersions, selectScheduleVersion, updateActiveScheduleVersion, type SavedScheduleVersion } from './lib/scheduleVersionRepository';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
@@ -3536,6 +3536,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const [weightMethod, setWeightMethod] = useState<'duration' | 'quantity' | 'area' | 'percentage'>('duration');
   const [linkWeights, setLinkWeights] = useState<Record<string, number>>({});
   const [lockedWeights, setLockedWeights] = useState<Set<string>>(new Set());
+  const [savingLinks, setSavingLinks] = useState(false);
   const current = budgets.find((budget) => budget.type === type);
   const items = current?.items ?? [];
   const allocations = current?.allocations ?? [];
@@ -3668,7 +3669,8 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       allocations: importData.mode === 'budget' ? (sameEap ? old?.allocations ?? [] : []) : importedAllocations
     };
     try {
-      await saveBudget(next);
+      if (importData.mode === 'links') await saveBudgetAllocations(next);
+      else await saveBudget(next);
       setBudgets([...budgets.filter((budget) => budget.type !== next.type), next]);
       setType(next.type); setImportData(null); setBudgetId(null);
       setMessage(importData.mode === 'links' ? 'Vínculos importados com sucesso.' : importData.mode === 'budget-links' ? 'Orçamento e vínculos importados com sucesso.' : 'Orçamento importado com sucesso.');
@@ -3689,6 +3691,36 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       await deleteSavedBudget(projectKey, type);
       setBudgets(budgets.filter((budget) => budget.type !== type)); setBudgetId(null); setMessage('Orçamento excluído.');
     } catch (error) { setMessage((error as Error).message); }
+  }
+  function exportLinks() {
+    if (!current || !allocations.length) return;
+    const itemById = new Map(items.map((item) => [item.id, item]));
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const rows = allocations.map((allocation) => {
+      const item = itemById.get(allocation.budgetId);
+      const task = taskById.get(allocation.taskId);
+      return {
+        'Nível': item?.level ?? '',
+        'Código': item?.code ?? '',
+        'Descrição': item?.description ?? '',
+        'Custo': item?.total ?? 0,
+        'Pacote de trabalho/tarefas': allocation.packageName ?? task?.packageName ?? '',
+        'Serviço': allocation.serviceName ?? task?.service ?? '',
+        'Lote': allocation.lotName ?? task?.lot ?? '',
+        'Parte': task?.lotMother ?? '',
+        'Peso (% Item)': allocation.weight
+      };
+    });
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    sheet['!cols'] = [
+      { wch: 12 }, { wch: 18 }, { wch: 45 }, { wch: 16 }, { wch: 34 },
+      { wch: 30 }, { wch: 24 }, { wch: 24 }, { wch: 16 }
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, 'Vínculos');
+    const safeName = current.name.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'orcamento';
+    XLSX.writeFile(workbook, `vinculos-${safeName}.xlsx`);
+    setMessage(`${rows.length} vínculo(s) exportado(s).`);
   }
   function taskBasis(task: Task, method: typeof weightMethod) {
     if (method === 'duration') return diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1;
@@ -3719,7 +3751,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     setLockedWeights(locks); distributeWeights('percentage', locks, next);
   }
   async function linkSelected() {
-    if (!current || !selected || !activityIds.length) return;
+    if (!current || !selected || !activityIds.length || savingLinks) return;
     const next: BudgetRevision = {
       ...current,
       allocations: [
@@ -3735,9 +3767,11 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       ]
     };
     try {
-      await saveBudget(next);
+      setSavingLinks(true);
+      await saveBudgetAllocations(next);
       setBudgets(budgets.map((budget) => budget.type === type ? next : budget)); setActivityIds([]); setWeightModalOpen(false); setMessage('Vínculo salvo.');
-    } catch (error) { setMessage((error as Error).message); }
+    } catch (error) { setMessage(`Não foi possível salvar o vínculo: ${(error as Error).message}`); }
+    finally { setSavingLinks(false); }
   }
 
   return (
@@ -3750,6 +3784,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         </div>
         <select className="budget-import-mode" value={importMode} onChange={(event) => setImportMode(event.target.value as BudgetImportMode)} aria-label="Tipo de importação"><option value="budget">Importar orçamento</option><option value="links">Importar vínculos</option><option value="budget-links">Importar orçamento + vínculos</option></select>
         <label className="primary budget-upload"><Upload size={15} /> Selecionar arquivo<input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readBudgetFile(file); event.currentTarget.value = ''; }} /></label>
+        <button type="button" disabled={!current || !allocations.length} onClick={exportLinks}><Download size={15} /> Exportar vínculos</button>
         <button className="danger-button" disabled={!current} onClick={() => void removeBudget()}><Trash2 size={15} /> Excluir</button>
       </div>
       {message && <p className="financial-message">{message}</p>}
@@ -3777,7 +3812,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <div className="mapping-methods">{([['duration','Por tempo'],['quantity','Por quantidade'],['area','Por área'],['percentage','Percentual']] as const).map(([value,label]) => <button key={value} className={weightMethod === value ? 'active' : ''} onClick={() => { setWeightMethod(value); const locks = value === 'percentage' ? lockedWeights : new Set<string>(); setLockedWeights(locks); distributeWeights(value, locks); }}>{label}</button>)}</div>
         {weightMethod === 'area' && !tasks.some((task) => activityIds.includes(task.id) && taskBasis(task, 'area') > 0) && <p className="financial-message">As atividades selecionadas não possuem quantidade com unidade de área (m²).</p>}
         <table><thead><tr><th>Atividade / lote</th><th>Base</th><th>Peso</th><th>Valor</th></tr></thead><tbody>{tasks.filter((task) => activityIds.includes(task.id)).map((task) => <tr key={task.id}><td><small>{task.lot}</small><strong>{task.packageName}</strong></td><td>{weightMethod === 'duration' ? `${taskBasis(task, weightMethod)} dias` : weightMethod === 'area' ? `${taskBasis(task, weightMethod)} m²` : weightMethod === 'quantity' ? `${task.quantity ?? 0} ${task.unit ?? ''}` : 'Manual'}</td><td><div className="weight-lock-cell">{weightMethod === 'percentage' ? <input type="number" min="0" max="100" step=".01" value={(linkWeights[task.id] ?? 0).toFixed(2)} onChange={(e) => changeManualWeight(task.id, Number(e.target.value))}/> : <b>{(linkWeights[task.id] ?? 0).toFixed(2)}%</b>}{weightMethod === 'percentage' && <button title={lockedWeights.has(task.id) ? 'Destravar percentual' : 'Travar percentual'} onClick={() => { const locks = new Set(lockedWeights); lockedWeights.has(task.id) ? locks.delete(task.id) : locks.add(task.id); setLockedWeights(locks); distributeWeights('percentage', locks); }}>{lockedWeights.has(task.id) ? <Lock size={15}/> : <Unlock size={15}/>}</button>}</div></td><td>{(selected.total * (linkWeights[task.id] ?? 0) / 100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td></tr>)}</tbody></table>
-        <aside className="mapping-total"><span>Valor a distribuir</span><strong>{selected.total.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><p>Soma dos pesos <b>{activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0).toFixed(2)}%</b></p><button disabled={Math.abs(activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0)-100) > .05} onClick={() => void linkSelected()}>Confirmar vínculo</button></aside>
+        <aside className="mapping-total"><span>Valor a distribuir</span><strong>{selected.total.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><p>Soma dos pesos <b>{activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0).toFixed(2)}%</b></p>{Math.abs(activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0)-100) > .05 && <small>Para confirmar, a soma dos pesos deve ser 100%.</small>}<button type="button" disabled={savingLinks || Math.abs(activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0)-100) > .05} onClick={() => void linkSelected()}>{savingLinks ? 'Salvando...' : 'Confirmar vínculo'}</button></aside>
       </div></div></div>}
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
         <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>
