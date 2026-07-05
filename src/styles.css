@@ -296,6 +296,15 @@ th { background: #f8fafc; color: #475569; }
 .weight-lock-cell { display:flex; align-items:center; gap:6px; }
 .weight-lock-cell input { width:88px; }
 .weight-lock-cell button { padding:6px; display:inline-flex; color:#475569; }
+.lot-areas-modal { max-width:720px; }
+.lot-areas-body { max-height:70vh; overflow:auto; }
+.lot-area-group { margin-bottom:16px; border:1px solid #e2e8f0; border-radius:12px; overflow:hidden; }
+.lot-area-group h4 { margin:0; padding:10px 14px; background:#f8fafc; }
+.lot-area-group label { display:grid; grid-template-columns:minmax(180px,1fr) 180px; align-items:center; gap:14px; padding:9px 14px; border-top:1px solid #eef2f7; }
+.lot-area-group label div { display:flex; align-items:center; gap:7px; }
+.lot-area-group input { width:100%; }
+.lot-area-group label small { color:#64748b; }
+.lot-areas-actions { position:sticky; bottom:0; display:flex; justify-content:flex-end; gap:8px; padding-top:12px; background:#fff; }
 .version-kind.planned { color: #9a3412; background: #ffedd5; }
 .version-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .version-actions button { font-size: 11px; }

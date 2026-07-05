@@ -8,7 +8,7 @@ import { saveCalendarEvents } from './lib/calendarRepository';
 import { loadLineBalanceData, saveLineBalanceData } from './lib/lineBalanceRepository';
 import { saveProject, uploadProjectImage } from './lib/projectRepository';
 import { deleteProjectBudget, saveScheduleTasks } from './lib/scheduleRepository';
-import { deleteBudget as deleteSavedBudget, loadBudgetRevisionName, loadBudgets, saveBudget, saveBudgetAllocations, saveBudgetRevisionName, type BudgetItem, type BudgetRevision, type BudgetType } from './lib/budgetRepository';
+import { deleteBudget as deleteSavedBudget, loadBudgetRevisionName, loadBudgets, loadFinancialLotAreas, saveBudget, saveBudgetAllocations, saveBudgetRevisionName, saveFinancialLotAreas, type BudgetItem, type BudgetRevision, type BudgetType } from './lib/budgetRepository';
 import { createScheduleVersion, deleteScheduleVersion, loadScheduleVersions, selectScheduleVersion, updateActiveScheduleVersion, type SavedScheduleVersion } from './lib/scheduleVersionRepository';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
@@ -3537,6 +3537,9 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const [linkWeights, setLinkWeights] = useState<Record<string, number>>({});
   const [lockedWeights, setLockedWeights] = useState<Set<string>>(new Set());
   const [savingLinks, setSavingLinks] = useState(false);
+  const [lotAreasOpen, setLotAreasOpen] = useState(false);
+  const [lotAreas, setLotAreas] = useState<Record<string, number>>({});
+  const [savingLotAreas, setSavingLotAreas] = useState(false);
   const current = budgets.find((budget) => budget.type === type);
   const items = current?.items ?? [];
   const allocations = current?.allocations ?? [];
@@ -3722,6 +3725,29 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     XLSX.writeFile(workbook, `vinculos-${safeName}.xlsx`);
     setMessage(`${rows.length} vínculo(s) exportado(s).`);
   }
+  const groupedLots = Array.from(new Set(tasks.map((task) => task.lotMother))).sort((a, b) => a.localeCompare(b, 'pt-BR')).map((lotMother) => ({
+    lotMother,
+    lots: Array.from(new Set(tasks.filter((task) => task.lotMother === lotMother).map((task) => task.lot))).sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }))
+  }));
+  const lotAreaKey = (lotMother: string, lotName: string) => `${lotMother}\u001f${lotName}`;
+  async function openLotAreas() {
+    setLotAreasOpen(true);
+    try {
+      const saved = await loadFinancialLotAreas(projectKey);
+      setLotAreas(Object.fromEntries(saved.map((area) => [lotAreaKey(area.lotMother, area.lotName), area.projectionArea])));
+    } catch (error) { setMessage(`Não foi possível carregar as áreas: ${(error as Error).message}`); }
+  }
+  async function persistLotAreas() {
+    try {
+      setSavingLotAreas(true);
+      await saveFinancialLotAreas(projectKey, groupedLots.flatMap((group) => group.lots.map((lotName) => ({
+        lotMother: group.lotMother, lotName,
+        projectionArea: Math.max(0, lotAreas[lotAreaKey(group.lotMother, lotName)] ?? 0)
+      }))));
+      setLotAreasOpen(false); setMessage('Áreas de projeção salvas.');
+    } catch (error) { setMessage(`Não foi possível salvar as áreas: ${(error as Error).message}`); }
+    finally { setSavingLotAreas(false); }
+  }
   function taskBasis(task: Task, method: typeof weightMethod) {
     if (method === 'duration') return diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1;
     if (method === 'quantity') return task.quantity ?? 0;
@@ -3785,6 +3811,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <select className="budget-import-mode" value={importMode} onChange={(event) => setImportMode(event.target.value as BudgetImportMode)} aria-label="Tipo de importação"><option value="budget">Importar orçamento</option><option value="links">Importar vínculos</option><option value="budget-links">Importar orçamento + vínculos</option></select>
         <label className="primary budget-upload"><Upload size={15} /> Selecionar arquivo<input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readBudgetFile(file); event.currentTarget.value = ''; }} /></label>
         <button type="button" disabled={!current || !allocations.length} onClick={exportLinks}><Download size={15} /> Exportar vínculos</button>
+        <button type="button" disabled={!tasks.length} onClick={() => void openLotAreas()}><Settings size={15} /> Configurar pavimentos</button>
         <button className="danger-button" disabled={!current} onClick={() => void removeBudget()}><Trash2 size={15} /> Excluir</button>
       </div>
       {message && <p className="financial-message">{message}</p>}
@@ -3813,6 +3840,10 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         {weightMethod === 'area' && !tasks.some((task) => activityIds.includes(task.id) && taskBasis(task, 'area') > 0) && <p className="financial-message">As atividades selecionadas não possuem quantidade com unidade de área (m²).</p>}
         <table><thead><tr><th>Atividade / lote</th><th>Base</th><th>Peso</th><th>Valor</th></tr></thead><tbody>{tasks.filter((task) => activityIds.includes(task.id)).map((task) => <tr key={task.id}><td><small>{task.lot}</small><strong>{task.packageName}</strong></td><td>{weightMethod === 'duration' ? `${taskBasis(task, weightMethod)} dias` : weightMethod === 'area' ? `${taskBasis(task, weightMethod)} m²` : weightMethod === 'quantity' ? `${task.quantity ?? 0} ${task.unit ?? ''}` : 'Manual'}</td><td><div className="weight-lock-cell">{weightMethod === 'percentage' ? <input type="number" min="0" max="100" step=".01" value={(linkWeights[task.id] ?? 0).toFixed(2)} onChange={(e) => changeManualWeight(task.id, Number(e.target.value))}/> : <b>{(linkWeights[task.id] ?? 0).toFixed(2)}%</b>}{weightMethod === 'percentage' && <button title={lockedWeights.has(task.id) ? 'Destravar percentual' : 'Travar percentual'} onClick={() => { const locks = new Set(lockedWeights); lockedWeights.has(task.id) ? locks.delete(task.id) : locks.add(task.id); setLockedWeights(locks); distributeWeights('percentage', locks); }}>{lockedWeights.has(task.id) ? <Lock size={15}/> : <Unlock size={15}/>}</button>}</div></td><td>{(selected.total * (linkWeights[task.id] ?? 0) / 100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td></tr>)}</tbody></table>
         <aside className="mapping-total"><span>Valor a distribuir</span><strong>{selected.total.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><p>Soma dos pesos <b>{activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0).toFixed(2)}%</b></p>{Math.abs(activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0)-100) > .05 && <small>Para confirmar, a soma dos pesos deve ser 100%.</small>}<button type="button" disabled={savingLinks || Math.abs(activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0)-100) > .05} onClick={() => void linkSelected()}>{savingLinks ? 'Salvando...' : 'Confirmar vínculo'}</button></aside>
+      </div></div></div>}
+      {lotAreasOpen && <div className="mapping-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setLotAreasOpen(false)}><div className="mapping-modal lot-areas-modal"><div className="chart-drawer-head"><div><small>CONFIGURAÇÃO FÍSICA</small><h3>Configurar pavimentos</h3><span>Informe a área de projeção de cada lote.</span></div><button className="drawer-close" onClick={() => setLotAreasOpen(false)}>×</button></div><div className="mapping-modal-body lot-areas-body">
+        {groupedLots.map((group) => <section className="lot-area-group" key={group.lotMother}><h4>{group.lotMother}</h4>{group.lots.map((lotName) => <label key={lotName}><span>{lotName}</span><div><input type="number" min="0" step=".01" value={lotAreas[lotAreaKey(group.lotMother, lotName)] ?? ''} onChange={(event) => setLotAreas({ ...lotAreas, [lotAreaKey(group.lotMother, lotName)]: Math.max(0, Number(event.target.value)) })}/><small>m²</small></div></label>)}</section>)}
+        <div className="lot-areas-actions"><button type="button" onClick={() => setLotAreasOpen(false)}>Cancelar</button><button type="button" className="primary" disabled={savingLotAreas} onClick={() => void persistLotAreas()}>{savingLotAreas ? 'Salvando...' : 'Salvar áreas'}</button></div>
       </div></div></div>}
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
         <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>

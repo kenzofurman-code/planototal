@@ -33,6 +33,7 @@ export type BudgetAllocation = {
   value: number;
   inheritedFromId?: string;
 };
+export type FinancialLotArea = { lotMother: string; lotName: string; projectionArea: number };
 
 export async function loadBudgets(projectKey: string): Promise<BudgetRevision[]> {
   if (!supabase) return [];
@@ -159,6 +160,25 @@ export async function saveBudgetAllocations(revision: BudgetRevision) {
     updated_at: new Date().toISOString()
   }).eq('project_key', revision.projectKey).eq('type', revision.type);
   if (updated.error) throw updated.error;
+}
+
+export async function loadFinancialLotAreas(projectKey: string): Promise<FinancialLotArea[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.from('financial_lot_areas').select('lot_mother,lot_name,projection_area').eq('project_key', projectKey);
+  if (error) throw error;
+  return (data ?? []).map((row) => ({ lotMother: row.lot_mother, lotName: row.lot_name, projectionArea: Number(row.projection_area) }));
+}
+
+export async function saveFinancialLotAreas(projectKey: string, areas: FinancialLotArea[]) {
+  if (!supabase) return;
+  const removed = await supabase.from('financial_lot_areas').delete().eq('project_key', projectKey);
+  if (removed.error) throw removed.error;
+  if (!areas.length) return;
+  const { error } = await supabase.from('financial_lot_areas').insert(areas.map((area) => ({
+    project_key: projectKey, lot_mother: area.lotMother, lot_name: area.lotName,
+    projection_area: area.projectionArea, updated_at: new Date().toISOString()
+  })));
+  if (error) throw error;
 }
 
 export async function deleteBudget(projectKey: string, type: BudgetType) {

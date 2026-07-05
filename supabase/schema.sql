@@ -502,6 +502,19 @@ create table if not exists financial_forecast (
   accumulated_measured numeric default 0
 );
 
+create table if not exists financial_lot_areas (
+  project_key text not null references projects(project_key) on delete cascade,
+  lot_mother text not null,
+  lot_name text not null,
+  projection_area numeric not null default 0 check (projection_area >= 0),
+  updated_at timestamptz not null default now(),
+  primary key (project_key, lot_mother, lot_name)
+);
+alter table financial_lot_areas enable row level security;
+drop policy if exists "financial_lot_areas_access" on financial_lot_areas;
+create policy "financial_lot_areas_access" on financial_lot_areas
+  for all to anon, authenticated using (true) with check (true);
+
 create table if not exists change_log (
   id uuid primary key default uuid_generate_v4(),
   project_id uuid references projects(id) on delete cascade,
