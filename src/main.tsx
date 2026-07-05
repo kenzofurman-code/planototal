@@ -3547,6 +3547,30 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const linkedTasks = new Set(allocations.map((item) => item.taskId));
   const visibleItems = items.filter((item) => `${item.code} ${item.description}`.toLocaleLowerCase('pt-BR').includes(budgetSearch.toLocaleLowerCase('pt-BR')));
   const visibleTasks = tasks.filter((task) => `${task.packageName} ${task.service ?? ''} ${task.lot} ${task.lotMother}`.toLocaleLowerCase('pt-BR').includes(activitySearch.toLocaleLowerCase('pt-BR')));
+  const itemLevel = (item: BudgetItem) => {
+    const parsed = Number(String(item.level).replace(',', '.'));
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+    return item.code.split(/[.\-\/]/).filter(Boolean).length;
+  };
+  const descendantIds = (itemId: string) => {
+    const index = items.findIndex((item) => item.id === itemId);
+    if (index < 0) return new Set<string>();
+    const level = itemLevel(items[index]);
+    const descendants = new Set<string>();
+    for (let cursor = index + 1; cursor < items.length; cursor += 1) {
+      if (itemLevel(items[cursor]) <= level) break;
+      descendants.add(items[cursor].id);
+    }
+    return descendants;
+  };
+  const directlyLinkedBudgetIds = new Set(allocations.map((allocation) => allocation.budgetId));
+  const superiorLinkByItem = new Map<string, BudgetItem>();
+  items.forEach((item) => {
+    if (!directlyLinkedBudgetIds.has(item.id)) return;
+    descendantIds(item.id).forEach((descendantId) => {
+      if (!directlyLinkedBudgetIds.has(descendantId) && !superiorLinkByItem.has(descendantId)) superiorLinkByItem.set(descendantId, item);
+    });
+  });
   const allVisibleTasksSelected = visibleTasks.length > 0 && visibleTasks.every((task) => activityIds.includes(task.id));
   const displayedImportFields = importData?.mode === 'links' ? linkImportFields : budgetImportFields;
 
@@ -3778,10 +3802,16 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   }
   async function linkSelected() {
     if (!current || !selected || !activityIds.length || savingLinks) return;
+    const inheritedFrom = superiorLinkByItem.get(selected.id);
+    if (inheritedFrom) {
+      setMessage(`Este item já está contemplado pelo vínculo do nível superior ${inheritedFrom.code}.`);
+      return;
+    }
+    const selectedAndDescendants = new Set([selected.id, ...descendantIds(selected.id)]);
     const next: BudgetRevision = {
       ...current,
       allocations: [
-        ...allocations.filter((item) => item.budgetId !== selected.id),
+        ...allocations.filter((item) => !selectedAndDescendants.has(item.budgetId)),
         ...activityIds.map((taskId) => {
           const task = tasks.find((candidate) => candidate.id === taskId);
           return {
@@ -3826,14 +3856,14 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <div className="mapping-shell">
           <div className="mapping-panel"><div className="mapping-panel-head"><small>ORÇAMENTO</small><h3>{current.name}</h3><span>{visibleItems.length} itens</span></div>
             <label className="mapping-search"><Search size={15}/><input value={budgetSearch} onChange={(e) => setBudgetSearch(e.target.value)} placeholder="Buscar código ou descrição..." /></label>
-            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código / descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linked = allocations.some((link) => link.budgetId === item.id); return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => setBudgetId(item.id)}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={linked ? 'mapping-status linked' : 'mapping-status'}>{linked ? 'Vinculado' : 'Livre'}</span></td></tr>; })}</tbody></table></div>
+            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código / descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linked = directlyLinkedBudgetIds.has(item.id); const superior = superiorLinkByItem.get(item.id); return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => { setBudgetId(item.id); if (superior) setMessage(`Item contemplado pelo vínculo do nível superior ${superior.code}.`); }}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={linked || superior ? 'mapping-status linked' : 'mapping-status'} title={superior ? `Contemplado por ${superior.code}` : undefined}>{linked ? 'Vinculado' : superior ? 'Vinculado no nível superior' : 'Livre'}</span></td></tr>; })}</tbody></table></div>
           </div>
           <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FÍSICA</small><h3>Cronograma da obra</h3><div className="mapping-panel-head-actions"><span>{visibleTasks.length} atividades</span><button type="button" disabled={!visibleTasks.length} onClick={toggleVisibleTasks}><CheckSquare size={15}/>{allVisibleTasksSelected ? 'Limpar seleção' : 'Selecionar todos'}</button></div></div>
             <div className="mapping-filter-actions"><label className="mapping-search"><Search size={15}/><input value={activitySearch} onChange={(e) => setActivitySearch(e.target.value)} placeholder="Buscar atividade, serviço, lote ou grupo..." /></label>{activityIds.length > 0 && <strong>{activityIds.length} selecionada(s)</strong>}</div>
             <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Atividade</th><th>Lote</th><th>Prazo</th><th>Status</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id} className={activityIds.includes(task.id) ? 'mapping-selected' : ''} onClick={() => setActivityIds((currentIds) => currentIds.includes(task.id) ? currentIds.filter((id) => id !== task.id) : [...currentIds, task.id])}><td><input type="checkbox" checked={activityIds.includes(task.id)} readOnly /></td><td><small>{task.service || task.lotMother}</small><strong>{task.packageName}</strong></td><td>{task.lot}</td><td>{diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1}d</td><td><span className={linkedTasks.has(task.id) ? 'mapping-status linked' : 'mapping-status'}>{linkedTasks.has(task.id) ? 'Vinculada' : 'Livre'}</span></td></tr>)}</tbody></table></div>
           </div>
         </div>
-        <div className="mapping-action"><Link2 size={18}/><div><strong>{selected?.code ?? 'Selecione um item'} · {activityIds.length} atividade(s)</strong><small>Defina o critério de ponderação antes de confirmar.</small></div><button className="primary" disabled={!selected || !activityIds.length} onClick={openWeightModal}><ArrowLeftRight size={15}/> Vincular</button></div>
+        <div className="mapping-action"><Link2 size={18}/><div><strong>{selected?.code ?? 'Selecione um item'} · {activityIds.length} atividade(s)</strong><small>{selected && superiorLinkByItem.has(selected.id) ? `Contemplado pelo nível superior ${superiorLinkByItem.get(selected.id)?.code}.` : 'Defina o critério de ponderação antes de confirmar.'}</small></div><button className="primary" disabled={!selected || !activityIds.length || superiorLinkByItem.has(selected.id)} onClick={openWeightModal}><ArrowLeftRight size={15}/> Vincular</button></div>
       </>}
       {weightModalOpen && selected && <div className="mapping-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setWeightModalOpen(false)}><div className="mapping-modal"><div className="chart-drawer-head"><div><small>{selected.code}</small><h3>Ponderar vínculo</h3><span>{selected.description}</span></div><button className="drawer-close" onClick={() => setWeightModalOpen(false)}>×</button></div><div className="mapping-modal-body">
         <div className="mapping-methods">{([['duration','Por tempo'],['quantity','Por quantidade'],['area','Por área'],['percentage','Percentual']] as const).map(([value,label]) => <button key={value} className={weightMethod === value ? 'active' : ''} onClick={() => { setWeightMethod(value); const locks = value === 'percentage' ? lockedWeights : new Set<string>(); setLockedWeights(locks); distributeWeights(value, locks); }}>{label}</button>)}</div>
