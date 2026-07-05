@@ -3492,7 +3492,7 @@ function LegacyFinancial({ projectKey, tasks, setTasks }: { projectKey: string; 
   );
 }
 
-type BudgetImportField = 'level' | 'code' | 'description' | 'material' | 'labor' | 'total' | 'taskId' | 'packageName' | 'service' | 'lot' | 'divisionType' | 'weight';
+type BudgetImportField = 'level' | 'code' | 'description' | 'material' | 'labor' | 'total' | 'taskId' | 'packageName' | 'service' | 'lot' | 'part' | 'divisionType' | 'weight';
 type BudgetImportMode = 'budget' | 'links' | 'budget-links';
 const budgetImportFields: Array<{ key: BudgetImportField; label: string; required: boolean; aliases: string[] }> = [
   { key: 'level', label: 'Nível', required: false, aliases: ['nível', 'nivel'] },
@@ -3516,7 +3516,7 @@ const linkImportFields: Array<{ key: BudgetImportField; label: string; required:
   { key: 'packageName', label: 'Pacote de trabalho/tarefas', required: false, aliases: ['pacote de trabalho/tarefas', 'pacote de trabalho', 'tarefas'] },
   { key: 'service', label: 'Serviço', required: false, aliases: ['serviço', 'servico'] },
   { key: 'lot', label: 'Lote', required: false, aliases: ['lote'] },
-  { key: 'divisionType', label: 'Parte', required: false, aliases: ['parte', 'tipo de divisão', 'tipo de divisao'] },
+  { key: 'part', label: 'Parte', required: false, aliases: ['parte', 'grupo', 'lote mãe', 'lote mae'] },
   { key: 'weight', label: 'Peso (% Item)', required: false, aliases: ['peso (% item)', 'peso', 'peso item'] }
 ];
 
@@ -3621,15 +3621,17 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       const packageName = String(get(row, 'packageName')).trim().toLocaleLowerCase('pt-BR');
       const service = String(get(row, 'service')).trim().toLocaleLowerCase('pt-BR');
       const lot = String(get(row, 'lot')).trim().toLocaleLowerCase('pt-BR');
-      if (!packageName && !service && !lot) return [];
+      const part = String(get(row, 'part')).trim().toLocaleLowerCase('pt-BR');
+      if (!packageName && !service && !lot && !part) return [];
       return tasks.filter((task) =>
         (!packageName || task.packageName.toLocaleLowerCase('pt-BR') === packageName) &&
         (!service || (task.service ?? '').toLocaleLowerCase('pt-BR') === service) &&
-        (!lot || task.lot.toLocaleLowerCase('pt-BR') === lot)
+        (!lot || task.lot.toLocaleLowerCase('pt-BR') === lot) &&
+        (!part || task.lotMother.toLocaleLowerCase('pt-BR') === part)
       );
     };
     const ambiguous = sourceRows.filter((row) => matchTask(row).length > 1);
-    if (ambiguous.length) return setMessage(`${ambiguous.length} linha(s) encontram mais de uma atividade. Informe o ID da atividade para concluir.`);
+    if (ambiguous.length) return setMessage(`${ambiguous.length} linha(s) encontram mais de uma atividade. Confira Pacote, Serviço, Lote e Parte.`);
     const itemByCode = new Map(normalized.map((item) => [item.code, item]));
     const importedAllocations = sourceRows.flatMap((row) => {
       const task = matchTask(row)[0];
@@ -3660,6 +3662,8 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       projectKey,
       type: importData.type,
       name: old?.name ?? (importData.type === 'contractor' ? 'Orçamento da construtora' : 'Orçamento de financiamento'),
+      versionId: importData.mode === 'links' ? old?.versionId : undefined,
+      versionNumber: importData.mode === 'links' ? old?.versionNumber : undefined,
       items: normalized,
       allocations: importData.mode === 'budget' ? (sameEap ? old?.allocations ?? [] : []) : importedAllocations
     };
