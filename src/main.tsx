@@ -3508,6 +3508,17 @@ const budgetImportFields: Array<{ key: BudgetImportField; label: string; require
   { key: 'divisionType', label: 'Tipo de divisão', required: false, aliases: ['tipo de divisão', 'tipo de divisao'] },
   { key: 'weight', label: 'Peso (% Item)', required: false, aliases: ['peso (% item)', 'peso', 'peso item'] }
 ];
+const linkImportFields: Array<{ key: BudgetImportField; label: string; required: boolean; aliases: string[] }> = [
+  { key: 'level', label: 'Nível', required: false, aliases: ['nível', 'nivel'] },
+  { key: 'code', label: 'Código', required: true, aliases: ['código', 'codigo'] },
+  { key: 'description', label: 'Descrição', required: false, aliases: ['descrição', 'descricao'] },
+  { key: 'total', label: 'Custo', required: false, aliases: ['custo', 'custo (r$)', 'total (r$)', 'total'] },
+  { key: 'packageName', label: 'Pacote de trabalho/tarefas', required: false, aliases: ['pacote de trabalho/tarefas', 'pacote de trabalho', 'tarefas'] },
+  { key: 'service', label: 'Serviço', required: false, aliases: ['serviço', 'servico'] },
+  { key: 'lot', label: 'Lote', required: false, aliases: ['lote'] },
+  { key: 'divisionType', label: 'Parte', required: false, aliases: ['parte', 'tipo de divisão', 'tipo de divisao'] },
+  { key: 'weight', label: 'Peso (% Item)', required: false, aliases: ['peso (% item)', 'peso', 'peso item'] }
+];
 
 function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
   const [budgets, setBudgets] = useState<BudgetRevision[]>([]);
@@ -3532,6 +3543,15 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const linkedTasks = new Set(allocations.map((item) => item.taskId));
   const visibleItems = items.filter((item) => `${item.code} ${item.description}`.toLocaleLowerCase('pt-BR').includes(budgetSearch.toLocaleLowerCase('pt-BR')));
   const visibleTasks = tasks.filter((task) => `${task.packageName} ${task.service ?? ''} ${task.lot} ${task.lotMother}`.toLocaleLowerCase('pt-BR').includes(activitySearch.toLocaleLowerCase('pt-BR')));
+  const allVisibleTasksSelected = visibleTasks.length > 0 && visibleTasks.every((task) => activityIds.includes(task.id));
+  const displayedImportFields = importData?.mode === 'links' ? linkImportFields : budgetImportFields;
+
+  function toggleVisibleTasks() {
+    const visibleIds = new Set(visibleTasks.map((task) => task.id));
+    setActivityIds((currentIds) => allVisibleTasksSelected
+      ? currentIds.filter((id) => !visibleIds.has(id))
+      : Array.from(new Set([...currentIds, ...visibleIds])));
+  }
 
   useEffect(() => {
     loadBudgets(projectKey).then(setBudgets).catch((error) => setMessage((error as Error).message));
@@ -3571,7 +3591,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     return Number(clean.includes(',') ? clean.replace(/\./g, '').replace(',', '.') : clean) || 0;
   };
   async function confirmImport() {
-    if (!importData || budgetImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)) return;
+    if (!importData || displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)) return;
     const get = (row: unknown[], key: BudgetImportField) => mapping[key] === undefined ? '' : row[mapping[key]!];
     const sourceRows = importData.rows.slice(importData.headerRow);
     const old = budgets.find((budget) => budget.type === importData.type);
@@ -3743,8 +3763,8 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
             <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código / descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linked = allocations.some((link) => link.budgetId === item.id); return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => setBudgetId(item.id)}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={linked ? 'mapping-status linked' : 'mapping-status'}>{linked ? 'Vinculado' : 'Livre'}</span></td></tr>; })}</tbody></table></div>
           </div>
           <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FÍSICA</small><h3>Cronograma da obra</h3><span>{visibleTasks.length} atividades</span></div>
-            <label className="mapping-search"><Search size={15}/><input value={activitySearch} onChange={(e) => setActivitySearch(e.target.value)} placeholder="Buscar atividade, serviço, lote ou grupo..." /></label>
-            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Atividade</th><th>Lote</th><th>Prazo</th><th>Status</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id} className={activityIds.includes(task.id) ? 'mapping-selected' : ''} onClick={() => setActivityIds(activityIds.includes(task.id) ? activityIds.filter((id) => id !== task.id) : [...activityIds, task.id])}><td><input type="checkbox" checked={activityIds.includes(task.id)} readOnly /></td><td><small>{task.service || task.lotMother}</small><strong>{task.packageName}</strong></td><td>{task.lot}</td><td>{diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1}d</td><td><span className={linkedTasks.has(task.id) ? 'mapping-status linked' : 'mapping-status'}>{linkedTasks.has(task.id) ? 'Vinculada' : 'Livre'}</span></td></tr>)}</tbody></table></div>
+            <div className="mapping-filter-actions"><label className="mapping-search"><Search size={15}/><input value={activitySearch} onChange={(e) => setActivitySearch(e.target.value)} placeholder="Buscar atividade, serviço, lote ou grupo..." /></label><strong>{activityIds.length} selecionada(s)</strong><button type="button" disabled={!visibleTasks.length} onClick={toggleVisibleTasks}><CheckSquare size={15}/>{allVisibleTasksSelected ? 'Limpar filtradas' : 'Selecionar várias'}</button></div>
+            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Atividade</th><th>Lote</th><th>Prazo</th><th>Status</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id} className={activityIds.includes(task.id) ? 'mapping-selected' : ''} onClick={() => setActivityIds((currentIds) => currentIds.includes(task.id) ? currentIds.filter((id) => id !== task.id) : [...currentIds, task.id])}><td><input type="checkbox" checked={activityIds.includes(task.id)} readOnly /></td><td><small>{task.service || task.lotMother}</small><strong>{task.packageName}</strong></td><td>{task.lot}</td><td>{diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1}d</td><td><span className={linkedTasks.has(task.id) ? 'mapping-status linked' : 'mapping-status'}>{linkedTasks.has(task.id) ? 'Vinculada' : 'Livre'}</span></td></tr>)}</tbody></table></div>
           </div>
         </div>
         <div className="mapping-action"><Link2 size={18}/><div><strong>{selected?.code ?? 'Selecione um item'} · {activityIds.length} atividade(s)</strong><small>Defina o critério de ponderação antes de confirmar.</small></div><button className="primary" disabled={!selected || !activityIds.length} onClick={openWeightModal}><ArrowLeftRight size={15}/> Vincular</button></div>
@@ -3759,8 +3779,8 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>
         <label className="import-header-row">Tipo de orçamento<select value={importData.type} onChange={(e) => setImportData({ ...importData, type: e.target.value as BudgetType })}><option value="contractor">Construtora (saída)</option><option value="financing">Financiamento (entrada)</option></select></label>
         <label className="import-header-row">Linha dos títulos<input type="number" min={1} value={importData.headerRow} onChange={(e) => updateBudgetHeaderRow(Number(e.target.value))}/></label><p className="import-help">Informe em qual coluna está cada informação. Os campos com * são obrigatórios.</p>
-        <div className="mapping-grid">{budgetImportFields.map((field) => <label key={field.key}>{field.label}{importFieldRequired(field, importData.mode) ? ' *' : ''}<select value={mapping[field.key] ?? ''} onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value === '' ? undefined : Number(e.target.value) })}><option value="">Não importar</option>{(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => <option key={index} value={index}>{String(header) || `Coluna ${index + 1}`}</option>)}</select></label>)}</div>
-        <div className="import-summary"><strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong><span>{budgetImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined) ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para importar.'}</span></div><button className="primary import-confirm" disabled={budgetImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)} onClick={() => void confirmImport()}>Confirmar importação</button>
+        <div className="mapping-grid">{displayedImportFields.map((field) => <label key={field.key}>{field.label}{importFieldRequired(field, importData.mode) ? ' *' : ''}<select value={mapping[field.key] ?? ''} onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value === '' ? undefined : Number(e.target.value) })}><option value="">Não importar</option>{(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => <option key={index} value={index}>{String(header) || `Coluna ${index + 1}`}</option>)}</select></label>)}</div>
+        <div className="import-summary"><strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong><span>{displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined) ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para importar.'}</span></div><button className="primary import-confirm" disabled={displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)} onClick={() => void confirmImport()}>Confirmar importação</button>
       </div></>}</aside>
     </section>
   );
