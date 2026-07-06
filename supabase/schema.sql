@@ -828,6 +828,7 @@ as $$
 declare
   allocation_count integer := 0;
   payload jsonb := coalesce(p_allocations, '[]'::jsonb);
+  invalid_link jsonb;
 begin
   if jsonb_typeof(payload) <> 'array' then
     raise exception 'A lista de vínculos deve ser um array JSON.';
@@ -862,14 +863,19 @@ begin
     raise exception 'Há vínculos sem identificação da atividade do cronograma.';
   end if;
 
-  if exists (
-    select 1 from jsonb_array_elements(payload) link
-    where link->>'weight' is null
-       or link->>'weight' !~ '^-?[0-9]+([.][0-9]+)?$'
-       or (link->>'weight')::numeric < 0
-       or (link->>'weight')::numeric > 100
-  ) then
-    raise exception 'Há vínculos com peso individual inválido; o peso deve estar entre 0 e 100.';
+  select link
+  into invalid_link
+  from jsonb_array_elements(payload) link
+  where jsonb_typeof(link->'weight') is distinct from 'number'
+     or (link->>'weight')::numeric < 0
+     or (link->>'weight')::numeric > 100
+  limit 1;
+
+  if invalid_link is not null then
+    raise exception 'Peso inválido no item %, atividade %: %. O peso deve estar entre 0 e 100.',
+      coalesce(invalid_link->>'budgetId', 'sem item'),
+      coalesce(invalid_link->>'taskId', 'sem atividade'),
+      coalesce(invalid_link->>'weight', 'sem peso');
   end if;
 
   if exists (
