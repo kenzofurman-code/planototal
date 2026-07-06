@@ -1098,27 +1098,53 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
           ))}
         </div>
       </div>
-      <div className="card table-wrap">
+      <div className="card table-wrap schedule-full-table">
         <table>
           <thead>
             <tr>
+              <th>ID</th>
               <th>Lote-mãe</th>
               <th>Lote</th>
+              <th>Família</th>
               <th>Pacote</th>
+              <th>Serviço</th>
+              <th>Todos os serviços</th>
               <th>Início</th>
               <th>Fim</th>
+              <th>Duração</th>
+              <th>Quantidade</th>
+              <th>Unidade</th>
+              <th>Custo</th>
+              <th>Responsável</th>
+              <th>Predecessoras</th>
+              <th>Sucessoras</th>
               <th>Avanço</th>
+              <th>Raia</th>
+              <th>Cor</th>
             </tr>
           </thead>
           <tbody>
             {tasks.map((t) => (
               <tr key={t.id}>
+                <td>{t.id}</td>
                 <td>{t.lotMother}</td>
                 <td>{t.lot}</td>
+                <td>{t.packageFamily || '—'}</td>
                 <td>{t.packageName}</td>
+                <td>{t.service || '—'}</td>
+                <td>{Array.from(new Set([t.service, ...(t.services ?? [])].filter(Boolean))).join(', ') || '—'}</td>
                 <td>{t.startDate}</td>
                 <td>{t.endDate}</td>
+                <td>{t.duration ?? '—'}</td>
+                <td>{t.quantity ?? '—'}</td>
+                <td>{t.unit || '—'}</td>
+                <td>{t.cost != null ? t.cost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}</td>
+                <td>{t.responsible || '—'}</td>
+                <td>{t.predecessors?.join(', ') || '—'}</td>
+                <td>{t.successors?.join(', ') || '—'}</td>
                 <td>{t.progress}%</td>
+                <td>{t.lane ?? '—'}</td>
+                <td><span className="schedule-color" style={{ background: t.color }} title={t.color} /> {t.color || '—'}</td>
               </tr>
             ))}
           </tbody>

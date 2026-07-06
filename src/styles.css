@@ -92,6 +92,10 @@ main { flex: 1; min-width: 0; }
 .metric strong { font-size: 26px; }
 .flow { font-weight: 700; color: #3730a3; }
 .table-wrap { overflow: auto; }
+.schedule-full-table table { min-width: 2100px; }
+.schedule-full-table th { position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+.schedule-full-table td { max-width: 280px; white-space: normal; overflow-wrap: anywhere; }
+.schedule-color { display: inline-block; width: 14px; height: 14px; border: 1px solid #cbd5e1; border-radius: 4px; vertical-align: -2px; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th, td { border-bottom: 1px solid #e5e7eb; padding: 10px; text-align: left; vertical-align: top; }
 th { background: #f8fafc; color: #475569; }
