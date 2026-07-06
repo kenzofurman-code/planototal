@@ -35,17 +35,49 @@ export type BudgetAllocation = {
 };
 export type FinancialLotArea = { lotMother: string; lotName: string; projectionArea: number };
 
+async function loadAllFinancialBudgetItems(versionIds: string[]) {
+  if (!supabase || !versionIds.length) return [] as Array<Record<string, any>>;
+  const rows: Array<Record<string, any>> = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase.from('financial_budget_items').select('*')
+      .in('version_id', versionIds)
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(`financial_budget_items: ${error.message}`);
+    rows.push(...(data ?? []));
+    if ((data ?? []).length < pageSize) break;
+  }
+  return rows;
+}
+
+async function loadAllFinancialBudgetAllocations(versionIds: string[]) {
+  if (!supabase || !versionIds.length) return [] as Array<Record<string, any>>;
+  const rows: Array<Record<string, any>> = [];
+  const pageSize = 1000;
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase.from('financial_budget_allocations').select('*')
+      .in('version_id', versionIds)
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(`financial_budget_allocations: ${error.message}`);
+    rows.push(...(data ?? []));
+    if ((data ?? []).length < pageSize) break;
+  }
+  return rows;
+}
+
 export async function loadBudgets(projectKey: string): Promise<BudgetRevision[]> {
   if (!supabase) return [];
   const { data, error } = await supabase.from('financial_budgets').select('project_key,type,name,active_version_id,items,allocations').eq('project_key', projectKey);
   if (error) throw error;
-  const activeIds = (data ?? []).map((row) => row.active_version_id).filter(Boolean);
+  const activeIds = (data ?? []).map((row) => row.active_version_id).filter((id): id is string => Boolean(id));
   const { data: versions, error: versionsError } = await supabase.from('financial_budget_versions').select('id,version_number').in('id', activeIds.length ? activeIds : ['00000000-0000-0000-0000-000000000000']);
   if (versionsError) throw versionsError;
-  const { data: itemRows, error: itemsError } = await supabase.from('financial_budget_items').select('*').in('version_id', activeIds.length ? activeIds : ['00000000-0000-0000-0000-000000000000']);
-  if (itemsError) throw itemsError;
-  const { data: allocationRows, error: allocationsError } = await supabase.from('financial_budget_allocations').select('*').eq('project_key', projectKey);
-  if (allocationsError) throw allocationsError;
+  const [itemRows, allocationRows] = await Promise.all([
+    loadAllFinancialBudgetItems(activeIds),
+    loadAllFinancialBudgetAllocations(activeIds)
+  ]);
   return (data ?? []).map((row) => {
     const normalizedItems = (itemRows ?? []).filter((item) => item.version_id === row.active_version_id).map((item) => ({
       id: item.id, level: item.level ?? '', code: item.code, description: item.description,
@@ -172,7 +204,7 @@ export async function saveBudgetAllocations(revision: BudgetRevision) {
     };
   });
   revision.allocations.forEach((item) => { item.id ??= crypto.randomUUID(); });
-  const { error } = await supabase.rpc('replace_financial_budget_allocations', {
+  const { data: insertedCount, error } = await supabase.rpc('replace_financial_budget_allocations', {
     p_version_id: revision.versionId,
     p_project_key: revision.projectKey,
     p_budget_type: revision.type,
@@ -183,6 +215,10 @@ export async function saveBudgetAllocations(revision: BudgetRevision) {
       ? 'A função transacional de vínculos ainda não foi instalada no Supabase. Execute a versão atual de supabase/schema.sql.'
       : error.message);
   }
+  if (Number(insertedCount) !== revision.allocations.length) {
+    throw new Error(`O banco confirmou ${Number(insertedCount).toLocaleString('pt-BR')} de ${revision.allocations.length.toLocaleString('pt-BR')} vínculo(s).`);
+  }
+  return Number(insertedCount);
 }
 
 export async function loadFinancialLotAreas(projectKey: string): Promise<FinancialLotArea[]> {

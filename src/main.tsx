@@ -3633,6 +3633,9 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       const weight = row.allocation.weight * normalization;
       return [{ ...row.allocation, weight, value: group.item.total * weight / 100 }];
     }));
+  const importableReviewUniqueAllocationCount = new Set(
+    importableReviewAllocations.map((allocation) => `${allocation.budgetId}\u001f${allocation.taskId}`)
+  ).size;
 
   function toggleVisibleTasks() {
     const visibleIds = new Set(visibleTasks.map((task) => task.id));
@@ -3765,7 +3768,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     const partialCount = importableReviewGroups.filter((group) => !isImportReviewGroupComplete(group)).length;
     const warning = [
       `Esta operação substituirá os ${current.allocations.length.toLocaleString('pt-BR')} vínculo(s) já existentes deste orçamento.`,
-      `${importableReviewAllocations.length.toLocaleString('pt-BR')} vínculo(s) válido(s), distribuídos em ${importableReviewGroups.length.toLocaleString('pt-BR')} item(ns) da EAP, serão gravados.`,
+      `${importableReviewAllocations.length.toLocaleString('pt-BR')} correspondência(s) válida(s) serão consolidadas em ${importableReviewUniqueAllocationCount.toLocaleString('pt-BR')} vínculo(s) único(s), distribuídos em ${importableReviewGroups.length.toLocaleString('pt-BR')} item(ns) da EAP.`,
       partialCount ? `${partialCount.toLocaleString('pt-BR')} item(ns) ficará(ão) parcialmente vinculado(s).` : '',
       invalidCount ? `${invalidCount.toLocaleString('pt-BR')} item(ns) incompleto(s) não será(ão) importado(s).` : '',
       'Essa substituição não poderá ser desfeita. Continuar?'
@@ -3774,14 +3777,14 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     const next: BudgetRevision = { ...current, allocations: importableReviewAllocations };
     try {
       setReviewImportError('');
-      setProcessingMessage(`Substituindo os vínculos por ${importableReviewAllocations.length.toLocaleString('pt-BR')} vínculo(s) revisado(s)...`);
-      await saveBudgetAllocations(next);
+      setProcessingMessage(`Gravando ${importableReviewUniqueAllocationCount.toLocaleString('pt-BR')} vínculo(s) único(s) revisado(s)...`);
+      const storedCount = await saveBudgetAllocations(next);
       const refreshed = await loadBudgets(projectKey);
       setBudgets(refreshed);
       setImportReview([]);
       setImportData(null);
       setBudgetId(null);
-      setMessage(`${importableReviewAllocations.length.toLocaleString('pt-BR')} vínculo(s) válido(s) importado(s). Os vínculos anteriores foram substituídos.`);
+      setMessage(`${(storedCount ?? importableReviewUniqueAllocationCount).toLocaleString('pt-BR')} vínculo(s) único(s) importado(s). Os vínculos anteriores foram substituídos.`);
     } catch (error) {
       const errorMessage = `A substituição não foi concluída e os vínculos anteriores foram preservados: ${(error as Error).message}`;
       setReviewImportError(errorMessage);
@@ -4103,7 +4106,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       {importReview.length > 0 && <div className="mapping-modal-backdrop"><div className="mapping-modal import-review-modal"><div className="chart-drawer-head"><div><small>REVISÃO TOTAL</small><h3>Vínculos de todos os níveis da EAP</h3><span>A correspondência usa Pacote + Serviço + Lote. Confira os pesos antes de substituir os vínculos atuais.</span><label className="import-review-filter"><input type="checkbox" checked={reviewOnlyInvalid} onChange={(event) => { const checked = event.target.checked; setReviewOnlyInvalid(checked); if (checked) setReviewCode(importReview.find((group) => !isImportReviewGroupComplete(group))?.item.code ?? ''); else setReviewCode(importReview[0]?.item.code ?? ''); }} />Mostrar somente itens sem 100% de vínculos válidos</label></div><button className="drawer-close" onClick={() => setImportReview([])}>×</button></div>{reviewImportError && <p className="import-review-error" role="alert">{reviewImportError}</p>}<div className="import-review-layout">
         <aside className="import-review-items">{visibleImportReview.map((group) => { const unresolved = group.rows.length - group.validCount; return <button key={group.item.code} className={reviewCode === group.item.code ? 'active' : ''} onClick={() => setReviewCode(group.item.code)}><span>{group.item.code}</span><strong>{group.item.description}</strong><small>{group.validCount}/{group.rows.length} vínculo(s) válido(s) · {group.total.toFixed(4)}%{unresolved ? ` · ${unresolved} pendente(s)` : ''}</small></button>; })}{!visibleImportReview.length && <p className="empty-state">Todos os itens com vínculos informados estão completos e totalizam 100%.</p>}</aside>
         <section className="import-review-detail">{(() => { const group = importReview.find((entry) => entry.item.code === reviewCode); if (!group) return null; return <><header><div><small>{group.item.code}</small><h3>{group.item.description}</h3><small>{group.validCount} vínculo(s) importável(is) de {group.rows.length} linha(s). Total original da planilha: {group.sheetTotal.toFixed(6)}%.</small></div><b className={isImportReviewGroupComplete(group) ? 'review-ok' : 'review-warning'}>{group.total.toFixed(6)}% válido · {isImportReviewGroupComplete(group) ? 'total' : isImportReviewGroupImportable(group) ? 'parcial' : 'não importável'}</b></header><table><thead><tr><th>Atividade da planilha</th><th>No planejamento</th><th>Peso</th></tr></thead><tbody>{group.rows.map((row, index) => <tr key={index} className={!row.found ? 'review-row-invalid' : ''}><td>{row.label || 'Sem identificação'}</td><td>{row.found ? 'Sim' : row.matches > 1 ? `${row.matches} correspondências` : 'Não'}</td><td>{row.weight.toFixed(8)}%</td></tr>)}</tbody></table>{!group.rows.length && <p className="empty-state">Nenhum vínculo informado para este item.</p>}</>; })()}</section>
-      </div><p className="import-review-warning"><strong>Atenção:</strong> ao importar, todos os {current?.allocations.length ?? 0} vínculo(s) já iniciados neste orçamento serão apagados e substituídos pelos vínculos válidos desta revisão. Itens abaixo de 100% serão gravados como parciais.</p><div className="lot-areas-actions import-review-actions"><span>{importableReviewGroups.length} item(ns) importável(is) · {importableReviewAllocations.length} vínculo(s) serão gravados.</span><button onClick={() => setImportReview([])}>Voltar</button><button className="primary" disabled={!importableReviewAllocations.length || Boolean(processingMessage)} onClick={() => void importReviewedLinks()}>Sobrescrever e importar vínculos válidos</button></div></div></div>}
+      </div><p className="import-review-warning"><strong>Atenção:</strong> ao importar, todos os {current?.allocations.length ?? 0} vínculo(s) já iniciados neste orçamento serão apagados e substituídos pelos vínculos válidos desta revisão. Itens abaixo de 100% serão gravados como parciais.</p><div className="lot-areas-actions import-review-actions"><span>{importableReviewGroups.length} item(ns) · {importableReviewAllocations.length} correspondência(s) · {importableReviewUniqueAllocationCount} vínculo(s) único(s) serão gravados.</span><button onClick={() => setImportReview([])}>Voltar</button><button className="primary" disabled={!importableReviewAllocations.length || Boolean(processingMessage)} onClick={() => void importReviewedLinks()}>Sobrescrever e importar vínculos válidos</button></div></div></div>}
       {processingMessage && <div className="processing-backdrop" role="status" aria-live="polite"><div className="processing-card"><span className="processing-spinner"/><strong>{processingMessage}</strong><small>Não feche esta tela enquanto o processamento estiver em andamento.</small></div></div>}
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
         <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>
