@@ -3540,6 +3540,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const [lotAreasOpen, setLotAreasOpen] = useState(false);
   const [lotAreas, setLotAreas] = useState<Record<string, number>>({});
   const [savingLotAreas, setSavingLotAreas] = useState(false);
+  const [weightIssues, setWeightIssues] = useState<Array<{ code: string; description: string; total: number; linkCount: number }>>([]);
   const current = budgets.find((budget) => budget.type === type);
   const items = current?.items ?? [];
   const allocations = current?.allocations ?? [];
@@ -3694,12 +3695,16 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       }];
     });
     if (importData.mode === 'links' && !importedAllocations.length) return setMessage('Nenhum vínculo válido foi encontrado. Confira o código do item e a identificação da atividade.');
-    const invalidWeights = normalized.filter((item) => {
+    const invalidWeights = normalized.flatMap((item) => {
       const links = importedAllocations.filter((allocation) => allocation.budgetId === item.id);
-      if (!links.length) return false;
-      return Math.abs(links.reduce((sum, allocation) => sum + allocation.weight, 0) - 100) > 0.05;
+      if (!links.length) return [];
+      const total = links.reduce((sum, allocation) => sum + allocation.weight, 0);
+      return Math.abs(total - 100) > 0.000001 ? [{ code: item.code, description: item.description, total, linkCount: links.length }] : [];
     });
-    if (invalidWeights.length) return setMessage(`Os pesos não fecham 100% para: ${invalidWeights.map((item) => item.code).join(', ')}.`);
+    if (invalidWeights.length) {
+      setWeightIssues(invalidWeights);
+      return setMessage(`${invalidWeights.length} item(ns) precisam de ajuste para fechar 100%.`);
+    }
     const next: BudgetRevision = {
       projectKey,
       type: importData.type,
@@ -3716,6 +3721,28 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       setType(next.type); setImportData(null); setBudgetId(null);
       setMessage(importData.mode === 'links' ? 'Vínculos importados com sucesso.' : importData.mode === 'budget-links' ? 'Orçamento e vínculos importados com sucesso.' : 'Orçamento importado com sucesso.');
     } catch (error) { setMessage((error as Error).message); }
+  }
+  function applySuggestedWeightAdjustments() {
+    if (!importData || mapping.code === undefined || mapping.weight === undefined) return;
+    const rows = importData.rows.map((row) => [...row]);
+    weightIssues.forEach((issue) => {
+      const rowIndexes: number[] = [];
+      for (let index = importData.headerRow; index < rows.length; index += 1) {
+        if (String(rows[index][mapping.code!]).trim() === issue.code) rowIndexes.push(index);
+      }
+      const currentWeights = rowIndexes.map((index) => money(rows[index][mapping.weight!]));
+      const currentTotal = currentWeights.reduce((sum, value) => sum + value, 0);
+      if (!rowIndexes.length) return;
+      const adjusted = currentTotal > 0
+        ? currentWeights.map((value) => Number((value * 100 / currentTotal).toFixed(8)))
+        : currentWeights.map(() => Number((100 / rowIndexes.length).toFixed(8)));
+      const previousTotal = adjusted.slice(0, -1).reduce((sum, value) => sum + value, 0);
+      adjusted[adjusted.length - 1] = Number((100 - previousTotal).toFixed(8));
+      rowIndexes.forEach((rowIndex, index) => { rows[rowIndex][mapping.weight!] = adjusted[index]; });
+    });
+    setImportData({ ...importData, rows });
+    setWeightIssues([]);
+    setMessage('Pesos ajustados proporcionalmente. Revise e confirme a importação novamente.');
   }
   async function persistName(name: string) {
     if (!current) return;
@@ -3888,6 +3915,11 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       {lotAreasOpen && <div className="mapping-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setLotAreasOpen(false)}><div className="mapping-modal lot-areas-modal"><div className="chart-drawer-head"><div><small>CONFIGURAÇÃO FÍSICA</small><h3>Configurar pavimentos</h3><span>Informe a área de projeção de cada lote.</span></div><button className="drawer-close" onClick={() => setLotAreasOpen(false)}>×</button></div><div className="mapping-modal-body lot-areas-body">
         {groupedLots.map((group) => <section className="lot-area-group" key={group.lotMother}><h4>{group.lotMother}</h4>{group.lots.map((lotName) => <label key={lotName}><span>{lotName}</span><div><input type="number" min="0" step=".01" value={lotAreas[lotAreaKey(group.lotMother, lotName)] ?? ''} onChange={(event) => setLotAreas({ ...lotAreas, [lotAreaKey(group.lotMother, lotName)]: Math.max(0, Number(event.target.value)) })}/><small>m²</small></div></label>)}</section>)}
         <div className="lot-areas-actions"><button type="button" onClick={() => setLotAreasOpen(false)}>Cancelar</button><button type="button" className="primary" disabled={savingLotAreas} onClick={() => void persistLotAreas()}>{savingLotAreas ? 'Salvando...' : 'Salvar áreas'}</button></div>
+      </div></div></div>}
+      {weightIssues.length > 0 && <div className="mapping-modal-backdrop"><div className="mapping-modal weight-adjust-modal"><div className="chart-drawer-head"><div><small>REVISÃO DA IMPORTAÇÃO</small><h3>Ajustar pesos dos vínculos</h3><span>Os itens abaixo não fecham exatamente 100%.</span></div><button className="drawer-close" onClick={() => setWeightIssues([])}>×</button></div><div className="mapping-modal-body">
+        <p className="import-help">A sugestão mantém a proporção atual. Se a soma estiver acima de 100%, reduz os pesos; se estiver abaixo, aumenta proporcionalmente.</p>
+        <div className="mapping-table-wrap"><table><thead><tr><th>Código / descrição</th><th>Vínculos</th><th>Soma atual</th><th>Ajuste</th></tr></thead><tbody>{weightIssues.map((issue) => <tr key={issue.code}><td><small>{issue.code}</small><strong>{issue.description}</strong></td><td>{issue.linkCount}</td><td><b>{issue.total.toFixed(8)}%</b></td><td className={issue.total > 100 ? 'weight-over' : 'weight-under'}>{issue.total > 100 ? `Reduzir ${(issue.total - 100).toFixed(8)}%` : `Aumentar ${(100 - issue.total).toFixed(8)}%`}</td></tr>)}</tbody></table></div>
+        <div className="lot-areas-actions"><button type="button" onClick={() => setWeightIssues([])}>Voltar sem ajustar</button><button type="button" className="primary" onClick={applySuggestedWeightAdjustments}>Aplicar sugestão proporcional</button></div>
       </div></div></div>}
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
         <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>

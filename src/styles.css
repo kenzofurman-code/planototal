@@ -305,6 +305,9 @@ th { background: #f8fafc; color: #475569; }
 .lot-area-group input { width:100%; }
 .lot-area-group label small { color:#64748b; }
 .lot-areas-actions { position:sticky; bottom:0; display:flex; justify-content:flex-end; gap:8px; padding-top:12px; background:#fff; }
+.weight-adjust-modal { max-width:820px; }
+.weight-over { color:#b91c1c; font-weight:700; }
+.weight-under { color:#0369a1; font-weight:700; }
 .version-kind.planned { color: #9a3412; background: #ffedd5; }
 .version-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
 .version-actions button { font-size: 11px; }
