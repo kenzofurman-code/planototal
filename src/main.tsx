@@ -3645,6 +3645,15 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     return Number(clean.includes(',') ? clean.replace(/\./g, '').replace(',', '.') : clean) || 0;
   };
   async function confirmImport() {
+    setProcessingMessage('Validando a planilha e identificando as atividades...');
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+    try {
+      await performConfirmImport();
+    } finally {
+      setProcessingMessage('');
+    }
+  }
+  async function performConfirmImport() {
     if (!importData || displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)) return;
     const get = (row: unknown[], key: BudgetImportField) => mapping[key] === undefined ? '' : row[mapping[key]!];
     const sourceRows = importData.rows.slice(importData.headerRow);
@@ -3671,7 +3680,10 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     const normalized = imported;
     const matchText = (value: unknown) => {
       const text = String(value ?? '').trim();
-      return /^(-|–|—|n\/?a|não se aplica)$/i.test(text) ? '' : text.toLocaleLowerCase('pt-BR');
+      if (/^(-|–|—|n\/?a|não se aplica)$/i.test(text)) return '';
+      return text.toLocaleLowerCase('pt-BR')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ').trim();
     };
     const matchTask = (row: unknown[]) => {
       const explicitId = String(get(row, 'taskId')).trim();
@@ -3682,10 +3694,10 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       const part = matchText(get(row, 'part'));
       if (!packageName && !service && !lot && !part) return [];
       return tasks.filter((task) =>
-        (!packageName || task.packageName.toLocaleLowerCase('pt-BR') === packageName) &&
-        (!service || (task.service ?? '').toLocaleLowerCase('pt-BR') === service) &&
-        (!lot || task.lot.toLocaleLowerCase('pt-BR') === lot) &&
-        (!part || task.lotMother.toLocaleLowerCase('pt-BR') === part)
+        (!packageName || matchText(task.packageName) === packageName) &&
+        (!service || [task.service, ...(task.services ?? [])].some((candidate) => matchText(candidate) === service)) &&
+        (!lot || matchText(task.lot) === lot) &&
+        (!part || matchText(task.lotMother) === part)
       );
     };
     const ambiguous = sourceRows.filter((row) => matchTask(row).length > 1);
@@ -3735,7 +3747,10 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       else await saveBudget(next);
       setBudgets([...budgets.filter((budget) => budget.type !== next.type), next]);
       setType(next.type); setImportData(null); setBudgetId(null);
-      setMessage(importData.mode === 'links' ? 'Vínculos importados com sucesso.' : importData.mode === 'budget-links' ? 'Orçamento e vínculos importados com sucesso.' : 'Orçamento importado com sucesso.');
+      const skipped = Math.max(0, sourceRows.length - importedAllocations.length);
+      setMessage(importData.mode === 'links'
+        ? `${importedAllocations.length.toLocaleString('pt-BR')} vínculo(s) importado(s). ${skipped.toLocaleString('pt-BR')} linha(s) sem correspondência foram ignoradas.`
+        : importData.mode === 'budget-links' ? 'Orçamento e vínculos importados com sucesso.' : 'Orçamento importado com sucesso.');
     } catch (error) { setMessage(`A importação não foi concluída: ${(error as Error).message}`); }
     finally { setProcessingMessage(''); }
   }
