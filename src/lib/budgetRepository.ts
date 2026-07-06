@@ -37,7 +37,7 @@ export type FinancialLotArea = { lotMother: string; lotName: string; projectionA
 
 export async function loadBudgets(projectKey: string): Promise<BudgetRevision[]> {
   if (!supabase) return [];
-  const { data, error } = await supabase.from('financial_budgets').select('project_key,type,name,active_version_id').eq('project_key', projectKey);
+  const { data, error } = await supabase.from('financial_budgets').select('project_key,type,name,active_version_id,items,allocations').eq('project_key', projectKey);
   if (error) throw error;
   const activeIds = (data ?? []).map((row) => row.active_version_id).filter(Boolean);
   const { data: versions, error: versionsError } = await supabase.from('financial_budget_versions').select('id,version_number').in('id', activeIds.length ? activeIds : ['00000000-0000-0000-0000-000000000000']);
@@ -46,29 +46,39 @@ export async function loadBudgets(projectKey: string): Promise<BudgetRevision[]>
   if (itemsError) throw itemsError;
   const { data: allocationRows, error: allocationsError } = await supabase.from('financial_budget_allocations').select('*').eq('project_key', projectKey);
   if (allocationsError) throw allocationsError;
-  return (data ?? []).map((row) => ({
-    projectKey: row.project_key,
-    type: row.type as BudgetType,
-    name: row.name,
-    versionId: row.active_version_id ?? undefined,
-    versionNumber: versions?.find((version) => version.id === row.active_version_id)?.version_number,
-    items: (itemRows ?? []).filter((item) => item.version_id === row.active_version_id).map((item) => ({
+  return (data ?? []).map((row) => {
+    const normalizedItems = (itemRows ?? []).filter((item) => item.version_id === row.active_version_id).map((item) => ({
       id: item.id, level: item.level ?? '', code: item.code, description: item.description,
       material: Number(item.material_cost), labor: Number(item.labor_cost), total: Number(item.total_cost)
-    })),
-    allocations: (allocationRows ?? []).filter((item) => item.version_id === row.active_version_id).map((item) => ({
+    }));
+    const activeItemIds = new Set(normalizedItems.map((item) => item.id));
+    const normalizedAllocations = (allocationRows ?? []).filter((item) =>
+      item.version_id === row.active_version_id && activeItemIds.has(item.budget_item_id)
+    ).map((item) => ({
       id: item.id, budgetId: item.budget_item_id, taskId: item.schedule_task_external_id,
       parentTaskId: item.parent_schedule_task_external_id ?? undefined, packageName: item.package_name ?? undefined,
       serviceName: item.service_name ?? undefined, lotName: item.lot_name ?? undefined,
       divisionType: item.division_type as DivisionType, weight: Number(item.item_weight_percent),
       value: Number(item.allocated_cost), inheritedFromId: item.inherited_from_allocation_id ?? undefined
-    }))
-  }));
+    }));
+    const fallbackItems = Array.isArray(row.items) ? row.items as BudgetItem[] : [];
+    const fallbackAllocations = Array.isArray(row.allocations) ? row.allocations as BudgetAllocation[] : [];
+    return {
+      projectKey: row.project_key,
+      type: row.type as BudgetType,
+      name: row.name,
+      versionId: row.active_version_id ?? undefined,
+      versionNumber: versions?.find((version) => version.id === row.active_version_id)?.version_number,
+      items: normalizedItems.length ? normalizedItems : fallbackItems,
+      allocations: normalizedItems.length ? normalizedAllocations : fallbackAllocations
+    };
+  });
 }
 
 export async function saveBudget(revision: BudgetRevision) {
   if (!supabase) return;
   let versionId = revision.versionId;
+  const creatingVersion = !versionId;
   if (!versionId) {
     const { data: last } = await supabase.from('financial_budget_versions').select('version_number')
       .eq('project_key', revision.projectKey).eq('budget_type', revision.type)
@@ -85,6 +95,20 @@ export async function saveBudget(revision: BudgetRevision) {
     versionId = created.data.id;
     revision.versionId = versionId;
     revision.versionNumber = (last?.version_number ?? 0) + 1;
+  }
+  if (creatingVersion) {
+    const replacementIds = new Map<string, string>();
+    revision.items = revision.items.map((item) => {
+      const id = crypto.randomUUID();
+      replacementIds.set(item.id, id);
+      return { ...item, id };
+    });
+    revision.allocations = revision.allocations.map((allocation) => ({
+      ...allocation,
+      id: undefined,
+      budgetId: replacementIds.get(allocation.budgetId) ?? allocation.budgetId,
+      inheritedFromId: undefined
+    }));
   }
   const { error } = await supabase.from('financial_budgets').upsert({
     project_key: revision.projectKey,
