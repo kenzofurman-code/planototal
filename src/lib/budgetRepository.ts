@@ -161,43 +161,18 @@ export async function saveBudgetAllocations(revision: BudgetRevision) {
     } : { ...item });
   });
   revision.allocations = Array.from(unique.values());
-
-  const removed = await supabase.from('financial_budget_allocations').delete().eq('version_id', revision.versionId);
-  if (removed.error) throw removed.error;
-
-  if (revision.allocations.length) {
-    const rows = revision.allocations.map((item) => {
-      const id = item.id ?? crypto.randomUUID();
-      item.id = id;
-      return {
-        id,
-        version_id: revision.versionId,
-        project_key: revision.projectKey,
-        budget_type: revision.type,
-        budget_item_id: item.budgetId,
-        schedule_task_external_id: item.taskId,
-        parent_schedule_task_external_id: item.parentTaskId ?? null,
-        package_name: item.packageName ?? null,
-        service_name: item.serviceName ?? null,
-        lot_name: item.lotName ?? null,
-        division_type: item.divisionType,
-        item_weight_percent: item.weight,
-        allocated_cost: item.value,
-        inherited_from_allocation_id: item.inheritedFromId ?? null,
-        updated_at: new Date().toISOString()
-      };
-    });
-    for (let index = 0; index < rows.length; index += 400) {
-      const inserted = await supabase.from('financial_budget_allocations').insert(rows.slice(index, index + 400));
-      if (inserted.error) throw new Error(`Falha no lote ${Math.floor(index / 400) + 1}: ${inserted.error.message}`);
-    }
+  revision.allocations.forEach((item) => { item.id ??= crypto.randomUUID(); });
+  const { error } = await supabase.rpc('replace_financial_budget_allocations', {
+    p_version_id: revision.versionId,
+    p_project_key: revision.projectKey,
+    p_budget_type: revision.type,
+    p_allocations: revision.allocations
+  });
+  if (error) {
+    throw new Error(error.code === 'PGRST202'
+      ? 'A função transacional de vínculos ainda não foi instalada no Supabase. Execute a versão atual de supabase/schema.sql.'
+      : error.message);
   }
-
-  const updated = await supabase.from('financial_budgets').update({
-    allocations: revision.allocations,
-    updated_at: new Date().toISOString()
-  }).eq('project_key', revision.projectKey).eq('type', revision.type);
-  if (updated.error) throw updated.error;
 }
 
 export async function loadFinancialLotAreas(projectKey: string): Promise<FinancialLotArea[]> {

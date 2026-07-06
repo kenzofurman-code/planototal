@@ -726,6 +726,99 @@ drop policy if exists "financial_budget_allocations_access" on financial_budget_
 create policy "financial_budget_allocations_access" on financial_budget_allocations
   for all to anon, authenticated using (true) with check (true);
 
+-- Substitui todos os vínculos de uma versão em uma única transação.
+-- Qualquer falha reverte também a exclusão, preservando os vínculos anteriores.
+create or replace function public.replace_financial_budget_allocations(
+  p_version_id uuid,
+  p_project_key text,
+  p_budget_type text,
+  p_allocations jsonb
+)
+returns integer
+language plpgsql
+security invoker
+set search_path = public
+as $$
+declare
+  allocation_count integer := 0;
+  payload jsonb := coalesce(p_allocations, '[]'::jsonb);
+begin
+  if jsonb_typeof(payload) <> 'array' then
+    raise exception 'A lista de vínculos deve ser um array JSON.';
+  end if;
+
+  if not exists (
+    select 1
+    from financial_budget_versions
+    where id = p_version_id
+      and project_key = p_project_key
+      and budget_type = p_budget_type
+      and status = 'active'
+  ) then
+    raise exception 'A versão informada não é a versão ativa deste orçamento.';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_array_elements(payload) link
+    left join financial_budget_items item
+      on item.id = nullif(link->>'budgetId', '')::uuid
+     and item.version_id = p_version_id
+    where item.id is null
+       or nullif(btrim(link->>'taskId'), '') is null
+       or coalesce((link->>'weight')::numeric, -1) < 0
+       or coalesce((link->>'weight')::numeric, 101) > 100
+  ) then
+    raise exception 'Há vínculos com item, atividade ou peso inválido.';
+  end if;
+
+  delete from financial_budget_allocations
+  where version_id = p_version_id;
+
+  insert into financial_budget_allocations (
+    id, version_id, project_key, budget_type, budget_item_id,
+    schedule_task_external_id, parent_schedule_task_external_id,
+    package_name, service_name, lot_name, division_type,
+    item_weight_percent, allocated_cost, inherited_from_allocation_id, updated_at
+  )
+  select
+    coalesce(nullif(link->>'id', '')::uuid, uuid_generate_v4()),
+    p_version_id,
+    p_project_key,
+    p_budget_type,
+    (link->>'budgetId')::uuid,
+    link->>'taskId',
+    nullif(link->>'parentTaskId', ''),
+    nullif(link->>'packageName', ''),
+    nullif(link->>'serviceName', ''),
+    nullif(link->>'lotName', ''),
+    coalesce(nullif(link->>'divisionType', ''), 'manual'),
+    (link->>'weight')::numeric,
+    coalesce((link->>'value')::numeric, 0),
+    nullif(link->>'inheritedFromId', '')::uuid,
+    now()
+  from jsonb_array_elements(payload) link;
+
+  get diagnostics allocation_count = row_count;
+
+  update financial_budgets
+  set allocations = payload,
+      updated_at = now()
+  where project_key = p_project_key
+    and type = p_budget_type
+    and active_version_id = p_version_id;
+
+  if not found then
+    raise exception 'O orçamento ativo não foi encontrado para atualização.';
+  end if;
+
+  return allocation_count;
+end;
+$$;
+
+grant execute on function public.replace_financial_budget_allocations(uuid, text, text, jsonb)
+  to anon, authenticated;
+
 create or replace function public.register_app_user()
 returns trigger
 language plpgsql

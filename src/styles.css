@@ -326,6 +326,10 @@ th { background: #f8fafc; color: #475569; }
 .import-review-items button.active { background:#edf5f3; box-shadow:inset 3px 0 #347064; }
 .import-review-detail { overflow:auto; padding:16px; }
 .import-review-detail header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+.import-review-filter { display:flex; align-items:center; gap:8px; margin-top:10px; color:#334155; font-size:13px; cursor:pointer; }
+.import-review-filter input { width:16px; height:16px; }
+.import-review-warning { padding:10px 16px; margin:0; border-top:1px solid #fecaca; background:#fff1f2; color:#9f1239; font-size:12px; }
+.import-review-error { padding:10px 16px; margin:0; border-bottom:1px solid #fecaca; background:#fff1f2; color:#9f1239; font-size:13px; font-weight:600; }
 .import-review-detail h3 { margin:3px 0; }
 .review-ok { color:#166534; }.review-warning { color:#b91c1c; }
 .review-row-invalid { background:#fff1f2; color:#9f1239; }
