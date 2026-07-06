@@ -150,6 +150,18 @@ export async function saveBudgetAllocations(revision: BudgetRevision) {
   if (!supabase) return;
   if (!revision.versionId) throw new Error('O orçamento ativo não possui uma versão válida para receber os vínculos.');
 
+  const unique = new Map<string, BudgetAllocation>();
+  revision.allocations.forEach((item) => {
+    const key = `${item.budgetId}\u001f${item.taskId}`;
+    const existing = unique.get(key);
+    unique.set(key, existing ? {
+      ...existing,
+      weight: existing.weight + item.weight,
+      value: existing.value + item.value
+    } : { ...item });
+  });
+  revision.allocations = Array.from(unique.values());
+
   const removed = await supabase.from('financial_budget_allocations').delete().eq('version_id', revision.versionId);
   if (removed.error) throw removed.error;
 
@@ -175,8 +187,10 @@ export async function saveBudgetAllocations(revision: BudgetRevision) {
         updated_at: new Date().toISOString()
       };
     });
-    const inserted = await supabase.from('financial_budget_allocations').insert(rows);
-    if (inserted.error) throw inserted.error;
+    for (let index = 0; index < rows.length; index += 400) {
+      const inserted = await supabase.from('financial_budget_allocations').insert(rows.slice(index, index + 400));
+      if (inserted.error) throw new Error(`Falha no lote ${Math.floor(index / 400) + 1}: ${inserted.error.message}`);
+    }
   }
 
   const updated = await supabase.from('financial_budgets').update({

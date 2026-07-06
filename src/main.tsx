@@ -3542,6 +3542,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const [savingLotAreas, setSavingLotAreas] = useState(false);
   const [weightIssues, setWeightIssues] = useState<Array<{ code: string; description: string; total: number; linkCount: number }>>([]);
   const [confirmAdjustedImport, setConfirmAdjustedImport] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState('');
   const current = budgets.find((budget) => budget.type === type);
   const items = current?.items ?? [];
   const allocations = current?.allocations ?? [];
@@ -3616,12 +3617,19 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       setMessage('Importe um orçamento antes de importar somente os vínculos.');
       return;
     }
-    const workbook = XLSX.read(await file.arrayBuffer(), { cellDates: true });
-    const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: false });
-    const headerRow = detectBudgetHeaderRow(rows);
-    setImportData({ fileName: file.name, rows, headerRow, type, mode: importMode });
-    setMapping(detectBudgetMapping(rows[headerRow - 1] ?? []));
+    try {
+      setProcessingMessage('Lendo e analisando a planilha...');
+      const workbook = XLSX.read(await file.arrayBuffer(), { cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: false });
+      const headerRow = detectBudgetHeaderRow(rows);
+      setImportData({ fileName: file.name, rows, headerRow, type, mode: importMode });
+      setMapping(detectBudgetMapping(rows[headerRow - 1] ?? []));
+    } catch (error) {
+      setMessage(`Não foi possível ler a planilha: ${(error as Error).message}`);
+    } finally {
+      setProcessingMessage('');
+    }
   }
   const importFieldRequired = (field: typeof budgetImportFields[number], mode = importData?.mode) =>
     field.key === 'code' || (mode !== 'links' && field.required);
@@ -3722,12 +3730,14 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       allocations: importData.mode === 'budget' ? (sameEap ? old?.allocations ?? [] : []) : importedAllocations
     };
     try {
+      setProcessingMessage(`Salvando ${importedAllocations.length.toLocaleString('pt-BR')} vínculo(s)...`);
       if (importData.mode === 'links') await saveBudgetAllocations(next);
       else await saveBudget(next);
       setBudgets([...budgets.filter((budget) => budget.type !== next.type), next]);
       setType(next.type); setImportData(null); setBudgetId(null);
       setMessage(importData.mode === 'links' ? 'Vínculos importados com sucesso.' : importData.mode === 'budget-links' ? 'Orçamento e vínculos importados com sucesso.' : 'Orçamento importado com sucesso.');
-    } catch (error) { setMessage((error as Error).message); }
+    } catch (error) { setMessage(`A importação não foi concluída: ${(error as Error).message}`); }
+    finally { setProcessingMessage(''); }
   }
   function applySuggestedWeightAdjustments() {
     if (!importData || mapping.code === undefined || mapping.weight === undefined) return;
@@ -3749,7 +3759,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     });
     setImportData({ ...importData, rows });
     setWeightIssues([]);
-    setMessage('Pesos ajustados proporcionalmente. Concluindo a importação...');
+    setMessage('Pesos ajustados proporcionalmente.');
     setConfirmAdjustedImport(true);
   }
   async function persistName(name: string) {
@@ -3929,6 +3939,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <div className="mapping-table-wrap"><table><thead><tr><th>Código / descrição</th><th>Vínculos</th><th>Soma atual</th><th>Ajuste</th></tr></thead><tbody>{weightIssues.map((issue) => <tr key={issue.code}><td><small>{issue.code}</small><strong>{issue.description}</strong></td><td>{issue.linkCount}</td><td><b>{issue.total.toFixed(8)}%</b></td><td className={issue.total > 100 ? 'weight-over' : 'weight-under'}>{issue.total > 100 ? `Reduzir ${(issue.total - 100).toFixed(8)}%` : `Aumentar ${(100 - issue.total).toFixed(8)}%`}</td></tr>)}</tbody></table></div>
         <div className="lot-areas-actions"><button type="button" onClick={() => setWeightIssues([])}>Voltar sem ajustar</button><button type="button" className="primary" onClick={applySuggestedWeightAdjustments}>Ajustar e importar vínculos</button></div>
       </div></div></div>}
+      {processingMessage && <div className="processing-backdrop" role="status" aria-live="polite"><div className="processing-card"><span className="processing-spinner"/><strong>{processingMessage}</strong><small>Não feche esta tela enquanto o processamento estiver em andamento.</small></div></div>}
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
         <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>
         <label className="import-header-row">Tipo de orçamento<select value={importData.type} onChange={(e) => setImportData({ ...importData, type: e.target.value as BudgetType })}><option value="contractor">Construtora (saída)</option><option value="financing">Financiamento (entrada)</option></select></label>
