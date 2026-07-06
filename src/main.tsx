@@ -3522,8 +3522,11 @@ type BudgetImportField = 'level' | 'code' | 'description' | 'material' | 'labor'
 type BudgetImportMode = 'budget' | 'links' | 'budget-links';
 type ImportReviewRow = { label: string; weight: number; found: boolean; matches: number; allocation?: BudgetAllocation };
 type ImportReviewGroup = { item: BudgetItem; rows: ImportReviewRow[]; total: number; sheetTotal: number; validCount: number };
-const isImportReviewGroupValid = (group: ImportReviewGroup) =>
-  group.rows.length > 0 && group.validCount === group.rows.length && Math.abs(group.total - 100) <= 0.000001;
+const IMPORT_WEIGHT_TOLERANCE = 0.01;
+const isImportReviewGroupComplete = (group: ImportReviewGroup) =>
+  group.rows.length > 0 && group.validCount === group.rows.length && Math.abs(group.total - 100) <= IMPORT_WEIGHT_TOLERANCE;
+const isImportReviewGroupImportable = (group: ImportReviewGroup) =>
+  group.validCount > 0 && group.total > 0 && (group.total <= 100 || isImportReviewGroupComplete(group));
 const budgetImportFields: Array<{ key: BudgetImportField; label: string; required: boolean; aliases: string[] }> = [
   { key: 'level', label: 'Nível', required: false, aliases: ['nível', 'nivel'] },
   { key: 'code', label: 'Código', required: true, aliases: ['código', 'codigo'] },
@@ -3600,7 +3603,11 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     }
     return descendants;
   };
-  const directlyLinkedBudgetIds = new Set(allocations.map((allocation) => allocation.budgetId));
+  const directWeightByBudgetId = allocations.reduce((totals, allocation) => {
+    totals.set(allocation.budgetId, (totals.get(allocation.budgetId) ?? 0) + allocation.weight);
+    return totals;
+  }, new Map<string, number>());
+  const directlyLinkedBudgetIds = new Set(directWeightByBudgetId.keys());
   const superiorLinkByItem = new Map<string, BudgetItem>();
   items.forEach((item) => {
     if (!directlyLinkedBudgetIds.has(item.id)) return;
@@ -3610,10 +3617,15 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   });
   const allVisibleTasksSelected = visibleTasks.length > 0 && visibleTasks.every((task) => activityIds.includes(task.id));
   const displayedImportFields = importData?.mode === 'links' ? linkImportFields : budgetImportFields;
-  const visibleImportReview = reviewOnlyInvalid ? importReview.filter((group) => !isImportReviewGroupValid(group)) : importReview;
-  const importableReviewGroups = importReview.filter(isImportReviewGroupValid);
+  const visibleImportReview = reviewOnlyInvalid ? importReview.filter((group) => !isImportReviewGroupComplete(group)) : importReview;
+  const importableReviewGroups = importReview.filter(isImportReviewGroupImportable);
   const importableReviewAllocations = importableReviewGroups.flatMap((group) =>
-    group.rows.flatMap((row) => row.allocation ? [row.allocation] : []));
+    group.rows.flatMap((row) => {
+      if (!row.allocation) return [];
+      const normalization = isImportReviewGroupComplete(group) ? 100 / group.total : 1;
+      const weight = row.allocation.weight * normalization;
+      return [{ ...row.allocation, weight, value: group.item.total * weight / 100 }];
+    }));
 
   function toggleVisibleTasks() {
     const visibleIds = new Set(visibleTasks.map((task) => task.id));
@@ -3721,7 +3733,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
           label, weight, found: candidates.length === 1, matches: candidates.length, allocation
         }]);
       });
-      const review = current.items.filter((item) => itemLevel(item) === 5).map((item) => {
+      const review = current.items.map((item) => {
         const related = rowsByCode.get(item.code) ?? [];
         const valid = related.filter((row) => row.found);
         return {
@@ -3739,13 +3751,15 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   }
   async function importReviewedLinks() {
     if (!importData || !current || !importableReviewAllocations.length) {
-      setReviewImportError('Não há grupos válidos, completos e totalizando 100% para importar.');
+      setReviewImportError('Não há vínculos com correspondência única e peso importável.');
       return;
     }
     const invalidCount = importReview.length - importableReviewGroups.length;
+    const partialCount = importableReviewGroups.filter((group) => !isImportReviewGroupComplete(group)).length;
     const warning = [
       `Esta operação substituirá os ${current.allocations.length.toLocaleString('pt-BR')} vínculo(s) já existentes deste orçamento.`,
       `${importableReviewAllocations.length.toLocaleString('pt-BR')} vínculo(s) válido(s), distribuídos em ${importableReviewGroups.length.toLocaleString('pt-BR')} item(ns) da EAP, serão gravados.`,
+      partialCount ? `${partialCount.toLocaleString('pt-BR')} item(ns) ficará(ão) parcialmente vinculado(s).` : '',
       invalidCount ? `${invalidCount.toLocaleString('pt-BR')} item(ns) incompleto(s) não será(ão) importado(s).` : '',
       'Essa substituição não poderá ser desfeita. Continuar?'
     ].filter(Boolean).join('\n\n');
@@ -4055,7 +4069,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <div className="mapping-shell">
           <div className="mapping-panel"><div className="mapping-panel-head"><small>ORÇAMENTO</small><h3>{current.name}</h3><span>{visibleItems.length} itens</span></div>
             <label className="mapping-search"><Search size={15}/><input value={budgetSearch} onChange={(e) => setBudgetSearch(e.target.value)} placeholder="Buscar código ou descrição..." /></label>
-            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código / descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linked = directlyLinkedBudgetIds.has(item.id); const superior = superiorLinkByItem.get(item.id); return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => { setBudgetId(item.id); if (superior) setMessage(`Item contemplado pelo vínculo do nível superior ${superior.code}.`); }}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={linked || superior ? 'mapping-status linked' : 'mapping-status'} title={superior ? `Contemplado por ${superior.code}` : undefined}>{linked ? 'Vinculado' : superior ? 'Vinculado no nível superior' : 'Livre'}</span></td></tr>; })}</tbody></table></div>
+            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código / descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linkedWeight = directWeightByBudgetId.get(item.id) ?? 0; const linked = linkedWeight > 0; const fullyLinked = linked && Math.abs(linkedWeight - 100) <= IMPORT_WEIGHT_TOLERANCE; const superior = superiorLinkByItem.get(item.id); const status = fullyLinked ? 'Vinculado totalmente' : linked ? `Vinculado parcial (${linkedWeight.toFixed(2)}%)` : superior ? 'Vinculado no nível superior' : 'Livre'; return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => { setBudgetId(item.id); if (superior) setMessage(`Item contemplado pelo vínculo do nível superior ${superior.code}.`); }}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={fullyLinked || superior ? 'mapping-status linked' : linked ? 'mapping-status partial' : 'mapping-status'} title={superior ? `Contemplado por ${superior.code}` : linked ? `${linkedWeight.toFixed(8)}% vinculado` : undefined}>{status}</span></td></tr>; })}</tbody></table></div>
           </div>
           <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FÍSICA</small><h3>Cronograma da obra</h3><div className="mapping-panel-head-actions"><span>{visibleTasks.length} atividades</span><button type="button" disabled={!visibleTasks.length} onClick={toggleVisibleTasks}><CheckSquare size={15}/>{allVisibleTasksSelected ? 'Limpar seleção' : 'Selecionar todos'}</button></div></div>
             <div className="mapping-filter-actions"><label className="mapping-search"><Search size={15}/><input value={activitySearch} onChange={(e) => setActivitySearch(e.target.value)} placeholder="Buscar atividade, serviço, lote ou grupo..." /></label>{activityIds.length > 0 && <strong>{activityIds.length} selecionada(s)</strong>}</div>
@@ -4079,10 +4093,10 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <div className="mapping-table-wrap"><table><thead><tr><th>Código / descrição</th><th>Vínculos</th><th>Soma atual</th><th>Ajuste</th></tr></thead><tbody>{weightIssues.map((issue) => <tr key={issue.code}><td><small>{issue.code}</small><strong>{issue.description}</strong></td><td>{issue.linkCount}</td><td><b>{issue.total.toFixed(8)}%</b></td><td className={issue.total > 100 ? 'weight-over' : 'weight-under'}>{issue.total > 100 ? `Reduzir ${(issue.total - 100).toFixed(8)}%` : `Aumentar ${(100 - issue.total).toFixed(8)}%`}</td></tr>)}</tbody></table></div>
         <div className="lot-areas-actions"><button type="button" onClick={() => setWeightIssues([])}>Voltar sem ajustar</button><button type="button" className="primary" onClick={applySuggestedWeightAdjustments}>Ajustar e importar vínculos</button></div>
       </div></div></div>}
-      {importReview.length > 0 && <div className="mapping-modal-backdrop"><div className="mapping-modal import-review-modal"><div className="chart-drawer-head"><div><small>REVISÃO TOTAL</small><h3>Vínculos da EAP nível 5</h3><span>Confira correspondências e pesos antes de substituir os vínculos atuais.</span><label className="import-review-filter"><input type="checkbox" checked={reviewOnlyInvalid} onChange={(event) => { const checked = event.target.checked; setReviewOnlyInvalid(checked); if (checked) setReviewCode(importReview.find((group) => !isImportReviewGroupValid(group))?.item.code ?? ''); else setReviewCode(importReview[0]?.item.code ?? ''); }} />Mostrar somente itens sem 100% de vínculos válidos</label></div><button className="drawer-close" onClick={() => setImportReview([])}>×</button></div>{reviewImportError && <p className="import-review-error" role="alert">{reviewImportError}</p>}<div className="import-review-layout">
+      {importReview.length > 0 && <div className="mapping-modal-backdrop"><div className="mapping-modal import-review-modal"><div className="chart-drawer-head"><div><small>REVISÃO TOTAL</small><h3>Vínculos de todos os níveis da EAP</h3><span>A correspondência usa Pacote + Serviço + Lote. Confira os pesos antes de substituir os vínculos atuais.</span><label className="import-review-filter"><input type="checkbox" checked={reviewOnlyInvalid} onChange={(event) => { const checked = event.target.checked; setReviewOnlyInvalid(checked); if (checked) setReviewCode(importReview.find((group) => !isImportReviewGroupComplete(group))?.item.code ?? ''); else setReviewCode(importReview[0]?.item.code ?? ''); }} />Mostrar somente itens sem 100% de vínculos válidos</label></div><button className="drawer-close" onClick={() => setImportReview([])}>×</button></div>{reviewImportError && <p className="import-review-error" role="alert">{reviewImportError}</p>}<div className="import-review-layout">
         <aside className="import-review-items">{visibleImportReview.map((group) => { const unresolved = group.rows.length - group.validCount; return <button key={group.item.code} className={reviewCode === group.item.code ? 'active' : ''} onClick={() => setReviewCode(group.item.code)}><span>{group.item.code}</span><strong>{group.item.description}</strong><small>{group.validCount}/{group.rows.length} vínculo(s) válido(s) · {group.total.toFixed(4)}%{unresolved ? ` · ${unresolved} pendente(s)` : ''}</small></button>; })}{!visibleImportReview.length && <p className="empty-state">Todos os itens com vínculos informados estão completos e totalizam 100%.</p>}</aside>
-        <section className="import-review-detail">{(() => { const group = importReview.find((entry) => entry.item.code === reviewCode); if (!group) return null; return <><header><div><small>{group.item.code}</small><h3>{group.item.description}</h3><small>{group.validCount} vínculo(s) importável(is) de {group.rows.length} linha(s). Total original da planilha: {group.sheetTotal.toFixed(6)}%.</small></div><b className={Math.abs(group.total - 100) < .000001 && group.validCount === group.rows.length ? 'review-ok' : 'review-warning'}>{group.total.toFixed(6)}% válido</b></header><table><thead><tr><th>Atividade da planilha</th><th>No planejamento</th><th>Peso</th></tr></thead><tbody>{group.rows.map((row, index) => <tr key={index} className={!row.found ? 'review-row-invalid' : ''}><td>{row.label || 'Sem identificação'}</td><td>{row.found ? 'Sim' : row.matches > 1 ? `${row.matches} correspondências` : 'Não'}</td><td>{row.weight.toFixed(8)}%</td></tr>)}</tbody></table>{!group.rows.length && <p className="empty-state">Nenhum vínculo informado para este item.</p>}</>; })()}</section>
-      </div><p className="import-review-warning"><strong>Atenção:</strong> ao importar, todos os {current?.allocations.length ?? 0} vínculo(s) já iniciados neste orçamento serão apagados e substituídos pelos vínculos válidos desta revisão.</p><div className="lot-areas-actions import-review-actions"><span>{importableReviewGroups.length} item(ns) completo(s) · {importableReviewAllocations.length} vínculo(s) serão gravados.</span><button onClick={() => setImportReview([])}>Voltar</button><button className="primary" disabled={!importableReviewAllocations.length || Boolean(processingMessage)} onClick={() => void importReviewedLinks()}>Sobrescrever e importar vínculos válidos</button></div></div></div>}
+        <section className="import-review-detail">{(() => { const group = importReview.find((entry) => entry.item.code === reviewCode); if (!group) return null; return <><header><div><small>{group.item.code}</small><h3>{group.item.description}</h3><small>{group.validCount} vínculo(s) importável(is) de {group.rows.length} linha(s). Total original da planilha: {group.sheetTotal.toFixed(6)}%.</small></div><b className={isImportReviewGroupComplete(group) ? 'review-ok' : 'review-warning'}>{group.total.toFixed(6)}% válido · {isImportReviewGroupComplete(group) ? 'total' : isImportReviewGroupImportable(group) ? 'parcial' : 'não importável'}</b></header><table><thead><tr><th>Atividade da planilha</th><th>No planejamento</th><th>Peso</th></tr></thead><tbody>{group.rows.map((row, index) => <tr key={index} className={!row.found ? 'review-row-invalid' : ''}><td>{row.label || 'Sem identificação'}</td><td>{row.found ? 'Sim' : row.matches > 1 ? `${row.matches} correspondências` : 'Não'}</td><td>{row.weight.toFixed(8)}%</td></tr>)}</tbody></table>{!group.rows.length && <p className="empty-state">Nenhum vínculo informado para este item.</p>}</>; })()}</section>
+      </div><p className="import-review-warning"><strong>Atenção:</strong> ao importar, todos os {current?.allocations.length ?? 0} vínculo(s) já iniciados neste orçamento serão apagados e substituídos pelos vínculos válidos desta revisão. Itens abaixo de 100% serão gravados como parciais.</p><div className="lot-areas-actions import-review-actions"><span>{importableReviewGroups.length} item(ns) importável(is) · {importableReviewAllocations.length} vínculo(s) serão gravados.</span><button onClick={() => setImportReview([])}>Voltar</button><button className="primary" disabled={!importableReviewAllocations.length || Boolean(processingMessage)} onClick={() => void importReviewedLinks()}>Sobrescrever e importar vínculos válidos</button></div></div></div>}
       {processingMessage && <div className="processing-backdrop" role="status" aria-live="polite"><div className="processing-card"><span className="processing-spinner"/><strong>{processingMessage}</strong><small>Não feche esta tela enquanto o processamento estiver em andamento.</small></div></div>}
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
         <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>

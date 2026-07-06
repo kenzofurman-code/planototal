@@ -161,6 +161,7 @@ th { background: #f8fafc; color: #475569; }
 .mapping-selected { background: #edf5f3; box-shadow: inset 3px 0 #347064; }
 .mapping-status { padding: 3px 7px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 10px; font-weight: 700; }
 .mapping-status.linked { background: #dcfce7; color: #166534; }
+.mapping-status.partial { background: #fef3c7; color: #92400e; }
 .mapping-action { position: sticky; bottom: 12px; display: flex; align-items: center; gap: 12px; max-width: 620px; margin: 14px auto 0; padding: 12px; border: 1px solid #e2e8f0; border-radius: 15px; background: #fff; box-shadow: 0 10px 28px rgba(15,23,42,.14); }
 .mapping-action div { display: grid; flex: 1; }
 .mapping-action small { color: #64748b; }

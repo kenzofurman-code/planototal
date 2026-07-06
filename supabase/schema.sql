@@ -674,6 +674,92 @@ where not exists (
   select 1 from financial_budget_versions version
   where version.project_key = budget.project_key and version.budget_type = budget.type
 );
+
+-- Instalações antigas guardavam a EAP e os vínculos apenas nos campos JSON.
+-- Mantém os mesmos UUIDs dos itens para que os vínculos continuem apontando
+-- para a EAP correta da versão ativa.
+insert into financial_budget_items (
+  id, version_id, project_key, budget_type, level, code, description,
+  material_cost, labor_cost, total_cost
+)
+select
+  case
+    when item->>'id' ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      then (item->>'id')::uuid
+    else uuid_generate_v4()
+  end,
+  version.id,
+  budget.project_key,
+  budget.type,
+  coalesce(item->>'level', ''),
+  item->>'code',
+  coalesce(nullif(item->>'description', ''), item->>'code'),
+  case when item->>'material' ~ '^-?[0-9]+([.][0-9]+)?$' then (item->>'material')::numeric else 0 end,
+  case when item->>'labor' ~ '^-?[0-9]+([.][0-9]+)?$' then (item->>'labor')::numeric else 0 end,
+  case when item->>'total' ~ '^-?[0-9]+([.][0-9]+)?$' then (item->>'total')::numeric else 0 end
+from financial_budgets budget
+join financial_budget_versions version
+  on version.project_key = budget.project_key
+ and version.budget_type = budget.type
+ and version.status = 'active'
+cross join lateral jsonb_array_elements(
+  case when jsonb_typeof(budget.items) = 'array' then budget.items else '[]'::jsonb end
+) item
+where nullif(btrim(item->>'code'), '') is not null
+  and not exists (
+    select 1
+    from financial_budget_items existing
+    where existing.version_id = version.id
+      and existing.code = item->>'code'
+  )
+on conflict do nothing;
+
+insert into financial_budget_allocations (
+  id, version_id, project_key, budget_type, budget_item_id,
+  schedule_task_external_id, package_name, service_name, lot_name,
+  division_type, item_weight_percent, allocated_cost
+)
+select
+  uuid_generate_v4(),
+  version.id,
+  budget.project_key,
+  budget.type,
+  item.id,
+  link->>'taskId',
+  max(nullif(link->>'packageName', '')),
+  max(nullif(link->>'serviceName', '')),
+  max(nullif(link->>'lotName', '')),
+  case
+    when max(link->>'divisionType') in ('manual', 'equal', 'duration', 'quantity', 'area', 'percentage', 'inherited')
+      then max(link->>'divisionType')
+    else 'manual'
+  end,
+  least(100, greatest(0, sum(
+    case when link->>'weight' ~ '^-?[0-9]+([.][0-9]+)?$' then (link->>'weight')::numeric else 0 end
+  ))),
+  sum(case when link->>'value' ~ '^-?[0-9]+([.][0-9]+)?$' then (link->>'value')::numeric else 0 end)
+from financial_budgets budget
+join financial_budget_versions version
+  on version.project_key = budget.project_key
+ and version.budget_type = budget.type
+ and version.status = 'active'
+cross join lateral jsonb_array_elements(
+  case when jsonb_typeof(budget.allocations) = 'array' then budget.allocations else '[]'::jsonb end
+) link
+join financial_budget_items item
+  on item.version_id = version.id
+ and item.id::text = link->>'budgetId'
+where nullif(btrim(link->>'taskId'), '') is not null
+  and not exists (
+    select 1
+    from financial_budget_allocations existing
+    where existing.version_id = version.id
+      and existing.budget_item_id = item.id
+      and existing.schedule_task_external_id = link->>'taskId'
+  )
+group by version.id, budget.project_key, budget.type, item.id, link->>'taskId'
+on conflict do nothing;
+
 update financial_budget_items item
 set version_id = version.id
 from financial_budget_versions version
@@ -765,11 +851,34 @@ begin
       on item.id = nullif(link->>'budgetId', '')::uuid
      and item.version_id = p_version_id
     where item.id is null
-       or nullif(btrim(link->>'taskId'), '') is null
-       or coalesce((link->>'weight')::numeric, -1) < 0
-       or coalesce((link->>'weight')::numeric, 101) > 100
   ) then
-    raise exception 'Há vínculos com item, atividade ou peso inválido.';
+    raise exception 'Há vínculos apontando para itens que não pertencem à EAP normalizada da versão ativa.';
+  end if;
+
+  if exists (
+    select 1 from jsonb_array_elements(payload) link
+    where nullif(btrim(link->>'taskId'), '') is null
+  ) then
+    raise exception 'Há vínculos sem identificação da atividade do cronograma.';
+  end if;
+
+  if exists (
+    select 1 from jsonb_array_elements(payload) link
+    where link->>'weight' is null
+       or link->>'weight' !~ '^-?[0-9]+([.][0-9]+)?$'
+       or (link->>'weight')::numeric < 0
+       or (link->>'weight')::numeric > 100
+  ) then
+    raise exception 'Há vínculos com peso individual inválido; o peso deve estar entre 0 e 100.';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_array_elements(payload) link
+    group by link->>'budgetId'
+    having sum((link->>'weight')::numeric) > 100.01
+  ) then
+    raise exception 'Há itens da EAP cuja soma dos vínculos ultrapassa 100%%.';
   end if;
 
   delete from financial_budget_allocations
