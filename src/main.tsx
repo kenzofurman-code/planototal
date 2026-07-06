@@ -3541,6 +3541,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const [lotAreas, setLotAreas] = useState<Record<string, number>>({});
   const [savingLotAreas, setSavingLotAreas] = useState(false);
   const [weightIssues, setWeightIssues] = useState<Array<{ code: string; description: string; total: number; linkCount: number }>>([]);
+  const [confirmAdjustedImport, setConfirmAdjustedImport] = useState(false);
   const current = budgets.find((budget) => budget.type === type);
   const items = current?.items ?? [];
   const allocations = current?.allocations ?? [];
@@ -3585,6 +3586,12 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   useEffect(() => {
     loadBudgets(projectKey).then(setBudgets).catch((error) => setMessage((error as Error).message));
   }, [projectKey]);
+
+  useEffect(() => {
+    if (!confirmAdjustedImport || !importData) return;
+    setConfirmAdjustedImport(false);
+    void confirmImport();
+  }, [confirmAdjustedImport, importData]);
 
   function detectBudgetMapping(headers: unknown[]) {
     const result: Partial<Record<BudgetImportField, number>> = {};
@@ -3742,7 +3749,8 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     });
     setImportData({ ...importData, rows });
     setWeightIssues([]);
-    setMessage('Pesos ajustados proporcionalmente. Revise e confirme a importação novamente.');
+    setMessage('Pesos ajustados proporcionalmente. Concluindo a importação...');
+    setConfirmAdjustedImport(true);
   }
   async function persistName(name: string) {
     if (!current) return;
@@ -3919,7 +3927,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       {weightIssues.length > 0 && <div className="mapping-modal-backdrop"><div className="mapping-modal weight-adjust-modal"><div className="chart-drawer-head"><div><small>REVISÃO DA IMPORTAÇÃO</small><h3>Ajustar pesos dos vínculos</h3><span>Os itens abaixo não fecham exatamente 100%.</span></div><button className="drawer-close" onClick={() => setWeightIssues([])}>×</button></div><div className="mapping-modal-body">
         <p className="import-help">A sugestão mantém a proporção atual. Se a soma estiver acima de 100%, reduz os pesos; se estiver abaixo, aumenta proporcionalmente.</p>
         <div className="mapping-table-wrap"><table><thead><tr><th>Código / descrição</th><th>Vínculos</th><th>Soma atual</th><th>Ajuste</th></tr></thead><tbody>{weightIssues.map((issue) => <tr key={issue.code}><td><small>{issue.code}</small><strong>{issue.description}</strong></td><td>{issue.linkCount}</td><td><b>{issue.total.toFixed(8)}%</b></td><td className={issue.total > 100 ? 'weight-over' : 'weight-under'}>{issue.total > 100 ? `Reduzir ${(issue.total - 100).toFixed(8)}%` : `Aumentar ${(100 - issue.total).toFixed(8)}%`}</td></tr>)}</tbody></table></div>
-        <div className="lot-areas-actions"><button type="button" onClick={() => setWeightIssues([])}>Voltar sem ajustar</button><button type="button" className="primary" onClick={applySuggestedWeightAdjustments}>Aplicar sugestão proporcional</button></div>
+        <div className="lot-areas-actions"><button type="button" onClick={() => setWeightIssues([])}>Voltar sem ajustar</button><button type="button" className="primary" onClick={applySuggestedWeightAdjustments}>Ajustar e importar vínculos</button></div>
       </div></div></div>}
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
         <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>
