@@ -3543,6 +3543,8 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const [weightIssues, setWeightIssues] = useState<Array<{ code: string; description: string; total: number; linkCount: number }>>([]);
   const [confirmAdjustedImport, setConfirmAdjustedImport] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
+  const [importReview, setImportReview] = useState<Array<{ item: BudgetItem; rows: Array<{ label: string; weight: number; found: boolean; matches: number }>; total: number }>>([]);
+  const [reviewCode, setReviewCode] = useState('');
   const current = budgets.find((budget) => budget.type === type);
   const items = current?.items ?? [];
   const allocations = current?.allocations ?? [];
@@ -3644,6 +3646,37 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     const clean = String(input ?? '').replace(/[^\d,.-]/g, '');
     return Number(clean.includes(',') ? clean.replace(/\./g, '').replace(',', '.') : clean) || 0;
   };
+  async function openImportReview() {
+    if (!importData || !current) return;
+    setProcessingMessage('Montando a revisão completa da importação...');
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+    try {
+      const get = (row: unknown[], key: BudgetImportField) => mapping[key] === undefined ? '' : row[mapping[key]!];
+      const text = (value: unknown) => {
+        const raw = String(value ?? '').trim();
+        if (/^(-|–|—|n\/?a|não se aplica)$/i.test(raw)) return '';
+        return raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+      };
+      const taskData = tasks.map((task) => ({ task, packageName: text(task.packageName), lot: text(task.lot), part: text(task.lotMother), services: [task.service, ...(task.services ?? [])].map(text) }));
+      const byPackage = new Map<string, typeof taskData>();
+      taskData.forEach((entry) => byPackage.set(entry.packageName, [...(byPackage.get(entry.packageName) ?? []), entry]));
+      const rowsByCode = new Map<string, Array<{ label: string; weight: number; found: boolean; matches: number }>>();
+      importData.rows.slice(importData.headerRow).forEach((row) => {
+        const code = String(get(row, 'code')).trim();
+        const packageName = text(get(row, 'packageName')), service = text(get(row, 'service')), lot = text(get(row, 'lot')), part = text(get(row, 'part'));
+        const candidates = (packageName ? byPackage.get(packageName) ?? [] : taskData).filter((entry) =>
+          (!service || entry.services.includes(service)) && (!lot || entry.lot === lot) && (!part || entry.part === part));
+        const label = [String(get(row, 'packageName')).trim(), String(get(row, 'service')).trim(), String(get(row, 'lot')).trim(), String(get(row, 'part')).trim()].filter((value) => value && value !== '-').join(' · ');
+        rowsByCode.set(code, [...(rowsByCode.get(code) ?? []), { label, weight: money(get(row, 'weight')) || 100, found: candidates.length === 1, matches: candidates.length }]);
+      });
+      const review = current.items.filter((item) => itemLevel(item) === 5).map((item) => {
+        const related = rowsByCode.get(item.code) ?? [];
+        return { item, rows: related, total: related.reduce((sum, row) => sum + row.weight, 0) };
+      });
+      setImportReview(review);
+      setReviewCode(review[0]?.item.code ?? '');
+    } finally { setProcessingMessage(''); }
+  }
   async function confirmImport() {
     setProcessingMessage('Validando a planilha e identificando as atividades...');
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
@@ -3954,13 +3987,17 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <div className="mapping-table-wrap"><table><thead><tr><th>Código / descrição</th><th>Vínculos</th><th>Soma atual</th><th>Ajuste</th></tr></thead><tbody>{weightIssues.map((issue) => <tr key={issue.code}><td><small>{issue.code}</small><strong>{issue.description}</strong></td><td>{issue.linkCount}</td><td><b>{issue.total.toFixed(8)}%</b></td><td className={issue.total > 100 ? 'weight-over' : 'weight-under'}>{issue.total > 100 ? `Reduzir ${(issue.total - 100).toFixed(8)}%` : `Aumentar ${(100 - issue.total).toFixed(8)}%`}</td></tr>)}</tbody></table></div>
         <div className="lot-areas-actions"><button type="button" onClick={() => setWeightIssues([])}>Voltar sem ajustar</button><button type="button" className="primary" onClick={applySuggestedWeightAdjustments}>Ajustar e importar vínculos</button></div>
       </div></div></div>}
+      {importReview.length > 0 && <div className="mapping-modal-backdrop"><div className="mapping-modal import-review-modal"><div className="chart-drawer-head"><div><small>REVISÃO TOTAL</small><h3>Vínculos da EAP nível 5</h3><span>Confira correspondências e pesos antes de gravar.</span></div><button className="drawer-close" onClick={() => setImportReview([])}>×</button></div><div className="import-review-layout">
+        <aside className="import-review-items">{importReview.map((group) => <button key={group.item.code} className={reviewCode === group.item.code ? 'active' : ''} onClick={() => setReviewCode(group.item.code)}><span>{group.item.code}</span><strong>{group.item.description}</strong><small>{group.rows.length} atividade(s) · {group.total.toFixed(4)}%</small></button>)}</aside>
+        <section className="import-review-detail">{(() => { const group = importReview.find((entry) => entry.item.code === reviewCode); if (!group) return null; return <><header><div><small>{group.item.code}</small><h3>{group.item.description}</h3></div><b className={Math.abs(group.total - 100) < .000001 ? 'review-ok' : 'review-warning'}>{group.total.toFixed(6)}%</b></header><table><thead><tr><th>Atividade da planilha</th><th>No planejamento</th><th>Peso</th></tr></thead><tbody>{group.rows.map((row, index) => <tr key={index}><td>{row.label || 'Sem identificação'}</td><td>{row.found ? 'Sim' : row.matches > 1 ? `${row.matches} correspondências` : 'Não'}</td><td>{row.weight.toFixed(8)}%</td></tr>)}</tbody></table>{!group.rows.length && <p className="empty-state">Nenhum vínculo informado para este item.</p>}</>; })()}</section>
+      </div><div className="lot-areas-actions import-review-actions"><button onClick={() => setImportReview([])}>Voltar</button><button className="primary" onClick={() => { setImportReview([]); void confirmImport(); }}>Importar vínculos revisados</button></div></div></div>}
       {processingMessage && <div className="processing-backdrop" role="status" aria-live="polite"><div className="processing-card"><span className="processing-spinner"/><strong>{processingMessage}</strong><small>Não feche esta tela enquanto o processamento estiver em andamento.</small></div></div>}
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
         <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>
         <label className="import-header-row">Tipo de orçamento<select value={importData.type} onChange={(e) => setImportData({ ...importData, type: e.target.value as BudgetType })}><option value="contractor">Construtora (saída)</option><option value="financing">Financiamento (entrada)</option></select></label>
         <label className="import-header-row">Linha dos títulos<input type="number" min={1} value={importData.headerRow} onChange={(e) => updateBudgetHeaderRow(Number(e.target.value))}/></label><p className="import-help">Informe em qual coluna está cada informação. Os campos com * são obrigatórios.</p>
         <div className="mapping-grid">{displayedImportFields.map((field) => <label key={field.key}>{field.label}{importFieldRequired(field, importData.mode) ? ' *' : ''}<select value={mapping[field.key] ?? ''} onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value === '' ? undefined : Number(e.target.value) })}><option value="">Não importar</option>{(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => <option key={index} value={index}>{String(header) || `Coluna ${index + 1}`}</option>)}</select></label>)}</div>
-        <div className="import-summary"><strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong><span>{displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined) ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para importar.'}</span></div><button className="primary import-confirm" disabled={displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)} onClick={() => void confirmImport()}>Confirmar importação</button>
+        <div className="import-summary"><strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong><span>{displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined) ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para revisar.'}</span></div><button className="primary import-confirm" disabled={displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)} onClick={() => importData.mode === 'links' ? void openImportReview() : void confirmImport()}>{importData.mode === 'links' ? 'Revisar vínculos' : 'Confirmar importação'}</button>
       </div></>}</aside>
     </section>
   );
