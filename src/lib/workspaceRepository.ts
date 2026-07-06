@@ -74,30 +74,47 @@ function mapCalendarEvent(row: Record<string, any>): CalendarEvent {
   };
 }
 
+async function loadAllScheduleTaskRows(projectKeys: string[]) {
+  if (!supabase || !projectKeys.length) return [] as Array<Record<string, any>>;
+  const pageSize = 1000;
+  const rows: Array<Record<string, any>> = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase.from('schedule_tasks')
+      .select('*')
+      .in('project_key', projectKeys)
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) {
+      throw new Error(`schedule_tasks: ${error.message}${error.hint ? ` (${error.hint})` : ''} [${error.code}]`);
+    }
+    rows.push(...(data ?? []));
+    if ((data ?? []).length < pageSize) break;
+  }
+  return rows;
+}
+
 export async function loadWorkspace(userId: string): Promise<WorkspaceSnapshot | null> {
   if (!supabase) return null;
-  const [projectsRes, tasksRes, calendarRes, accessRes] = await Promise.all([
-    supabase.from('projects').select('*').order('created_at', { ascending: true }),
-    supabase.from('schedule_tasks').select('*').order('created_at', { ascending: true }),
-    supabase.from('calendar_events').select('*').order('created_at', { ascending: true }),
-    supabase.from('user_project_access').select('project_key').eq('user_id', userId)
-  ]);
-  if (projectsRes.error) {
-    throw new Error(`projects: ${projectsRes.error.message}${projectsRes.error.hint ? ` (${projectsRes.error.hint})` : ''} [${projectsRes.error.code}]`);
-  }
-  if (tasksRes.error) {
-    throw new Error(`schedule_tasks: ${tasksRes.error.message}${tasksRes.error.hint ? ` (${tasksRes.error.hint})` : ''} [${tasksRes.error.code}]`);
-  }
-  if (calendarRes.error) {
-    throw new Error(`calendar_events: ${calendarRes.error.message}${calendarRes.error.hint ? ` (${calendarRes.error.hint})` : ''} [${calendarRes.error.code}]`);
-  }
+  const accessRes = await supabase.from('user_project_access').select('project_key').eq('user_id', userId);
   if (accessRes.error) {
     throw new Error(`user_project_access: ${accessRes.error.message}${accessRes.error.hint ? ` (${accessRes.error.hint})` : ''} [${accessRes.error.code}]`);
   }
   const allowed = new Set((accessRes.data ?? []).map((row) => row.project_key));
+  const [projectsRes, calendarRes, taskRows] = await Promise.all([
+    supabase.from('projects').select('*').order('created_at', { ascending: true }),
+    supabase.from('calendar_events').select('*').order('created_at', { ascending: true }),
+    loadAllScheduleTaskRows(Array.from(allowed))
+  ]);
+  if (projectsRes.error) {
+    throw new Error(`projects: ${projectsRes.error.message}${projectsRes.error.hint ? ` (${projectsRes.error.hint})` : ''} [${projectsRes.error.code}]`);
+  }
+  if (calendarRes.error) {
+    throw new Error(`calendar_events: ${calendarRes.error.message}${calendarRes.error.hint ? ` (${calendarRes.error.hint})` : ''} [${calendarRes.error.code}]`);
+  }
   return {
     projects: (projectsRes.data ?? []).filter((row) => allowed.has(row.project_key)).map(mapProject),
-    tasks: restoreTaskColors((tasksRes.data ?? []).filter((row) => allowed.has(row.project_key))),
+    tasks: restoreTaskColors(taskRows),
     calendarEvents: (calendarRes.data ?? []).filter((row) => !row.project_key || allowed.has(row.project_key)).map(mapCalendarEvent)
   };
 }

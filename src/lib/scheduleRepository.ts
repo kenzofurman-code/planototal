@@ -32,8 +32,12 @@ export async function saveScheduleTasks(projectKey: string, tasks: Task[]) {
     source: 'import',
     updated_at: new Date().toISOString()
   }));
-  const { error } = await supabase.from('schedule_tasks').upsert(rows, { onConflict: 'project_key,external_id' });
-  if (error) throw error;
+  const batchSize = 500;
+  for (let index = 0; index < rows.length; index += batchSize) {
+    const { error } = await supabase.from('schedule_tasks')
+      .upsert(rows.slice(index, index + batchSize), { onConflict: 'project_key,external_id' });
+    if (error) throw new Error(`Falha ao salvar o lote ${Math.floor(index / batchSize) + 1} do cronograma: ${error.message}`);
+  }
 }
 
 export async function deleteProjectBudget(projectKey: string) {

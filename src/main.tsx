@@ -941,7 +941,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
     setImportData({ ...importData, headerRow });
     setMapping(detectMapping(importData.rows[headerRow - 1] ?? []));
   }
-  function importSchedule() {
+  async function importSchedule() {
     if (!importData) return;
     const missing = importFields.filter((field) => field.required && mapping[field.key] === undefined);
     if (missing.length) return;
@@ -1062,10 +1062,17 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
         lane: (index % 3) + 1
       };
     });
-    setTasks(imported);
-    void saveScheduleTasks(projectKey, imported);
-    void createScheduleVersion(projectKey, `Cronograma V${String(savedVersions.length + 1).padStart(2, '0')}`, imported, savedVersions.length === 0).then(refreshVersions);
-    setImportData(null);
+    try {
+      setVersionMessage(`Salvando ${imported.length.toLocaleString('pt-BR')} atividades consolidadas...`);
+      await saveScheduleTasks(projectKey, imported);
+      await createScheduleVersion(projectKey, `Cronograma V${String(savedVersions.length + 1).padStart(2, '0')}`, imported, savedVersions.length === 0);
+      setTasks(imported);
+      setImportData(null);
+      await refreshVersions();
+      setVersionMessage(`${parsed.length.toLocaleString('pt-BR')} linhas válidas processadas em ${imported.length.toLocaleString('pt-BR')} atividades consolidadas.`);
+    } catch (error) {
+      setVersionMessage(`A importação não foi concluída: ${(error as Error).message}`);
+    }
   }
 
   return (
@@ -1197,7 +1204,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
                 <strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong>
                 <span>{importFields.filter((field) => field.required && mapping[field.key] === undefined).length ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para importar.'}</span>
               </div>
-              <button className="primary import-confirm" disabled={importFields.some((field) => field.required && mapping[field.key] === undefined)} onClick={importSchedule}>
+              <button className="primary import-confirm" disabled={importFields.some((field) => field.required && mapping[field.key] === undefined)} onClick={() => void importSchedule()}>
                 Importar cronograma
               </button>
             </div>

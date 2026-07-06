@@ -897,7 +897,7 @@ begin
     item_weight_percent, allocated_cost, inherited_from_allocation_id, updated_at
   )
   select
-    coalesce(nullif(link->>'id', '')::uuid, uuid_generate_v4()),
+    coalesce(nullif(link->>'id', '')::uuid, gen_random_uuid()),
     p_version_id,
     p_project_key,
     p_budget_type,
