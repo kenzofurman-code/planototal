@@ -3593,6 +3593,16 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     });
     return result;
   }
+  function detectBudgetHeaderRow(rows: unknown[][]) {
+    let bestIndex = 0;
+    let bestScore = -1;
+    rows.slice(0, 30).forEach((row, index) => {
+      const detected = detectBudgetMapping(row);
+      const score = Object.keys(detected).length;
+      if (score > bestScore) { bestIndex = index; bestScore = score; }
+    });
+    return bestIndex + 1;
+  }
   async function readBudgetFile(file: File) {
     if (importMode === 'links' && !current) {
       setMessage('Importe um orçamento antes de importar somente os vínculos.');
@@ -3601,9 +3611,9 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     const workbook = XLSX.read(await file.arrayBuffer(), { cellDates: true });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: false });
-    const headerRow = 1;
+    const headerRow = detectBudgetHeaderRow(rows);
     setImportData({ fileName: file.name, rows, headerRow, type, mode: importMode });
-    setMapping(detectBudgetMapping(rows[0] ?? []));
+    setMapping(detectBudgetMapping(rows[headerRow - 1] ?? []));
   }
   const importFieldRequired = (field: typeof budgetImportFields[number], mode = importData?.mode) =>
     field.key === 'code' || (mode !== 'links' && field.required);
@@ -3643,13 +3653,17 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     // Cada versão possui seus próprios itens. Mesmo com EAP idêntica, reutilizar
     // o UUID da versão anterior violaria a chave primária e misturaria auditorias.
     const normalized = imported;
+    const matchText = (value: unknown) => {
+      const text = String(value ?? '').trim();
+      return /^(-|–|—|n\/?a|não se aplica)$/i.test(text) ? '' : text.toLocaleLowerCase('pt-BR');
+    };
     const matchTask = (row: unknown[]) => {
       const explicitId = String(get(row, 'taskId')).trim();
       if (explicitId) return tasks.filter((task) => task.id === explicitId);
-      const packageName = String(get(row, 'packageName')).trim().toLocaleLowerCase('pt-BR');
-      const service = String(get(row, 'service')).trim().toLocaleLowerCase('pt-BR');
-      const lot = String(get(row, 'lot')).trim().toLocaleLowerCase('pt-BR');
-      const part = String(get(row, 'part')).trim().toLocaleLowerCase('pt-BR');
+      const packageName = matchText(get(row, 'packageName'));
+      const service = matchText(get(row, 'service'));
+      const lot = matchText(get(row, 'lot'));
+      const part = matchText(get(row, 'part'));
       if (!packageName && !service && !lot && !part) return [];
       return tasks.filter((task) =>
         (!packageName || task.packageName.toLocaleLowerCase('pt-BR') === packageName) &&
