@@ -3543,7 +3543,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const [weightIssues, setWeightIssues] = useState<Array<{ code: string; description: string; total: number; linkCount: number }>>([]);
   const [confirmAdjustedImport, setConfirmAdjustedImport] = useState(false);
   const [processingMessage, setProcessingMessage] = useState('');
-  const [importReview, setImportReview] = useState<Array<{ item: BudgetItem; rows: Array<{ label: string; weight: number; found: boolean; matches: number }>; total: number }>>([]);
+  const [importReview, setImportReview] = useState<Array<{ item: BudgetItem; rows: Array<{ label: string; weight: number; found: boolean; matches: number }>; total: number; sheetTotal: number; validCount: number }>>([]);
   const [reviewCode, setReviewCode] = useState('');
   const current = budgets.find((budget) => budget.type === type);
   const items = current?.items ?? [];
@@ -3671,7 +3671,13 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       });
       const review = current.items.filter((item) => itemLevel(item) === 5).map((item) => {
         const related = rowsByCode.get(item.code) ?? [];
-        return { item, rows: related, total: related.reduce((sum, row) => sum + row.weight, 0) };
+        const valid = related.filter((row) => row.found);
+        return {
+          item, rows: related,
+          total: valid.reduce((sum, row) => sum + row.weight, 0),
+          sheetTotal: related.reduce((sum, row) => sum + row.weight, 0),
+          validCount: valid.length
+        };
       });
       setImportReview(review);
       setReviewCode(review[0]?.item.code ?? '');
@@ -3988,9 +3994,9 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <div className="lot-areas-actions"><button type="button" onClick={() => setWeightIssues([])}>Voltar sem ajustar</button><button type="button" className="primary" onClick={applySuggestedWeightAdjustments}>Ajustar e importar vínculos</button></div>
       </div></div></div>}
       {importReview.length > 0 && <div className="mapping-modal-backdrop"><div className="mapping-modal import-review-modal"><div className="chart-drawer-head"><div><small>REVISÃO TOTAL</small><h3>Vínculos da EAP nível 5</h3><span>Confira correspondências e pesos antes de gravar.</span></div><button className="drawer-close" onClick={() => setImportReview([])}>×</button></div><div className="import-review-layout">
-        <aside className="import-review-items">{importReview.map((group) => <button key={group.item.code} className={reviewCode === group.item.code ? 'active' : ''} onClick={() => setReviewCode(group.item.code)}><span>{group.item.code}</span><strong>{group.item.description}</strong><small>{group.rows.length} atividade(s) · {group.total.toFixed(4)}%</small></button>)}</aside>
-        <section className="import-review-detail">{(() => { const group = importReview.find((entry) => entry.item.code === reviewCode); if (!group) return null; return <><header><div><small>{group.item.code}</small><h3>{group.item.description}</h3></div><b className={Math.abs(group.total - 100) < .000001 ? 'review-ok' : 'review-warning'}>{group.total.toFixed(6)}%</b></header><table><thead><tr><th>Atividade da planilha</th><th>No planejamento</th><th>Peso</th></tr></thead><tbody>{group.rows.map((row, index) => <tr key={index}><td>{row.label || 'Sem identificação'}</td><td>{row.found ? 'Sim' : row.matches > 1 ? `${row.matches} correspondências` : 'Não'}</td><td>{row.weight.toFixed(8)}%</td></tr>)}</tbody></table>{!group.rows.length && <p className="empty-state">Nenhum vínculo informado para este item.</p>}</>; })()}</section>
-      </div><div className="lot-areas-actions import-review-actions"><button onClick={() => setImportReview([])}>Voltar</button><button className="primary" onClick={() => { setImportReview([]); void confirmImport(); }}>Importar vínculos revisados</button></div></div></div>}
+        <aside className="import-review-items">{importReview.map((group) => { const unresolved = group.rows.length - group.validCount; return <button key={group.item.code} className={reviewCode === group.item.code ? 'active' : ''} onClick={() => setReviewCode(group.item.code)}><span>{group.item.code}</span><strong>{group.item.description}</strong><small>{group.validCount}/{group.rows.length} vínculo(s) válido(s) · {group.total.toFixed(4)}%{unresolved ? ` · ${unresolved} pendente(s)` : ''}</small></button>; })}</aside>
+        <section className="import-review-detail">{(() => { const group = importReview.find((entry) => entry.item.code === reviewCode); if (!group) return null; return <><header><div><small>{group.item.code}</small><h3>{group.item.description}</h3><small>{group.validCount} vínculo(s) importável(is) de {group.rows.length} linha(s). Total original da planilha: {group.sheetTotal.toFixed(6)}%.</small></div><b className={Math.abs(group.total - 100) < .000001 && group.validCount === group.rows.length ? 'review-ok' : 'review-warning'}>{group.total.toFixed(6)}% válido</b></header><table><thead><tr><th>Atividade da planilha</th><th>No planejamento</th><th>Peso</th></tr></thead><tbody>{group.rows.map((row, index) => <tr key={index} className={!row.found ? 'review-row-invalid' : ''}><td>{row.label || 'Sem identificação'}</td><td>{row.found ? 'Sim' : row.matches > 1 ? `${row.matches} correspondências` : 'Não'}</td><td>{row.weight.toFixed(8)}%</td></tr>)}</tbody></table>{!group.rows.length && <p className="empty-state">Nenhum vínculo informado para este item.</p>}</>; })()}</section>
+      </div><div className="lot-areas-actions import-review-actions"><span>{importReview.some((group) => group.rows.length > 0 && (group.validCount !== group.rows.length || Math.abs(group.total - 100) > .000001)) ? 'Resolva os itens pendentes antes de importar.' : 'Todos os vínculos informados estão consistentes.'}</span><button onClick={() => setImportReview([])}>Voltar</button><button className="primary" disabled={importReview.some((group) => group.rows.length > 0 && (group.validCount !== group.rows.length || Math.abs(group.total - 100) > .000001))} onClick={() => { setImportReview([]); void confirmImport(); }}>Importar vínculos revisados</button></div></div></div>}
       {processingMessage && <div className="processing-backdrop" role="status" aria-live="polite"><div className="processing-card"><span className="processing-spinner"/><strong>{processingMessage}</strong><small>Não feche esta tela enquanto o processamento estiver em andamento.</small></div></div>}
       <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
         <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>
