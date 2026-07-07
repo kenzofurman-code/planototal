@@ -1269,11 +1269,18 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
   const [packageColors, setPackageColors] = useState<Record<string, string>>(() => Object.fromEntries(tasks.map((task) => [`${task.lotMother}||${task.packageName}`, task.color])));
   const [groupOrder, setGroupOrder] = useState<string[]>(() => Array.from(new Set(tasks.map((task) => task.lotMother))));
   const [lotOrder, setLotOrder] = useState<Record<string, string[]>>(() => Object.fromEntries(Array.from(new Set(tasks.map((task) => task.lotMother))).map((group) => [group, Array.from(new Set(tasks.filter((task) => task.lotMother === group).map((task) => task.lot)))])));
-  const [ordering, setOrdering] = useState<{
-    type: 'group' | 'lot';
-    key: string;
-    group?: string;
-  } | null>(null);
+  const [ordering, setOrdering] = useState<
+    | {
+        type: 'group';
+        group: string;
+      }
+    | {
+        type: 'lot';
+        group: string;
+        lot: string;
+      }
+    | null
+  >(null);
   const [drag, setDrag] = useState<null | {
     id: string;
     mode: 'pending' | 'move' | 'resize' | 'link';
@@ -1657,25 +1664,29 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
     setVersions(remaining);
     setSelectedVersionId(remaining[0].id);
   }
-  function reorderRow(target: { type: 'group' | 'lot'; key: string; group?: string }) {
-    if (!ordering || ordering.type !== target.type || ordering.key === target.key) return;
+  function reorderRow(target: { type: 'group'; group: string } | { type: 'lot'; group: string; lot: string }) {
+    if (!ordering || ordering.type !== target.type) return;
     if (ordering.type === 'group') {
+      if (target.type !== 'group' || ordering.group === target.group) return;
       const current = [...groups];
-      const from = current.indexOf(ordering.key);
-      const to = current.indexOf(target.key);
+      const from = current.indexOf(ordering.group);
+      const to = current.indexOf(target.group);
+      if (from < 0 || to < 0) return;
       current.splice(from, 1);
-      current.splice(to, 0, ordering.key);
+      current.splice(to, 0, ordering.group);
       setGroupOrder(current);
-    } else if (ordering.group && ordering.group === target.group) {
+    } else if (target.type === 'lot' && ordering.group === target.group) {
+      if (ordering.lot === target.lot) return;
       const taskLots = Array.from(new Set(tasks.filter((task) => task.lotMother === ordering.group).map((task) => task.lot)));
       const current = [...(lotOrder[ordering.group] ?? taskLots)];
       taskLots.forEach((lot) => {
         if (!current.includes(lot)) current.push(lot);
       });
-      const from = current.indexOf(ordering.key);
-      const to = current.indexOf(target.key);
+      const from = current.indexOf(ordering.lot);
+      const to = current.indexOf(target.lot);
+      if (from < 0 || to < 0) return;
       current.splice(from, 1);
-      current.splice(to, 0, ordering.key);
+      current.splice(to, 0, ordering.lot);
       setLotOrder({ ...lotOrder, [ordering.group]: current });
     }
     setOrdering(null);
@@ -1855,20 +1866,20 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
               <div
                 key={layout.group}
                 draggable
-                className={`lot-mother-band ${ordering?.key === layout.group ? 'ordering' : ''}`}
+                className={`lot-mother-band ${ordering?.type === 'group' && ordering.group === layout.group ? 'ordering' : ''}`}
                 style={{ top: layout.top, height: layout.height }}
                 title={layout.group}
                 onDragStart={() =>
                   setOrdering({
                     type: 'group',
-                    key: layout.group
+                    group: layout.group
                   })
                 }
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() =>
                   reorderRow({
                     type: 'group',
-                    key: layout.group
+                    group: layout.group
                   })
                 }
                 onDragEnd={() => setOrdering(null)}
@@ -1904,21 +1915,21 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
               <div
                 key={row.key}
                 draggable
-                className={`lot-label ${row.type} ${ordering?.key === row.key ? 'ordering' : ''}`}
+                className={`lot-label ${row.type} ${ordering?.type === 'lot' && ordering.group === row.group && ordering.lot === row.label ? 'ordering' : ''}`}
                 style={{ top: row.top, height: row.height }}
                 onDragStart={() =>
                   setOrdering({
-                    type: row.type,
-                    key: row.type === 'lot' ? row.label : row.key,
-                    group: row.group
+                    type: 'lot',
+                    group: row.group!,
+                    lot: row.label
                   })
                 }
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() =>
                   reorderRow({
-                    type: row.type,
-                    key: row.type === 'lot' ? row.label : row.key,
-                    group: row.group
+                    type: 'lot',
+                    group: row.group!,
+                    lot: row.label
                   })
                 }
                 onDragEnd={() => setOrdering(null)}
@@ -2568,13 +2579,15 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     setSelectedTaskId(task.id);
     setSelectedMediumTaskIds([task.id]);
   }
-  function reorderMediumTask(targetId: string) {
-    if (!windowData || !mediumOrdering || mediumOrdering === targetId) return;
-    const next = [...windowData.tasks];
-    const from = next.findIndex((task) => task.id === mediumOrdering);
-    const to = next.findIndex((task) => task.id === targetId);
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
+  function reorderMediumTask(targetKey: string) {
+    if (!windowData || !mediumOrdering || mediumOrdering === targetKey) return;
+    const groupKey = (task: Task) => `${task.lotMother}||${task.lot}`;
+    const moving = windowData.tasks.filter((task) => groupKey(task) === mediumOrdering);
+    if (!moving.length) return;
+    const remaining = windowData.tasks.filter((task) => groupKey(task) !== mediumOrdering);
+    const targetIndex = remaining.findIndex((task) => groupKey(task) === targetKey);
+    if (targetIndex < 0) return;
+    const next = [...remaining.slice(0, targetIndex), ...moving, ...remaining.slice(targetIndex)];
     setWindowData({ ...windowData, tasks: next });
     setMediumOrdering(null);
   }
@@ -2958,12 +2971,12 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
                 return (
                 <div
                   draggable
-                  className={`medium-label-row ${mediumOrdering === group.tasks[0].id ? 'ordering' : ''}`}
+                  className={`medium-label-row ${mediumOrdering === group.key ? 'ordering' : ''}`}
                   key={group.key}
                   style={{ height: mediumGroupLayout.get(group.key)?.height ?? 116 }}
-                  onDragStart={() => setMediumOrdering(group.tasks[0].id)}
+                  onDragStart={() => setMediumOrdering(group.key)}
                   onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => reorderMediumTask(group.tasks[0].id)}
+                  onDrop={() => reorderMediumTask(group.key)}
                   onDragEnd={() => setMediumOrdering(null)}
                 >
                   <span className="medium-parent-lot">⠿ {group.lot}</span>
