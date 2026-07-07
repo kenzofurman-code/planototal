@@ -2670,13 +2670,15 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     const responsibleMatches = responsibleNames.join(' ').toLocaleLowerCase('pt-BR').includes(mediumResponsibleSearch.trim().toLocaleLowerCase('pt-BR'));
     return activityMatches && responsibleMatches && (!mediumOnlyUnassigned || responsibleNames.length === 0);
   });
-  const firstTaskByLot = new Map<string, string>();
-  visibleMediumTasks.forEach((task) => {
-    const key = `${task.lotMother}||${task.lot}`;
-    if (!firstTaskByLot.has(key)) firstTaskByLot.set(key, task.id);
-  });
   const maxSublotDepth = Math.max(0, ...visibleMediumTasks.flatMap((task) => leafUnits(task.id).map((unit) => unitPath(task.id, unit).length)), 0);
   const labelColumnWidth = 182 + maxSublotDepth * 145;
+  const mediumMotherImportOrder = new Map<string, number>();
+  const mediumLotImportOrder = new Map<string, number>();
+  visibleMediumTasks.forEach((task) => {
+    if (!mediumMotherImportOrder.has(task.lotMother)) mediumMotherImportOrder.set(task.lotMother, mediumMotherImportOrder.size);
+    const lotKey = `${task.lotMother}||${task.lot}`;
+    if (!mediumLotImportOrder.has(lotKey)) mediumLotImportOrder.set(lotKey, mediumLotImportOrder.size);
+  });
   const mediumLotGroups = Array.from(
     visibleMediumTasks.reduce((map, task) => {
       const key = `${task.lotMother}||${task.lot}`;
@@ -2688,15 +2690,20 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
   )
     .map(([, group]) => group)
     .sort((a, b) => {
-      const numericCompare = (left: string, right: string, direction: 'import' | 'asc' | 'desc') => {
-        if (direction === 'import') return 0;
+      const numericCompare = (left: string, right: string, direction: 'asc' | 'desc') => {
         const leftMatch = left.match(/\d+/)?.[0];
         const rightMatch = right.match(/\d+/)?.[0];
         const comparison = leftMatch && rightMatch ? Number(leftMatch) - Number(rightMatch) : left.localeCompare(right, 'pt-BR');
         return direction === 'asc' ? comparison : -comparison;
       };
-      const mother = numericCompare(a.lotMother, b.lotMother, mediumMotherSort);
-      return mother || numericCompare(a.lot, b.lot, mediumLotSort);
+      const mother =
+        mediumMotherSort === 'import'
+          ? (mediumMotherImportOrder.get(a.lotMother) ?? 0) - (mediumMotherImportOrder.get(b.lotMother) ?? 0)
+          : numericCompare(a.lotMother, b.lotMother, mediumMotherSort);
+      if (mother) return mother;
+      return mediumLotSort === 'import'
+        ? (mediumLotImportOrder.get(a.key) ?? 0) - (mediumLotImportOrder.get(b.key) ?? 0)
+        : numericCompare(a.lot, b.lot, mediumLotSort);
     });
   const mediumRowLayout = new Map<string, { top: number; height: number }>();
   const mediumUnitLayout = new Map<string, { x: number; y: number; width: number; height: number; lane: number; truncatedStart: boolean; truncatedEnd: boolean }>();
@@ -2736,6 +2743,17 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     });
     mediumRowTop += height;
   });
+  const mediumMotherLayouts = Array.from(
+    mediumLotGroups.reduce((map, group) => {
+      const groupLayout = mediumGroupLayout.get(group.key);
+      if (!groupLayout) return map;
+      const current = map.get(group.lotMother);
+      const top = current ? Math.min(current.top, groupLayout.top) : groupLayout.top;
+      const bottom = current ? Math.max(current.bottom, groupLayout.top + groupLayout.height) : groupLayout.top + groupLayout.height;
+      map.set(group.lotMother, { top, bottom });
+      return map;
+    }, new Map<string, { top: number; bottom: number }>())
+  ).map(([lotMother, layout]) => ({ lotMother, top: layout.top, height: layout.bottom - layout.top }));
   return (
     <section className="page medium-page">
       <PageHeader title="Médio prazo" subtitle="Janela independente de três meses para abertura e detalhamento dos lotes." />
@@ -2842,7 +2860,7 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
               gridTemplateColumns: `${labelColumnWidth}px minmax(0,1fr)`
             }}
             onPointerDown={(event) => {
-              if (!(event.target as Element).closest('.medium-task-card,.medium-label-row,button,input,select')) {
+              if (!(event.target as Element).closest('.medium-task-card,.medium-label-row,.medium-mother-band,button,input,select')) {
                 setSelectedTaskId(null);
                 setSelectedMediumTaskIds([]);
               }
@@ -2861,6 +2879,19 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
                   <b key={index}>Sublote {index + 1}</b>
                 ))}
               </div>
+              {mediumMotherLayouts.map((layout) => (
+                <div
+                  className="medium-mother-band"
+                  key={layout.lotMother}
+                  style={{
+                    top: layout.top,
+                    height: layout.height
+                  }}
+                  title={layout.lotMother}
+                >
+                  {layout.lotMother}
+                </div>
+              ))}
               {mediumLotGroups.map((group) => {
                 const paths = group.tasks.flatMap((task) => leafUnits(task.id).map((unit) => unitPath(task.id, unit)));
                 return (
@@ -2874,7 +2905,6 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
                   onDrop={() => reorderMediumTask(group.tasks[0].id)}
                   onDragEnd={() => setMediumOrdering(null)}
                 >
-                  <span className="medium-parent-mother">{group.lotMother}</span>
                   <span className="medium-parent-lot">⠿ {group.lot}</span>
                   <div className="medium-location-grid medium-location-line" style={{ gridTemplateColumns: `32px 150px repeat(${maxSublotDepth},145px)` }}>
                     <span />
