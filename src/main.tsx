@@ -1415,7 +1415,6 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
       group?: string;
     }> = [];
     for (const g of groups) {
-      result.push({ type: 'group', key: g, label: g, tasks: [], height: 30 });
       const taskLots = Array.from(new Set(tasks.filter((t) => t.lotMother === g).map((t) => t.lot)));
       const lots = [...(lotOrder[g] ?? []).filter((lot) => taskLots.includes(lot)), ...taskLots.filter((lot) => !(lotOrder[g] ?? []).includes(lot))];
       for (const lot of lots) {
@@ -1611,6 +1610,16 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
     labelY += row.height;
     return { ...row, top };
   });
+  const groupLabelLayouts = Array.from(
+    labelRows.reduce((map, row) => {
+      if (!row.group) return map;
+      const current = map.get(row.group);
+      const top = current ? Math.min(current.top, row.top) : row.top;
+      const bottom = current ? Math.max(current.bottom, row.top + row.height) : row.top + row.height;
+      map.set(row.group, { top, bottom });
+      return map;
+    }, new Map<string, { top: number; bottom: number }>())
+  ).map(([group, layout]) => ({ group, top: layout.top, height: layout.bottom - layout.top }));
   const dayNames = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
   const microservices: Record<string, string> = {
     ALVENARIA: 'Marcação 20% · Elevação 80%',
@@ -1838,7 +1847,59 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
         </aside>
         <div className="chart-scroll">
           <div className="lot-labels" style={{ height }}>
-            <div className="lot-label-header">Lotes</div>
+            <div className="lot-label-header">
+              <span>LM</span>
+              <b>Lotes</b>
+            </div>
+            {groupLabelLayouts.map((layout) => (
+              <div
+                key={layout.group}
+                draggable
+                className={`lot-mother-band ${ordering?.key === layout.group ? 'ordering' : ''}`}
+                style={{ top: layout.top, height: layout.height }}
+                title={layout.group}
+                onDragStart={() =>
+                  setOrdering({
+                    type: 'group',
+                    key: layout.group
+                  })
+                }
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() =>
+                  reorderRow({
+                    type: 'group',
+                    key: layout.group
+                  })
+                }
+                onDragEnd={() => setOrdering(null)}
+              >
+                <strong>{layout.group}</strong>
+                <span className="lot-mother-actions">
+                  <button
+                    title="Classificar lotes em ordem ascendente"
+                    draggable={false}
+                    onDragStart={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      sortLots(layout.group, 'asc');
+                    }}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    title="Classificar lotes em ordem descendente"
+                    draggable={false}
+                    onDragStart={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      sortLots(layout.group, 'desc');
+                    }}
+                  >
+                    ↓
+                  </button>
+                </span>
+              </div>
+            ))}
             {labelRows.map((row) => (
               <div
                 key={row.key}

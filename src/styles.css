@@ -358,12 +358,19 @@ th { background: #f8fafc; color: #475569; }
 .import-confirm { width: 100%; }
 .lot-labels { position: sticky; z-index: 11; left: 0; float: left; width: 220px; pointer-events: none; }
 .lot-label-header, .lot-label { position: absolute; left: 0; width: 220px; padding: 0 10px; display: flex; align-items: center; border-right: 1px solid #cfd3df; border-bottom: 1px solid #e5e7eb; background: rgba(255,255,255,.94); backdrop-filter: blur(3px); font-size: 12px; }
-.lot-label-header { position: sticky; top: 0; height: 90px; z-index: 2; font-weight: 700; background: #fafafa; }
+.lot-label-header { position: sticky; top: 0; height: 90px; z-index: 4; padding: 0; font-weight: 700; background: #fafafa; }
+.lot-label-header span { align-self: stretch; width: 34px; display: grid; place-items: center; border-right: 1px solid #dbe1ea; color: #64748b; font-size: 10px; }
+.lot-label-header b { padding-left: 12px; }
 .lot-label.group { font-weight: 700; background: rgba(238,242,255,.96); }
-.lot-label { pointer-events: auto; cursor: grab; user-select: none; }
+.lot-label { z-index: 1; padding-left: 42px; pointer-events: auto; cursor: grab; user-select: none; }
 .lot-label:active { cursor: grabbing; }
 .lot-label.ordering { opacity: .45; outline: 2px dashed #4f46e5; }
 .drag-grip { margin-right: 7px; color: #94a3b8; font-size: 17px; }
+.lot-mother-band { position: absolute; z-index: 3; left: 0; width: 34px; display: grid; grid-template-rows: minmax(0,1fr) auto; place-items: center; padding: 6px 3px; border-right: 1px solid #dbe1ea; border-bottom: 1px solid #e5e7eb; background: linear-gradient(180deg,#f8fafc,#eef2ff); color: #475569; cursor: grab; pointer-events: auto; user-select: none; }
+.lot-mother-band strong { min-height: 0; overflow: hidden; font-size: 8px; font-weight: 800; letter-spacing: .04em; line-height: 1.1; text-align: center; text-transform: uppercase; writing-mode: vertical-rl; transform: rotate(180deg); }
+.lot-mother-band.ordering { opacity: .45; outline: 2px dashed #4f46e5; }
+.lot-mother-actions { display: grid; gap: 2px; margin-top: 4px; }
+.lot-mother-actions button { width: 22px; height: 18px; padding: 0; border-color: #c7d2fe; color: #3730a3; background: #fff; font-size: 10px; line-height: 1; }
 .chart-scroll svg { position: absolute; top: 0; left: 220px; display: block; }
 svg { user-select: none; touch-action: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .kanban { display: grid; grid-template-columns: repeat(4, minmax(240px, 1fr)); gap: 12px; overflow-x: auto; }
