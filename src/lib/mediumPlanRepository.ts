@@ -23,6 +23,21 @@ export type MediumWindowState = {
     tasks: Task[];
   } | null;
   units: Record<string, MediumWindowUnit[]>;
+  windowsByMonth?: Record<
+    string,
+    {
+      analysisStart: string;
+      windowData: {
+        id: string;
+        startDate: string;
+        endDate: string;
+        createdAt: string;
+        tasks: Task[];
+      };
+      units: Record<string, MediumWindowUnit[]>;
+      savedAt: string;
+    }
+  >;
 };
 
 export async function loadPublishedMediumPlan(projectKey: string): Promise<Task[] | null> {

@@ -16,6 +16,7 @@ import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
 import { AuthGate } from './components/AuthGate';
 import { setProjectAccess } from './lib/accessRepository';
 import { loadMediumWindowState, loadPublishedMediumPlan, saveMediumWindowState, savePublishedMediumPlan } from './lib/mediumPlanRepository';
+import { loadShortTermState } from './lib/shortTermRepository';
 import { loadWorkspace } from './lib/workspaceRepository';
 import { createClimateCity, deleteClimateCity, loadClimateCities, replaceClimateRecords, type ClimateCity, type ClimateImportRow } from './lib/climateRepository';
 import type { CalendarEvent, Page, Project, ScheduleDependency, Task } from './types';
@@ -2281,9 +2282,16 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     createdAt: string;
     tasks: Task[];
   };
+  type SavedWindow = {
+    analysisStart: string;
+    windowData: Window;
+    units: Record<string, Unit[]>;
+    savedAt: string;
+  };
   const [analysisStart, setAnalysisStart] = useState(() => tasks[0]?.startDate ?? toIsoDate(new Date()));
   const [windowData, setWindowData] = useState<Window | null>(null);
   const [units, setUnits] = useState<Record<string, Unit[]>>({});
+  const [windowsByMonth, setWindowsByMonth] = useState<Record<string, SavedWindow>>({});
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedMediumTaskIds, setSelectedMediumTaskIds] = useState<string[]>([]);
   const [newUnitName, setNewUnitName] = useState('');
@@ -2316,6 +2324,7 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [monthPickerStartYear, setMonthPickerStartYear] = useState(() => parseDate(tasks[0]?.startDate ?? toIsoDate(new Date())).getFullYear());
   const [mediumWindowReady, setMediumWindowReady] = useState(false);
+  const [creatingMediumWindow, setCreatingMediumWindow] = useState(false);
   useEffect(() => {
     const element = mediumTimelineScrollRef.current;
     if (!element) return;
@@ -2334,6 +2343,7 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
         if (state.analysisStart) setAnalysisStart(state.analysisStart);
         if (state.windowData) setWindowData(state.windowData as Window);
         if (state.units) setUnits(state.units as Record<string, Unit[]>);
+        if (state.windowsByMonth) setWindowsByMonth(state.windowsByMonth as Record<string, SavedWindow>);
         if (active) setMediumWindowReady(true);
       })
       .catch(() => {
@@ -2366,17 +2376,19 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     void saveMediumWindowState(projectId, {
       analysisStart,
       windowData,
-      units
+      units,
+      windowsByMonth
     });
-  }, [windowData, units, analysisStart, projectId, onPublish, mediumWindowReady]);
+  }, [windowData, units, analysisStart, projectId, onPublish, mediumWindowReady, windowsByMonth]);
   useEffect(() => {
     if (!mediumWindowReady) return;
     void saveMediumWindowState(projectId, {
       analysisStart,
       windowData,
-      units
+      units,
+      windowsByMonth
     });
-  }, [analysisStart, windowData, units, projectId, mediumWindowReady]);
+  }, [analysisStart, windowData, units, windowsByMonth, projectId, mediumWindowReady]);
   function threeMonthsAfter(value: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return toIsoDate(addDays(new Date(), 90));
     const date = parseDate(value);
@@ -2385,50 +2397,30 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     return toIsoDate(date);
   }
   const analysisEnd = threeMonthsAfter(analysisStart);
-  const previewTasks = tasks.filter((task) => task.startDate <= analysisEnd && task.endDate >= analysisStart);
-  function createWindow() {
-    const snapshot = previewTasks
-      .map((task) => ({
-        ...task,
-        services: [...(task.services ?? [])]
-      }))
-      .sort((a, b) => `${a.lotMother}|${a.lot}|${a.packageName}`.localeCompare(`${b.lotMother}|${b.lot}|${b.packageName}`, 'pt-BR'));
-    const windowSnapshot = {
-      id: crypto.randomUUID(),
-      startDate: analysisStart,
-      endDate: analysisEnd,
-      createdAt: new Date().toISOString(),
-      tasks: snapshot
-    };
+  function monthKey(value: string) {
+    return value.slice(0, 7);
+  }
+  function previousMonthKey(value: string) {
+    const date = parseDate(`${monthKey(value)}-01`);
+    date.setMonth(date.getMonth() - 1);
+    return toIsoDate(date).slice(0, 7);
+  }
+  function rootActivityId(activityId: string) {
+    return activityId.split(':')[0];
+  }
+  const currentMonthKey = monthKey(analysisStart);
+  const previousSavedWindow = windowsByMonth[previousMonthKey(analysisStart)];
+  const currentSavedWindow = windowsByMonth[currentMonthKey];
+  const previewSourceTasks = previousSavedWindow?.windowData.tasks ?? tasks;
+  const previewTasks = previewSourceTasks.filter((task) => task.startDate <= analysisEnd && task.endDate >= analysisStart);
+  function buildRootUnits(snapshot: Task[]): Record<string, Unit[]> {
     const rootIds = new Map(snapshot.map((task) => [task.id, crypto.randomUUID()]));
     const resolveTaskId = (reference: string) => {
       if (rootIds.has(reference)) return reference;
       const numeric = reference.match(/\d+/)?.[0];
       return snapshot.find((task) => task.id === numeric || task.id.match(/\d+/)?.[0] === numeric)?.id;
     };
-    setUnits(
-      Object.fromEntries(
-        snapshot.map((task) => {
-          const predecessorUnits = (task.predecessors ?? []).map(resolveTaskId).filter((id): id is string => Boolean(id)).map((id) => rootIds.get(id)!).filter(Boolean);
-          return [
-            task.id,
-            [
-              {
-                id: rootIds.get(task.id)!,
-                name: task.lot,
-                weight: 100,
-                quantity: task.quantity ?? 0,
-                startDate: task.startDate,
-                endDate: task.endDate,
-                responsible: task.responsible ?? '',
-                predecessors: predecessorUnits
-              }
-            ]
-          ];
-        })
-      )
-    );
-    const unitSnapshot = Object.fromEntries(
+    return Object.fromEntries(
       snapshot.map((task) => {
         const predecessorUnits = (task.predecessors ?? []).map(resolveTaskId).filter((id): id is string => Boolean(id)).map((id) => rootIds.get(id)!).filter(Boolean);
         return [
@@ -2448,15 +2440,117 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
         ];
       })
     );
+  }
+  function cloneUnits(source: Record<string, Unit[]>, taskIds: Set<string>): Record<string, Unit[]> {
+    const unitIds = new Map(Object.values(source).flat().map((unit) => [unit.id, crypto.randomUUID()]));
+    return Object.fromEntries(
+      Object.entries(source)
+        .filter(([taskId]) => taskIds.has(taskId))
+        .map(([taskId, list]) => [
+          taskId,
+          list.map((unit) => ({
+            ...unit,
+            id: unitIds.get(unit.id)!,
+            parentId: unit.parentId ? unitIds.get(unit.parentId) : undefined,
+            predecessors: (unit.predecessors ?? []).map((id) => unitIds.get(id)).filter(Boolean) as string[]
+          }))
+        ])
+    );
+  }
+  function propagateMediumUnits(sourceUnits: Record<string, Unit[]>, changedUnitIds: Set<string>) {
+    const next = Object.fromEntries(Object.entries(sourceUnits).map(([owner, list]) => [owner, list.map((unit) => ({ ...unit }))]));
+    const changed = Array.from(changedUnitIds);
+    const propagate = (sourceUnitId: string, visited = new Set<string>()) => {
+      if (visited.has(sourceUnitId)) return;
+      visited.add(sourceUnitId);
+      const allUnits = Object.values(next).flat();
+      allUnits
+        .filter((unit) => (unit.predecessors ?? []).includes(sourceUnitId))
+        .forEach((successor) => {
+          const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
+          const predecessorEnds = (successor.predecessors ?? [])
+            .map((id) => allUnits.find((unit) => unit.id === id))
+            .filter((unit): unit is Unit => Boolean(unit))
+            .map((unit) => parseDate(unit.endDate).getTime())
+            .filter((time) => !Number.isNaN(time));
+          const start = addDays(predecessorEnds.length ? new Date(Math.max(...predecessorEnds)) : parseDate(successor.endDate), 1);
+          successor.startDate = toIsoDate(start);
+          successor.endDate = toIsoDate(addDays(start, duration));
+          propagate(successor.id, visited);
+        });
+    };
+    changed.forEach((id) => propagate(id));
+    return next;
+  }
+  async function applyShortTermCarryOver(sourceUnits: Record<string, Unit[]>) {
+    const shortState = await loadShortTermState(projectId).catch(() => null);
+    const unfinishedIds = new Set(
+      (shortState?.weekly ?? [])
+        .filter((item) => !item.finalized || (item.executedBefore ?? 0) + (item.progressThisWeek ?? 0) < (item.plannedThisWeek ?? 100))
+        .map((item) => rootActivityId(item.activityId))
+    );
+    if (!unfinishedIds.size) return sourceUnits;
+    const shifted = Object.fromEntries(Object.entries(sourceUnits).map(([owner, list]) => [owner, list.map((unit) => ({ ...unit }))]));
+    const changedUnitIds = new Set<string>();
+    Object.entries(shifted).forEach(([taskId, list]) => {
+      if (!unfinishedIds.has(rootActivityId(taskId))) return;
+      list.forEach((unit) => {
+        if (unit.endDate >= analysisStart) return;
+        const duration = diffDays(parseDate(unit.startDate), parseDate(unit.endDate));
+        unit.startDate = analysisStart;
+        unit.endDate = toIsoDate(addDays(parseDate(analysisStart), Math.max(0, duration)));
+        changedUnitIds.add(unit.id);
+      });
+    });
+    return changedUnitIds.size ? propagateMediumUnits(shifted, changedUnitIds) : shifted;
+  }
+  async function createWindow() {
+    if (currentSavedWindow) {
+      const overwrite = window.confirm(`JÃ¡ existe uma janela salva para ${currentMonthKey}. Deseja sobrescrever esse perÃ­odo?`);
+      if (!overwrite) return;
+    }
+    setCreatingMediumWindow(true);
+    try {
+      const sourceTasks = previousSavedWindow?.windowData.tasks ?? tasks;
+      const sourceUnits = previousSavedWindow?.units;
+      const snapshot = sourceTasks
+        .filter((task) => task.startDate <= analysisEnd && task.endDate >= analysisStart)
+      .map((task) => ({
+        ...task,
+        services: [...(task.services ?? [])]
+      }))
+      .sort((a, b) => `${a.lotMother}|${a.lot}|${a.packageName}`.localeCompare(`${b.lotMother}|${b.lot}|${b.packageName}`, 'pt-BR'));
+      const windowSnapshot: Window = {
+        id: crypto.randomUUID(),
+        startDate: analysisStart,
+        endDate: analysisEnd,
+        createdAt: new Date().toISOString(),
+        tasks: snapshot
+      };
+      const snapshotTaskIds = new Set(snapshot.map((task) => task.id));
+      const baseUnits = sourceUnits ? cloneUnits(sourceUnits, snapshotTaskIds) : buildRootUnits(snapshot);
+      const unitSnapshot = previousSavedWindow ? await applyShortTermCarryOver(baseUnits) : baseUnits;
+      const savedWindow = {
+        analysisStart,
+        windowData: windowSnapshot,
+        units: unitSnapshot,
+        savedAt: new Date().toISOString()
+      };
+      const nextWindowsByMonth = { ...windowsByMonth, [currentMonthKey]: savedWindow };
     setWindowData(windowSnapshot);
     setUnits(unitSnapshot);
+      setWindowsByMonth(nextWindowsByMonth);
     setSelectedTaskId(null);
     setSelectedMediumTaskIds([]);
     void saveMediumWindowState(projectId, {
       analysisStart,
       windowData: windowSnapshot,
-      units: unitSnapshot
+        units: unitSnapshot,
+        windowsByMonth: nextWindowsByMonth
     });
+    } finally {
+      setCreatingMediumWindow(false);
+    }
   }
   function addUnit(task: Task) {
     if (!newUnitName.trim()) return;
@@ -2491,6 +2585,63 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     setUnits({ ...units, [task.id]: distributed });
     setNewUnitName('');
   }
+  function openLotFromTask(sourceTask: Task) {
+    if (!windowData || !newUnitName.trim()) return;
+    const lotName = newUnitName.trim();
+    const sourceLotTasks = windowData.tasks.filter((task) => task.lotMother === sourceTask.lotMother && task.lot === sourceTask.lot);
+    if (!sourceLotTasks.length) return;
+    const lotExists = windowData.tasks.some((task) => task.lotMother === sourceTask.lotMother && task.lot.toLocaleLowerCase('pt-BR') === lotName.toLocaleLowerCase('pt-BR'));
+    if (lotExists) {
+      window.alert('Já existe um lote com esse nome dentro deste lote-mãe.');
+      return;
+    }
+    const sourceTaskIds = new Set(sourceLotTasks.map((task) => task.id));
+    const cloneIds = new Map<string, string>(sourceLotTasks.map((task) => [task.id, crypto.randomUUID()]));
+    const clonedTasks: Task[] = sourceLotTasks.map((task) => {
+      const mappedPredecessors = (task.predecessors ?? []).map((id) => cloneIds.get(id)).filter((id): id is string => typeof id === 'string');
+      return {
+        ...task,
+        id: cloneIds.get(task.id)!,
+        lot: lotName,
+        progress: 0,
+        predecessors: Array.from(new Set([task.id, ...mappedPredecessors])),
+        successors: []
+      };
+    });
+    const clonedUnits: Record<string, Unit[]> = Object.fromEntries(
+      sourceLotTasks.map((task) => {
+        const sourceLeaves = leafUnits(task.id);
+        const sourceEndTimes = sourceLeaves.map((unit) => parseDate(unit.endDate).getTime()).filter((time) => !Number.isNaN(time));
+        const sourceEnd = sourceEndTimes.length ? new Date(Math.max(...sourceEndTimes)) : parseDate(task.endDate);
+        const sourceStart = parseDate(task.startDate);
+        const sourceDuration = diffDays(sourceStart, parseDate(task.endDate));
+        const start = addDays(Number.isNaN(sourceEnd.getTime()) ? parseDate(task.endDate) : sourceEnd, 1);
+        return [
+          cloneIds.get(task.id)!,
+          [
+            {
+              id: crypto.randomUUID(),
+              name: lotName,
+              weight: 100,
+              quantity: task.quantity ?? 0,
+              startDate: toIsoDate(start),
+              endDate: toIsoDate(addDays(start, Math.max(0, sourceDuration))),
+              responsible: task.responsible ?? '',
+              predecessors: sourceLeaves.map((unit) => unit.id)
+            }
+          ]
+        ];
+      })
+    );
+    const lastSourceIndex = Math.max(...windowData.tasks.map((task, index) => (sourceTaskIds.has(task.id) ? index : -1)));
+    const nextTasks = [...windowData.tasks.slice(0, lastSourceIndex + 1), ...clonedTasks, ...windowData.tasks.slice(lastSourceIndex + 1)];
+    setWindowData({ ...windowData, tasks: nextTasks });
+    setUnits({ ...units, ...clonedUnits });
+    setSelectedMediumTaskIds(clonedTasks.map((task) => task.id));
+    setSelectedTaskId(clonedTasks[0]?.id ?? null);
+    setNewUnitName('');
+    setUnitParentId(null);
+  }
   function updateUnit(taskId: string, unitId: string, patch: Partial<Unit>) {
     const next = Object.fromEntries(Object.entries(units).map(([owner, list]) => [owner, list.map((unit) => ({ ...unit }))]));
     const source = next[taskId]?.find((unit) => unit.id === unitId);
@@ -2499,12 +2650,18 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     const propagate = (sourceUnit: Unit, visited = new Set<string>()) => {
       if (visited.has(sourceUnit.id)) return;
       visited.add(sourceUnit.id);
+      const allUnits = Object.values(next).flat();
       Object.values(next)
         .flat()
         .filter((unit) => (unit.predecessors ?? []).includes(sourceUnit.id))
         .forEach((successor) => {
           const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
-          const start = addDays(parseDate(sourceUnit.endDate), 1);
+          const predecessorEnds = (successor.predecessors ?? [])
+            .map((id) => allUnits.find((unit) => unit.id === id))
+            .filter((unit): unit is Unit => Boolean(unit))
+            .map((unit) => parseDate(unit.endDate).getTime())
+            .filter((time) => !Number.isNaN(time));
+          const start = addDays(predecessorEnds.length ? new Date(Math.max(...predecessorEnds)) : parseDate(sourceUnit.endDate), 1);
           successor.startDate = toIsoDate(start);
           successor.endDate = toIsoDate(addDays(start, duration));
           propagate(successor, visited);
@@ -2854,6 +3011,14 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
           <small>Atividades encontradas</small>
           <strong>{previewTasks.length}</strong>
         </div>
+        <div>
+          <small>Origem da janela</small>
+          <strong>{previousSavedWindow ? `Janela ${previousMonthKey(analysisStart)}` : 'Cronograma base'}</strong>
+        </div>
+        <div>
+          <small>Período salvo</small>
+          <strong>{currentSavedWindow ? 'Sim' : 'Não'}</strong>
+        </div>
         {windowData && (
           <>
             <label className="medium-check">
@@ -2862,8 +3027,8 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
             <button onClick={addManualActivity}>＋ Atividade livre</button>
           </>
         )}
-        <button className="primary" onClick={createWindow}>
-          {windowData ? 'Criar nova janela' : 'Filtrar e criar janela'}
+        <button className="primary" disabled={creatingMediumWindow} onClick={() => void createWindow()}>
+          {creatingMediumWindow ? 'Criando janela...' : windowData ? 'Criar nova janela' : 'Filtrar e criar janela'}
         </button>
       </div>
       {!windowData && (
@@ -3199,26 +3364,19 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
                 ) : null;
               })}
             </div>
-            <h3>Abrir local</h3>
+            <h3>Abrir novo lote</h3>
             <p>
-              <b>{selectedTask.packageName}</b>
+              <b>{selectedTask.lot}</b>
               <br />
-              {selectedTask.lotMother} · {selectedTask.lot}
+              {selectedTask.lotMother} · copia todas as atividades deste lote e cria vínculos sucessores.
             </p>
             <div className="medium-unit-add">
               <label>
-                Abrir dentro de
-                <select value={unitParentId ?? (units[selectedTask.id] ?? [])[0]?.id ?? ''} onChange={(event) => setUnitParentId(event.target.value)}>
-                  {(units[selectedTask.id] ?? []).map((unit) => (
-                    <option value={unit.id} key={unit.id}>
-                      {unit.name}
-                    </option>
-                  ))}
-                </select>
+                Nome do novo lote
               </label>
-              <input value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Ex.: Balancim 1, Apto 101..." />
-              <button className="primary" onClick={() => addUnit(selectedTask)}>
-                Adicionar unidade
+              <input value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Ex.: 8º pavimento, Torre B, Frente 02..." />
+              <button className="primary" onClick={() => openLotFromTask(selectedTask)}>
+                Criar lote com mesmas atividades
               </button>
             </div>
             <div className="medium-unit-list">
