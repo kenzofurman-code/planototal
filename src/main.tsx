@@ -2286,11 +2286,13 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     analysisStart: string;
     windowData: Window;
     units: Record<string, Unit[]>;
+    backlogTaskIds?: string[];
     savedAt: string;
   };
   const [analysisStart, setAnalysisStart] = useState(() => tasks[0]?.startDate ?? toIsoDate(new Date()));
   const [windowData, setWindowData] = useState<Window | null>(null);
   const [units, setUnits] = useState<Record<string, Unit[]>>({});
+  const [backlogTaskIds, setBacklogTaskIds] = useState<string[]>([]);
   const [windowsByMonth, setWindowsByMonth] = useState<Record<string, SavedWindow>>({});
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedMediumTaskIds, setSelectedMediumTaskIds] = useState<string[]>([]);
@@ -2325,6 +2327,7 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
   const [monthPickerStartYear, setMonthPickerStartYear] = useState(() => parseDate(tasks[0]?.startDate ?? toIsoDate(new Date())).getFullYear());
   const [mediumWindowReady, setMediumWindowReady] = useState(false);
   const [creatingMediumWindow, setCreatingMediumWindow] = useState(false);
+  const [draggingBacklogTaskId, setDraggingBacklogTaskId] = useState<string | null>(null);
   useEffect(() => {
     const element = mediumTimelineScrollRef.current;
     if (!element) return;
@@ -2343,6 +2346,7 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
         if (state.analysisStart) setAnalysisStart(state.analysisStart);
         if (state.windowData) setWindowData(state.windowData as Window);
         if (state.units) setUnits(state.units as Record<string, Unit[]>);
+        if (state.backlogTaskIds) setBacklogTaskIds(state.backlogTaskIds);
         if (state.windowsByMonth) setWindowsByMonth(state.windowsByMonth as Record<string, SavedWindow>);
         if (active) setMediumWindowReady(true);
       })
@@ -2377,18 +2381,20 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
       analysisStart,
       windowData,
       units,
+      backlogTaskIds,
       windowsByMonth
     });
-  }, [windowData, units, analysisStart, projectId, onPublish, mediumWindowReady, windowsByMonth]);
+  }, [windowData, units, backlogTaskIds, analysisStart, projectId, onPublish, mediumWindowReady, windowsByMonth]);
   useEffect(() => {
     if (!mediumWindowReady) return;
     void saveMediumWindowState(projectId, {
       analysisStart,
       windowData,
       units,
+      backlogTaskIds,
       windowsByMonth
     });
-  }, [analysisStart, windowData, units, windowsByMonth, projectId, mediumWindowReady]);
+  }, [analysisStart, windowData, units, backlogTaskIds, windowsByMonth, projectId, mediumWindowReady]);
   function threeMonthsAfter(value: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return toIsoDate(addDays(new Date(), 90));
     const date = parseDate(value);
@@ -2489,20 +2495,25 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
         .filter((item) => !item.finalized || (item.executedBefore ?? 0) + (item.progressThisWeek ?? 0) < (item.plannedThisWeek ?? 100))
         .map((item) => rootActivityId(item.activityId))
     );
-    if (!unfinishedIds.size) return sourceUnits;
+    if (!unfinishedIds.size) return { units: sourceUnits, backlogTaskIds: [] as string[] };
     const shifted = Object.fromEntries(Object.entries(sourceUnits).map(([owner, list]) => [owner, list.map((unit) => ({ ...unit }))]));
     const changedUnitIds = new Set<string>();
+    const delayedTaskIds = new Set<string>();
     Object.entries(shifted).forEach(([taskId, list]) => {
       if (!unfinishedIds.has(rootActivityId(taskId))) return;
       list.forEach((unit) => {
-        if (unit.endDate >= analysisStart) return;
+        if (unit.endDate > analysisStart) return;
         const duration = diffDays(parseDate(unit.startDate), parseDate(unit.endDate));
         unit.startDate = analysisStart;
         unit.endDate = toIsoDate(addDays(parseDate(analysisStart), Math.max(0, duration)));
         changedUnitIds.add(unit.id);
+        delayedTaskIds.add(taskId);
       });
     });
-    return changedUnitIds.size ? propagateMediumUnits(shifted, changedUnitIds) : shifted;
+    return {
+      units: changedUnitIds.size ? propagateMediumUnits(shifted, changedUnitIds) : shifted,
+      backlogTaskIds: Array.from(delayedTaskIds)
+    };
   }
   async function createWindow() {
     if (currentSavedWindow) {
@@ -2529,23 +2540,28 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
       };
       const snapshotTaskIds = new Set(snapshot.map((task) => task.id));
       const baseUnits = sourceUnits ? cloneUnits(sourceUnits, snapshotTaskIds) : buildRootUnits(snapshot);
-      const unitSnapshot = previousSavedWindow ? await applyShortTermCarryOver(baseUnits) : baseUnits;
+      const carryOver = previousSavedWindow ? await applyShortTermCarryOver(baseUnits) : { units: baseUnits, backlogTaskIds: [] };
+      const unitSnapshot = carryOver.units;
+      const nextBacklogTaskIds = carryOver.backlogTaskIds;
       const savedWindow = {
         analysisStart,
         windowData: windowSnapshot,
         units: unitSnapshot,
+        backlogTaskIds: nextBacklogTaskIds,
         savedAt: new Date().toISOString()
       };
       const nextWindowsByMonth = { ...windowsByMonth, [currentMonthKey]: savedWindow };
     setWindowData(windowSnapshot);
     setUnits(unitSnapshot);
+      setBacklogTaskIds(nextBacklogTaskIds);
       setWindowsByMonth(nextWindowsByMonth);
     setSelectedTaskId(null);
     setSelectedMediumTaskIds([]);
     void saveMediumWindowState(projectId, {
       analysisStart,
-      windowData: windowSnapshot,
+        windowData: windowSnapshot,
         units: unitSnapshot,
+        backlogTaskIds: nextBacklogTaskIds,
         windowsByMonth: nextWindowsByMonth
     });
     } finally {
@@ -2872,6 +2888,49 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     setSelectedMediumTaskIds([]);
     setSelectedTaskId(null);
   }
+  function scheduleBacklogTask(taskId: string, startDate: string) {
+    if (!windowData) return;
+    const taskUnits = leafUnits(taskId);
+    const targetUnit = taskUnits[0] ?? units[taskId]?.[0];
+    if (!targetUnit) return;
+    const duration = diffDays(parseDate(targetUnit.startDate), parseDate(targetUnit.endDate));
+    const nextUnits = propagateMediumUnits(
+      {
+        ...units,
+        [taskId]: (units[taskId] ?? []).map((unit) =>
+          unit.id === targetUnit.id
+            ? {
+                ...unit,
+                startDate,
+                endDate: toIsoDate(addDays(parseDate(startDate), Math.max(0, duration)))
+              }
+            : unit
+        )
+      },
+      new Set([targetUnit.id])
+    );
+    const nextBacklogTaskIds = backlogTaskIds.filter((id) => id !== taskId);
+    const nextWindowsByMonth = {
+      ...windowsByMonth,
+      [currentMonthKey]: {
+        ...(windowsByMonth[currentMonthKey] ?? {
+          analysisStart,
+          windowData,
+          units: nextUnits,
+          savedAt: new Date().toISOString()
+        }),
+        windowData,
+        units: nextUnits,
+        backlogTaskIds: nextBacklogTaskIds,
+        savedAt: new Date().toISOString()
+      }
+    };
+    setUnits(nextUnits);
+    setBacklogTaskIds(nextBacklogTaskIds);
+    setWindowsByMonth(nextWindowsByMonth);
+    setSelectedTaskId(taskId);
+    setSelectedMediumTaskIds([taskId]);
+  }
   const selectedTask = windowData?.tasks.find((task) => task.id === selectedTaskId);
   const activeUnitParentId = selectedTask ? ((units[selectedTask.id] ?? []).some((unit) => unit.id === unitParentId) ? unitParentId! : units[selectedTask.id]?.[0]?.id) : undefined;
   const activeSiblingWeight = selectedTask ? (units[selectedTask.id] ?? []).filter((unit) => unit.parentId === activeUnitParentId).reduce((sum, unit) => sum + unit.weight, 0) : 0;
@@ -2910,6 +2969,9 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     const lotKey = `${task.lotMother}||${task.lot}`;
     if (!mediumLotImportOrder.has(lotKey)) mediumLotImportOrder.set(lotKey, mediumLotImportOrder.size);
   });
+  const backlogTasks = backlogTaskIds
+    .map((taskId) => windowData?.tasks.find((task) => task.id === taskId))
+    .filter((task): task is Task => Boolean(task));
   const mediumLotGroups = Array.from(
     visibleMediumTasks.reduce((map, task) => {
       const key = `${task.lotMother}||${task.lot}`;
@@ -3096,15 +3158,50 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
           <div
             className="medium-timeline-shell"
             style={{
-              gridTemplateColumns: `${labelColumnWidth}px minmax(0,1fr)`
+              gridTemplateColumns: `230px ${labelColumnWidth}px minmax(0,1fr)`
             }}
             onPointerDown={(event) => {
-              if (!(event.target as Element).closest('.medium-task-card,.medium-label-row,.medium-mother-band,button,input,select')) {
+              if (!(event.target as Element).closest('.medium-task-card,.medium-backlog-card,.medium-label-row,.medium-mother-band,button,input,select')) {
                 setSelectedTaskId(null);
                 setSelectedMediumTaskIds([]);
               }
             }}
           >
+            <aside className="medium-backlog-column">
+              <header>
+                <small>Backlog</small>
+                <h3>Atividades atrasadas</h3>
+                <span>{backlogTasks.length} item(ns)</span>
+              </header>
+              <div className="medium-backlog-list">
+                {backlogTasks.map((task) => {
+                  const firstUnit = leafUnits(task.id)[0] ?? units[task.id]?.[0];
+                  return (
+                    <button
+                      draggable
+                      className={`medium-backlog-card ${draggingBacklogTaskId === task.id ? 'dragging' : ''}`}
+                      key={task.id}
+                      onClick={() => {
+                        setSelectedTaskId(task.id);
+                        setSelectedMediumTaskIds([task.id]);
+                      }}
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('text/plain', task.id);
+                        event.dataTransfer.effectAllowed = 'move';
+                        setDraggingBacklogTaskId(task.id);
+                      }}
+                      onDragEnd={() => setDraggingBacklogTaskId(null)}
+                    >
+                      <i style={{ background: task.color }} />
+                      <strong>{task.packageName}</strong>
+                      <span>{task.lot}</span>
+                      <small>{firstUnit ? `${parseDate(firstUnit.startDate).toLocaleDateString('pt-BR')} a ${parseDate(firstUnit.endDate).toLocaleDateString('pt-BR')}` : 'Sem data'}</small>
+                    </button>
+                  );
+                })}
+                {!backlogTasks.length && <p>Nenhuma atividade atrasada da janela anterior.</p>}
+              </div>
+            </aside>
             <div ref={mediumLabelsRef} className="medium-label-column">
               <div
                 className="medium-label-head medium-location-grid"
@@ -3168,6 +3265,22 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
             <div
               ref={mediumTimelineScrollRef}
               className="medium-timeline-scroll"
+              onDragOver={(event) => {
+                if (!draggingBacklogTaskId) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+              }}
+              onDrop={(event) => {
+                const taskId = event.dataTransfer.getData('text/plain') || draggingBacklogTaskId;
+                if (!taskId || !mediumTimelineRef.current) return;
+                event.preventDefault();
+                const rect = mediumTimelineRef.current.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const dayOffset = Math.max(0, Math.round(x / dayWidth));
+                const start = toIsoDate(addDays(parseDate(windowData.startDate), dayOffset));
+                scheduleBacklogTask(taskId, start);
+                setDraggingBacklogTaskId(null);
+              }}
               onPointerDown={startMediumPan}
               onPointerMove={moveMediumPan}
               onPointerUp={finishMediumPan}

@@ -23,6 +23,7 @@ export type MediumWindowState = {
     tasks: Task[];
   } | null;
   units: Record<string, MediumWindowUnit[]>;
+  backlogTaskIds?: string[];
   windowsByMonth?: Record<
     string,
     {
@@ -35,6 +36,7 @@ export type MediumWindowState = {
         tasks: Task[];
       };
       units: Record<string, MediumWindowUnit[]>;
+      backlogTaskIds?: string[];
       savedAt: string;
     }
   >;
