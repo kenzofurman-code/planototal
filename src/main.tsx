@@ -966,7 +966,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
     const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
       header: 1,
       defval: '',
-      raw: false
+      raw: true
     });
     const headerRow = 4;
     setImportData({ fileName: file.name, rows, headerRow });
@@ -1013,12 +1013,29 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
     setImportData({ ...importData, headerRow });
     setMapping(detectMapping(importData.rows[headerRow - 1] ?? [], importData.rows[headerRow - 2] ?? []));
   }
+  function importColumnLabel(header: unknown, index: number, parentHeaders: unknown[]) {
+    const title = String(header || '(sem título)');
+    let parent = '';
+    for (let cursor = index; cursor >= 0; cursor -= 1) {
+      parent = String(parentHeaders[cursor] ?? '').trim();
+      if (parent) break;
+    }
+    const context = parent && parent !== title ? `${parent} / ` : '';
+    return `${XLSX.utils.encode_col(index)} · ${context}${title}`;
+  }
   async function importSchedule() {
     if (!importData) return;
     const missing = importFields.filter((field) => field.required && mapping[field.key] === undefined);
     if (missing.length) return;
     const value = (row: unknown[], key: ImportField) => (mapping[key] === undefined ? '' : row[mapping[key]!]);
     const parseImportedDate = (input: unknown) => {
+      if (input instanceof Date && !Number.isNaN(input.getTime())) {
+        return `${input.getFullYear()}-${String(input.getMonth() + 1).padStart(2, '0')}-${String(input.getDate()).padStart(2, '0')}`;
+      }
+      if (typeof input === 'number') {
+        const parsed = XLSX.SSF.parse_date_code(input);
+        if (parsed) return `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}`;
+      }
       const text = String(input ?? '').trim();
       const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
       return match ? `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` : text.slice(0, 10);
@@ -1280,7 +1297,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
                       <option value="">Não importar</option>
                       {(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => (
                         <option value={index} key={index}>
-                          {XLSX.utils.encode_col(index)} · {String(header) || '(sem título)'}
+                          {importColumnLabel(header, index, importData.rows[importData.headerRow - 2] ?? [])}
                         </option>
                       ))}
                     </select>
@@ -4163,7 +4180,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       setProcessingMessage('Lendo e analisando a planilha...');
       const workbook = XLSX.read(await file.arrayBuffer(), { cellDates: true });
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: false });
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: true });
       const headerRow = detectBudgetHeaderRow(rows);
       setImportData({ fileName: file.name, rows, headerRow, type, mode: importMode });
       setMapping(detectBudgetMapping(rows[headerRow - 1] ?? []));
