@@ -80,7 +80,7 @@ async function loadAllScheduleTaskRows(projectKeys: string[]) {
   const rows: Array<Record<string, any>> = [];
   for (let from = 0; ; from += pageSize) {
     const { data, error } = await supabase.from('schedule_tasks')
-      .select('*')
+      .select('id,external_id,project_key,lot_mother,lot,package_name,package_family,service_name,start_date,end_date,duration_days,quantity,unit,progress_percent,responsible_name,cost_estimated,color,services,predecessors,successors,lane,created_at')
       .in('project_key', projectKeys)
       .order('created_at', { ascending: true })
       .order('id', { ascending: true })
@@ -101,20 +101,36 @@ export async function loadWorkspace(userId: string): Promise<WorkspaceSnapshot |
     throw new Error(`user_project_access: ${accessRes.error.message}${accessRes.error.hint ? ` (${accessRes.error.hint})` : ''} [${accessRes.error.code}]`);
   }
   const allowed = new Set((accessRes.data ?? []).map((row) => row.project_key));
-  const [projectsRes, calendarRes, taskRows] = await Promise.all([
-    supabase.from('projects').select('*').order('created_at', { ascending: true }),
-    supabase.from('calendar_events').select('*').order('created_at', { ascending: true }),
-    loadAllScheduleTaskRows(Array.from(allowed))
-  ]);
+  const allowedKeys = Array.from(allowed);
+  if (!allowedKeys.length) {
+    return { projects: [], tasks: [], calendarEvents: [] };
+  }
+  const projectsRes = await supabase.from('projects')
+    .select('id,project_key,name,image_url,address,area,status,start_date,planned_end_date,city,state,ibge_code,created_at')
+    .in('project_key', allowedKeys)
+    .order('created_at', { ascending: true });
   if (projectsRes.error) {
     throw new Error(`projects: ${projectsRes.error.message}${projectsRes.error.hint ? ` (${projectsRes.error.hint})` : ''} [${projectsRes.error.code}]`);
   }
+  const projects = (projectsRes.data ?? []).map(mapProject);
+  const activeProjectKey = projects[0]?.id;
+  if (!activeProjectKey) {
+    return { projects: [], tasks: [], calendarEvents: [] };
+  }
+  const calendarFilter = `project_key.is.null,project_key.eq.global,project_key.eq.${activeProjectKey}`;
+  const [calendarRes, taskRows] = await Promise.all([
+    supabase.from('calendar_events')
+      .select('id,project_key,project_id,date,title,kind,color,applies_to_all,project_ids,created_at')
+      .or(calendarFilter)
+      .order('created_at', { ascending: true }),
+    loadAllScheduleTaskRows([activeProjectKey])
+  ]);
   if (calendarRes.error) {
     throw new Error(`calendar_events: ${calendarRes.error.message}${calendarRes.error.hint ? ` (${calendarRes.error.hint})` : ''} [${calendarRes.error.code}]`);
   }
   return {
-    projects: (projectsRes.data ?? []).filter((row) => allowed.has(row.project_key)).map(mapProject),
+    projects,
     tasks: restoreTaskColors(taskRows),
-    calendarEvents: (calendarRes.data ?? []).filter((row) => !row.project_key || allowed.has(row.project_key)).map(mapCalendarEvent)
+    calendarEvents: (calendarRes.data ?? []).map(mapCalendarEvent)
   };
 }

@@ -83,7 +83,7 @@ function App({ userId }: { userId: string }) {
     setWorkspaceLoaded(false);
     setWorkspaceError('');
     const timeout = new Promise<never>((_, reject) => {
-      window.setTimeout(() => reject(new Error('Tempo limite excedido ao conectar com o Supabase.')), 15000);
+      window.setTimeout(() => reject(new Error('Tempo limite excedido ao conectar com o Supabase. Verifique a conexão e tente novamente.')), 30000);
     });
     void Promise.race([loadWorkspace(userId), timeout])
       .then((workspace) => {
@@ -885,6 +885,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
   const [mapping, setMapping] = useState<Partial<Record<ImportField, number>>>({});
   const [savedVersions, setSavedVersions] = useState<SavedScheduleVersion[]>([]);
   const [versionMessage, setVersionMessage] = useState('');
+  const [clearingBudget, setClearingBudget] = useState(false);
 
   async function refreshVersions() {
     try {
@@ -910,9 +911,52 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
     await refreshVersions();
   }
   async function removeVersion(version: SavedScheduleVersion) {
-    if (!window.confirm(`Excluir "${version.name}"?`)) return;
-    await deleteScheduleVersion(projectKey, version.id);
-    await refreshVersions();
+    const remaining = savedVersions.filter((item) => item.id !== version.id);
+    const deletingLast = remaining.length === 0;
+    const deletingActive = version.isActive;
+    const warning = deletingLast
+      ? `Excluir "${version.name}" vai limpar o cronograma deste projeto.\n\nRiscos:\n- todas as atividades importadas serão removidas;\n- telas que dependem do cronograma podem ficar sem base até uma nova importação;\n- esta ação não pode ser desfeita por esta tela.\n\nDeseja continuar?`
+      : deletingActive
+        ? `Excluir "${version.name}" vai remover a versão ativa. A próxima versão salva será definida como ativa e substituirá as atividades atuais do cronograma.\n\nDeseja continuar?`
+        : `Excluir "${version.name}"?`;
+    if (!window.confirm(warning)) return;
+    setVersionMessage(deletingLast ? 'Limpando cronograma do projeto...' : 'Excluindo versão...');
+    try {
+      await deleteScheduleVersion(projectKey, version.id);
+      if (deletingLast) {
+        await saveScheduleTasks(projectKey, []);
+        setTasks([]);
+      } else if (deletingActive) {
+        const nextActive = remaining[0];
+        await selectScheduleVersion(projectKey, nextActive.id, 'is_active');
+        const snapshot = nextActive.tasks.map((task) => ({ ...task }));
+        await saveScheduleTasks(projectKey, snapshot);
+        setTasks(snapshot);
+      }
+      await refreshVersions();
+      setVersionMessage(deletingLast ? 'Cronograma removido. Importe uma nova planilha para recomeçar.' : 'Versão excluída.');
+    } catch (error) {
+      setVersionMessage(`Não foi possível excluir a versão: ${(error as Error).message}`);
+    }
+  }
+  async function clearScheduleBudget() {
+    if (!tasks.length || clearingBudget) return;
+    if (!window.confirm('Limpar o orçamento importado do cronograma? As atividades, datas e dependências serão mantidas.')) return;
+    const cleaned = tasks.map((task) => ({ ...task, cost: undefined }));
+    setClearingBudget(true);
+    setVersionMessage('Limpando orçamento do cronograma...');
+    try {
+      await deleteProjectBudget(projectKey);
+      await saveScheduleTasks(projectKey, cleaned);
+      await updateActiveScheduleVersion(projectKey, cleaned);
+      setTasks(cleaned);
+      await refreshVersions();
+      setVersionMessage('Orçamento limpo. Você já pode recomeçar a importação.');
+    } catch (error) {
+      setVersionMessage(`Não foi possível limpar o orçamento: ${(error as Error).message}`);
+    } finally {
+      setClearingBudget(false);
+    }
   }
 
   async function readFile(file: File) {
@@ -1083,6 +1127,9 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
           Importar XLSX/CSV
           <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])} />
         </label>
+        <button className="danger-button" disabled={!tasks.some((task) => task.cost != null) || clearingBudget} onClick={() => void clearScheduleBudget()}>
+          <Trash2 size={16} /> {clearingBudget ? 'Limpando...' : 'Limpar orçamento'}
+        </button>
         <button onClick={() => void createCopy()}>Criar cópia</button>
       </PageHeader>
       <div className="card">
@@ -1100,7 +1147,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
                 <button className={version.isBaseline ? 'primary' : ''} onClick={() => void chooseVersion(version, 'is_baseline')}>
                   {version.isBaseline ? 'Linha de base' : 'Usar como linha de base'}
                 </button>
-                <button disabled={version.isActive} onClick={() => void removeVersion(version)}>Excluir</button>
+                <button className="danger-button" onClick={() => void removeVersion(version)}>Excluir</button>
               </div>
             </div>
           ))}
@@ -2463,9 +2510,34 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
         ])
     );
   }
+  function minimumFsStart(unit: Unit, allUnits: Unit[]) {
+    const predecessorEnds = (unit.predecessors ?? [])
+      .map((id) => allUnits.find((item) => item.id === id))
+      .filter((item): item is Unit => Boolean(item))
+      .map((item) => parseDate(item.endDate).getTime())
+      .filter((time) => !Number.isNaN(time));
+    return predecessorEnds.length ? addDays(new Date(Math.max(...predecessorEnds)), 1) : null;
+  }
+  function unitDependsOn(sourceId: string, targetId: string, sourceUnits = units, visited = new Set<string>()): boolean {
+    if (sourceId === targetId) return true;
+    if (visited.has(sourceId)) return false;
+    visited.add(sourceId);
+    const source = Object.values(sourceUnits).flat().find((unit) => unit.id === sourceId);
+    return (source?.predecessors ?? []).some((predecessorId) => unitDependsOn(predecessorId, targetId, sourceUnits, visited));
+  }
   function propagateMediumUnits(sourceUnits: Record<string, Unit[]>, changedUnitIds: Set<string>) {
     const next = Object.fromEntries(Object.entries(sourceUnits).map(([owner, list]) => [owner, list.map((unit) => ({ ...unit }))]));
     const changed = Array.from(changedUnitIds);
+    changed.forEach((id) => {
+      const allUnits = Object.values(next).flat();
+      const unit = allUnits.find((item) => item.id === id);
+      if (!unit) return;
+      const minimumStart = minimumFsStart(unit, allUnits);
+      if (!minimumStart || parseDate(unit.startDate) >= minimumStart) return;
+      const duration = diffDays(parseDate(unit.startDate), parseDate(unit.endDate));
+      unit.startDate = toIsoDate(minimumStart);
+      unit.endDate = toIsoDate(addDays(minimumStart, duration));
+    });
     const propagate = (sourceUnitId: string, visited = new Set<string>()) => {
       if (visited.has(sourceUnitId)) return;
       visited.add(sourceUnitId);
@@ -2474,14 +2546,11 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
         .filter((unit) => (unit.predecessors ?? []).includes(sourceUnitId))
         .forEach((successor) => {
           const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
-          const predecessorEnds = (successor.predecessors ?? [])
-            .map((id) => allUnits.find((unit) => unit.id === id))
-            .filter((unit): unit is Unit => Boolean(unit))
-            .map((unit) => parseDate(unit.endDate).getTime())
-            .filter((time) => !Number.isNaN(time));
-          const start = addDays(predecessorEnds.length ? new Date(Math.max(...predecessorEnds)) : parseDate(successor.endDate), 1);
-          successor.startDate = toIsoDate(start);
-          successor.endDate = toIsoDate(addDays(start, duration));
+          const minimumStart = minimumFsStart(successor, allUnits);
+          if (minimumStart && parseDate(successor.startDate) < minimumStart) {
+            successor.startDate = toIsoDate(minimumStart);
+            successor.endDate = toIsoDate(addDays(minimumStart, duration));
+          }
           propagate(successor.id, visited);
         });
     };
@@ -2663,6 +2732,12 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     const source = next[taskId]?.find((unit) => unit.id === unitId);
     if (!source) return;
     Object.assign(source, patch);
+    const sourceMinimumStart = minimumFsStart(source, Object.values(next).flat());
+    if (sourceMinimumStart && parseDate(source.startDate) < sourceMinimumStart) {
+      const duration = diffDays(parseDate(source.startDate), parseDate(source.endDate));
+      source.startDate = toIsoDate(sourceMinimumStart);
+      source.endDate = toIsoDate(addDays(sourceMinimumStart, duration));
+    }
     const propagate = (sourceUnit: Unit, visited = new Set<string>()) => {
       if (visited.has(sourceUnit.id)) return;
       visited.add(sourceUnit.id);
@@ -2672,14 +2747,11 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
         .filter((unit) => (unit.predecessors ?? []).includes(sourceUnit.id))
         .forEach((successor) => {
           const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
-          const predecessorEnds = (successor.predecessors ?? [])
-            .map((id) => allUnits.find((unit) => unit.id === id))
-            .filter((unit): unit is Unit => Boolean(unit))
-            .map((unit) => parseDate(unit.endDate).getTime())
-            .filter((time) => !Number.isNaN(time));
-          const start = addDays(predecessorEnds.length ? new Date(Math.max(...predecessorEnds)) : parseDate(sourceUnit.endDate), 1);
-          successor.startDate = toIsoDate(start);
-          successor.endDate = toIsoDate(addDays(start, duration));
+          const minimumStart = minimumFsStart(successor, allUnits);
+          if (minimumStart && parseDate(successor.startDate) < minimumStart) {
+            successor.startDate = toIsoDate(minimumStart);
+            successor.endDate = toIsoDate(addDays(minimumStart, duration));
+          }
           propagate(successor, visited);
         });
     };
@@ -2849,22 +2921,19 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
       const source = allUnits.find((unit) => unit.id === mediumDrag.unitId);
       const target = allUnits.find((unit) => unit.id === mediumDrag.target);
       const targetOwner = Object.entries(units).find(([, list]) => list.some((unit) => unit.id === target?.id))?.[0];
-      if (source && target && targetOwner) {
-        const duration = diffDays(parseDate(target.startDate), parseDate(target.endDate));
-        const requiredStart = addDays(parseDate(source.endDate), 1);
-        setUnits({
+      if (source && target && targetOwner && !unitDependsOn(source.id, target.id)) {
+        const withDependency = {
           ...units,
           [targetOwner]: units[targetOwner].map((unit) =>
             unit.id === target.id
               ? {
                   ...unit,
-                  predecessors: Array.from(new Set([...(unit.predecessors ?? []), source.id])),
-                  startDate: toIsoDate(requiredStart),
-                  endDate: toIsoDate(addDays(requiredStart, duration))
+                  predecessors: Array.from(new Set([...(unit.predecessors ?? []), source.id]))
                 }
               : unit
-          )
-        });
+            )
+        };
+        setUnits(propagateMediumUnits(withDependency, new Set([source.id])));
       }
     }
     setMediumDrag(null);
