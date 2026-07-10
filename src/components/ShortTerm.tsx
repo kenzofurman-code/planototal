@@ -227,6 +227,9 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
   // Checkbox exclusão em lote
   const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
 
+  // Ref para detectar nova importação de cronograma
+  const previousTasksSignature = useRef<string | null>(null);
+
   // --- Mapeamento Reativo das Tarefas ---
   const cronogramaInicial = useMemo(() => {
     return tasks.map(t => ({
@@ -407,6 +410,67 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
       logs: [newLog, ...(prev.logs || [])].slice(0, 100)
     }));
   }, [projectId, persistenceReady]);
+
+  // --- Auto-popular planejamento semanal ao importar cronograma ---
+  useEffect(() => {
+    if (!persistenceReady) return;
+
+    const currentSignature = tasks.map(t => t.id).sort().join(',');
+
+    // Se é o primeiro carregamento, apenas guarda a assinatura atual
+    if (previousTasksSignature.current === null) {
+      previousTasksSignature.current = currentSignature;
+      return;
+    }
+
+    // Se a assinatura mudou (indica importação de cronograma)
+    if (previousTasksSignature.current !== currentSignature) {
+      previousTasksSignature.current = currentSignature;
+
+      const weekId = toLocalDateString(currentWeekStart);
+      const newItems: ShortTermWeeklyItem[] = [];
+
+      tasks.forEach(t => {
+        const progress = t.progress || 0;
+        if (progress < 100) {
+          const alreadyPlanned = planning.some(p => p.weekId === weekId && p.activityId === t.id);
+          if (!alreadyPlanned) {
+            const uniqueId = slugify(`${t.id}_${weekId}_sem-equipe`);
+            newItems.push({
+              id: uniqueId,
+              weekId,
+              activityId: t.id,
+              activityName: t.service || t.packageName || 'SERVIÇO',
+              floor: t.lot || 'GERAL',
+              sectionId: t.packageName || 'GERAL',
+              responsible: '',
+              efetivo: null,
+              plannedThisWeek: Math.max(100 - progress, 25),
+              progressThisWeek: 0,
+              executedBefore: progress,
+              dailyWork: [0, 0, 0, 0, 0],
+              delayReason: '',
+              observations: '',
+              finalized: false,
+              isManual: false
+            });
+          }
+        }
+      });
+
+      if (newItems.length > 0) {
+        setPlanning(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          const filteredNew = newItems.filter(n => !existingIds.has(n.id));
+          return [...prev, ...filteredNew];
+        });
+        setNotification({ 
+          message: `Importação: ${newItems.length} atividades não concluídas trazidas para o planejamento da semana.`, 
+          type: 'success' 
+        });
+      }
+    }
+  }, [tasks, currentWeekStart, persistenceReady, planning]);
 
   // --- Lógica de Clima ---
   useEffect(() => {
