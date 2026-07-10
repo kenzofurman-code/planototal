@@ -872,7 +872,7 @@ const importFields: Array<{
     key: 'progress',
     label: 'Realizado',
     required: true,
-    aliases: ['realizado']
+    aliases: ['realizado', '% concluído', '% concluido', '% realizado', '% avanço', '% avanco', '% executado', 'progresso', 'percentual concluído', 'percentual concluido', 'avanço', 'avanco', '% físico', '% fisico', '% fis', '%', 'progress', '% progress', '% realizado físico', '% realizado fisico', '% concluída física', '% concluida fisica', '% físico concluído', '% fisico concluido', 'realizado (%)']
   }
 ];
 
@@ -1031,7 +1031,22 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
           predecessors: splitIds(value(row, 'predecessors')),
           successors: splitIds(value(row, 'successors')),
           responsible: String(value(row, 'responsible')).trim(),
-          progress: Math.min(100, Math.max(0, Number(String(value(row, 'progress')).replace(',', '.')) || 0)),
+          progress: (() => {
+            const rawProgress = String(value(row, 'progress')).trim();
+            if (!rawProgress) return 0;
+            let parsedProgress = 0;
+            if (rawProgress.includes('%')) {
+              parsedProgress = Number(rawProgress.replace('%', '').replace(',', '.').trim()) || 0;
+            } else {
+              const num = Number(rawProgress.replace(',', '.').trim()) || 0;
+              if (num > 0 && num < 1) {
+                parsedProgress = num * 100;
+              } else {
+                parsedProgress = num;
+              }
+            }
+            return Math.min(100, Math.max(0, parsedProgress));
+          })(),
           color: '#4f46e5'
         };
       })
