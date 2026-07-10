@@ -970,12 +970,39 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
     });
     const headerRow = 4;
     setImportData({ fileName: file.name, rows, headerRow });
-    setMapping(detectMapping(rows[headerRow - 1] ?? []));
+    setMapping(detectMapping(rows[headerRow - 1] ?? [], rows[headerRow - 2] ?? []));
   }
-  function detectMapping(headers: unknown[]) {
+  function detectMapping(headers: unknown[], parentHeaders: unknown[] = []) {
     const result: Partial<Record<ImportField, number>> = {};
+    const normalizeHeader = (value: unknown) =>
+      String(value ?? '')
+        .trim()
+        .toLocaleLowerCase('pt-BR')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ');
+    const aliasesFor = (field: typeof importFields[number]) => field.aliases.map(normalizeHeader);
+    const parentAt = (index: number) => {
+      for (let cursor = index; cursor >= 0; cursor -= 1) {
+        const value = normalizeHeader(parentHeaders[cursor]);
+        if (value) return value;
+      }
+      return '';
+    };
     importFields.forEach((field) => {
-      const index = headers.findIndex((header) => field.aliases.includes(String(header).trim().toLocaleLowerCase('pt-BR')));
+      if (field.key === 'progress') {
+        const progressIndex = headers.findIndex((header, index) => {
+          const title = normalizeHeader(header);
+          const parent = parentAt(index);
+          return title === 'realizado' && parent === 'avanco fisico (%)';
+        });
+        if (progressIndex >= 0) {
+          result[field.key] = progressIndex;
+          return;
+        }
+      }
+      const fieldAliases = aliasesFor(field);
+      const index = headers.findIndex((header) => fieldAliases.includes(normalizeHeader(header)));
       if (index >= 0) result[field.key] = index;
     });
     return result;
@@ -984,7 +1011,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
     if (!importData) return;
     const headerRow = Math.max(1, value);
     setImportData({ ...importData, headerRow });
-    setMapping(detectMapping(importData.rows[headerRow - 1] ?? []));
+    setMapping(detectMapping(importData.rows[headerRow - 1] ?? [], importData.rows[headerRow - 2] ?? []));
   }
   async function importSchedule() {
     if (!importData) return;
@@ -995,6 +1022,18 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
       const text = String(input ?? '').trim();
       const match = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
       return match ? `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}` : text.slice(0, 10);
+    };
+    const parseProgress = (input: unknown) => {
+      if (typeof input === 'number') {
+        const value = input > 0 && input < 1 ? input * 100 : input;
+        return Math.min(100, Math.max(0, value));
+      }
+      const raw = String(input ?? '').trim();
+      if (!raw) return 0;
+      const clean = raw.replace(/[^\d,.-]/g, '');
+      let value = Number(clean.includes(',') ? clean.replace(/\./g, '').replace(',', '.') : clean) || 0;
+      if (!raw.includes('%') && value > 0 && value < 1) value *= 100;
+      return Math.min(100, Math.max(0, value));
     };
     const splitIds = (input: unknown) =>
       String(input ?? '')
@@ -1031,22 +1070,7 @@ function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: 
           predecessors: splitIds(value(row, 'predecessors')),
           successors: splitIds(value(row, 'successors')),
           responsible: String(value(row, 'responsible')).trim(),
-          progress: (() => {
-            const rawProgress = String(value(row, 'progress')).trim();
-            if (!rawProgress) return 0;
-            let parsedProgress = 0;
-            if (rawProgress.includes('%')) {
-              parsedProgress = Number(rawProgress.replace('%', '').replace(',', '.').trim()) || 0;
-            } else {
-              const num = Number(rawProgress.replace(',', '.').trim()) || 0;
-              if (num > 0 && num < 1) {
-                parsedProgress = num * 100;
-              } else {
-                parsedProgress = num;
-              }
-            }
-            return Math.min(100, Math.max(0, parsedProgress));
-          })(),
+          progress: parseProgress(value(row, 'progress')),
           color: '#4f46e5'
         };
       })
