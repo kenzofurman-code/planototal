@@ -4012,7 +4012,7 @@ type BudgetImportField = 'level' | 'code' | 'description' | 'material' | 'labor'
 type BudgetImportMode = 'budget' | 'links' | 'budget-links';
 type ImportReviewRow = { label: string; weight: number; found: boolean; matches: number; allocation?: BudgetAllocation };
 type ImportReviewGroup = { item: BudgetItem; rows: ImportReviewRow[]; total: number; sheetTotal: number; validCount: number };
-const IMPORT_WEIGHT_TOLERANCE = 0.01;
+const IMPORT_WEIGHT_TOLERANCE = 0.000001;
 const isImportReviewGroupComplete = (group: ImportReviewGroup) =>
   group.rows.length > 0 && group.validCount === group.rows.length && Math.abs(group.total - 100) <= IMPORT_WEIGHT_TOLERANCE;
 const isImportReviewGroupImportable = (group: ImportReviewGroup) =>
@@ -4112,8 +4112,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const importableReviewAllocations = importableReviewGroups.flatMap((group) =>
     group.rows.flatMap((row) => {
       if (!row.allocation) return [];
-      const normalization = isImportReviewGroupComplete(group) ? 100 / group.total : 1;
-      const weight = row.allocation.weight * normalization;
+      const weight = row.allocation.weight;
       return [{ ...row.allocation, weight, value: group.item.total * weight / 100 }];
     }));
   const importableReviewUniqueAllocationCount = new Set(
@@ -4187,6 +4186,16 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     const clean = String(input ?? '').replace(/[^\d,.-]/g, '');
     return Number(clean.includes(',') ? clean.replace(/\./g, '').replace(',', '.') : clean) || 0;
   };
+  const percentage = (input: unknown) => {
+    const parse = (value: number, hasExplicitPercent = false) =>
+      !hasExplicitPercent && value > 0 && value < 1 ? value * 100 : value;
+    if (typeof input === 'number') return parse(input);
+    const raw = String(input ?? '').trim();
+    if (!raw) return 0;
+    const clean = raw.replace(/[^\d,.-]/g, '');
+    const value = Number(clean.includes(',') ? clean.replace(/\./g, '').replace(',', '.') : clean) || 0;
+    return parse(value, raw.includes('%'));
+  };
   async function openImportReview() {
     if (!importData || !current) return;
     setProcessingMessage('Montando a revisão completa da importação...');
@@ -4211,7 +4220,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         const item = current.items.find((candidate) => candidate.code === code);
         const task = candidates.length === 1 ? candidates[0].task : undefined;
         const rawWeight = get(row, 'weight');
-        const weight = String(rawWeight ?? '').trim() === '' ? 100 : money(rawWeight);
+        const weight = String(rawWeight ?? '').trim() === '' ? 100 : percentage(rawWeight);
         const allocation = item && task ? {
           budgetId: item.id,
           taskId: task.id,
@@ -4340,7 +4349,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       const item = itemByCode.get(String(get(row, 'code')).trim());
       if (!task || !item) return [];
       const rawWeight = get(row, 'weight');
-      const weight = String(rawWeight ?? '').trim() === '' ? 100 : money(rawWeight);
+      const weight = String(rawWeight ?? '').trim() === '' ? 100 : percentage(rawWeight);
       const rawDivision = String(get(row, 'divisionType')).trim().toLocaleLowerCase('pt-BR');
       const divisionType = rawDivision.includes('dura') || rawDivision.includes('tempo') ? 'duration'
         : rawDivision.includes('quant') ? 'quantity'
@@ -4394,7 +4403,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       for (let index = importData.headerRow; index < rows.length; index += 1) {
         if (String(rows[index][mapping.code!]).trim() === issue.code) rowIndexes.push(index);
       }
-      const currentWeights = rowIndexes.map((index) => money(rows[index][mapping.weight!]));
+      const currentWeights = rowIndexes.map((index) => percentage(rows[index][mapping.weight!]));
       const currentTotal = currentWeights.reduce((sum, value) => sum + value, 0);
       if (!rowIndexes.length) return;
       const adjusted = currentTotal > 0

@@ -194,8 +194,7 @@ export async function saveBudgetAllocations(revision: BudgetRevision) {
   });
   const itemTotalById = new Map(revision.items.map((item) => [item.id, item.total]));
   revision.allocations = Array.from(unique.values()).map((item) => {
-    const rounded = Number(item.weight.toFixed(8));
-    const weight = Math.abs(rounded - 100) <= 0.01 ? 100 : rounded;
+    const weight = Number(item.weight.toFixed(8));
     const itemTotal = itemTotalById.get(item.budgetId);
     return {
       ...item,
