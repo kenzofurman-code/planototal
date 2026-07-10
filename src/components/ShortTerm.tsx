@@ -770,7 +770,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
       list = list.filter(t =>
         t.activityName.toLowerCase().includes(planningSearch.toLowerCase()) ||
         t.floor.toLowerCase().includes(planningSearch.toLowerCase()) ||
-        t.sectionId.toLowerCase().includes(planningSearch.toLowerCase()) ||
+        (t.sectionId || '').toLowerCase().includes(planningSearch.toLowerCase()) ||
         (t.serviceComplement || '').toLowerCase().includes(planningSearch.toLowerCase()) ||
         (t.observations || '').toLowerCase().includes(planningSearch.toLowerCase())
       );
@@ -791,6 +791,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
       list = list.filter(t =>
         t.activityName.toLowerCase().includes(giantSearch.toLowerCase()) ||
         t.floor.toLowerCase().includes(giantSearch.toLowerCase()) ||
+        (t.sectionId || '').toLowerCase().includes(giantSearch.toLowerCase()) ||
         (t.responsible || '').toLowerCase().includes(giantSearch.toLowerCase()) ||
         (t.observations || '').toLowerCase().includes(giantSearch.toLowerCase())
       );
