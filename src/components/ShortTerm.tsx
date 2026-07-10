@@ -1592,7 +1592,14 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                             )}
                           </div>
                         )}
-                        <div className="text-[8px] font-bold text-indigo-500 mt-1">{t.floor}</div>
+                        <div className="flex justify-between items-center mt-1 text-[8px] font-bold">
+                          <span className="text-indigo-500">{t.floor}</span>
+                          {(t.executedBefore ?? 0) > 0 && (
+                            <span className="text-slate-500 bg-slate-100 px-1 py-0.5 rounded border border-slate-200">
+                              Realizado: <span className="text-slate-800 font-black">{t.executedBefore}%</span>
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       <td className="p-3 border-r text-center">
@@ -1614,7 +1621,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                           {[25, 50, 75, 100].map(val => {
                             const execBefore = t.executedBefore ?? 0;
                             const isPlanned = currentPlan === val;
-                            const isExecuted = execBefore > 0 && val === execBefore;
+                            const isExecuted = execBefore > 0 && val <= execBefore;
 
                             let btnClass = 'bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700';
                             if (isPlanned) btnClass = 'bg-emerald-600 text-white font-black scale-110 shadow-xs border-emerald-600';
