@@ -1,5 +1,6 @@
 export type Page =
   | 'projects'
+  | 'climate'
   | 'globalCalendar'
   | 'workCalendar'
   | 'dashboard'

@@ -1,12 +1,24 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import * as XLSX from 'xlsx';
-import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2 } from 'lucide-react';
-import { projects, procurement, tasks as initialTasks } from './demoData';
+import { BarChart3, Building2, CalendarRange, ChevronLeft, ChevronRight, CheckSquare, Download, FileSpreadsheet, Home, KanbanSquare, LineChart, Link2, ArrowLeftRight, Search, Menu, Settings, Trash2, MapPin, Ruler, ImagePlus, Users, CloudRain, Plus, Upload, Lock, Unlock } from 'lucide-react';
+import { procurement } from './demoData';
 import { addDays, diffDays, parseDate, toIsoDate } from './lib/date';
-import { isSupabaseConfigured } from './lib/supabase';
+import { saveCalendarEvents } from './lib/calendarRepository';
+import { loadLineBalanceData, saveLineBalanceData } from './lib/lineBalanceRepository';
+import { saveProject, uploadProjectImage } from './lib/projectRepository';
+import { deleteProjectBudget, saveScheduleTasks } from './lib/scheduleRepository';
+import { deleteBudget as deleteSavedBudget, loadBudgetRevisionName, loadBudgets, loadFinancialLotAreas, saveBudget, saveBudgetAllocations, saveBudgetRevisionName, saveFinancialLotAreas, type BudgetAllocation, type BudgetItem, type BudgetRevision, type BudgetType } from './lib/budgetRepository';
+import { createScheduleVersion, deleteScheduleVersion, loadScheduleVersions, selectScheduleVersion, updateActiveScheduleVersion, type SavedScheduleVersion } from './lib/scheduleVersionRepository';
+import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
 import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
+import { AuthGate } from './components/AuthGate';
+import { setProjectAccess } from './lib/accessRepository';
+import { loadMediumWindowState, loadPublishedMediumPlan, saveMediumWindowState, savePublishedMediumPlan } from './lib/mediumPlanRepository';
+import { loadShortTermState } from './lib/shortTermRepository';
+import { loadWorkspace } from './lib/workspaceRepository';
+import { createClimateCity, deleteClimateCity, loadClimateCities, replaceClimateRecords, type ClimateCity, type ClimateImportRow } from './lib/climateRepository';
 import type { CalendarEvent, Page, Project, ScheduleDependency, Task } from './types';
 import './styles.css';
 
@@ -35,14 +47,18 @@ const zoomPx: Record<number, number> = {
   7: 24
 };
 
-function App() {
+function App({ userId }: { userId: string }) {
   const [collapsed, setCollapsed] = useState(true);
   const [page, setPage] = useState<Page>('projects');
-  const [projectList, setProjectList] = useState<Project[]>(projects);
-  const [project, setProject] = useState<Project>(projects[0]);
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [projectList, setProjectList] = useState<Project[]>([]);
+  const [project, setProject] = useState<Project | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [latestMediumTasks, setLatestMediumTasks] = useState<Task[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
+  const [workspaceError, setWorkspaceError] = useState('');
+  const [workspaceReload, setWorkspaceReload] = useState(0);
+  const [creatingFirstProject, setCreatingFirstProject] = useState(false);
 
   // Interceptação do modo WhatsApp / Apontamento de Equipe de Campo
   const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
@@ -59,6 +75,114 @@ function App() {
         teamName={urlTeamName} 
         weekStartDate={urlWeekStartDate} 
       />
+    );
+  }
+
+  useEffect(() => {
+    let active = true;
+    setWorkspaceLoaded(false);
+    setWorkspaceError('');
+    const timeout = new Promise<never>((_, reject) => {
+      window.setTimeout(() => reject(new Error('Tempo limite excedido ao conectar com o Supabase. Verifique a conexão e tente novamente.')), 30000);
+    });
+    void Promise.race([loadWorkspace(userId), timeout])
+      .then((workspace) => {
+        if (!active) return;
+        if (workspace?.projects?.length) {
+          setProjectList(workspace.projects);
+          setProject(workspace.projects[0]);
+        } else {
+          setProjectList([]);
+          setProject(null);
+        }
+        setTasks(workspace?.tasks?.length ? workspace.tasks : []);
+        setCalendarEvents(workspace?.calendarEvents ?? []);
+        setWorkspaceLoaded(true);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setProjectList([]);
+        setProject(null);
+        setTasks([]);
+        const supabaseError = error as { message?: string; details?: string; hint?: string; code?: string } | null;
+        const detail = [
+          supabaseError?.message,
+          supabaseError?.details,
+          supabaseError?.hint,
+          supabaseError?.code ? `Código: ${supabaseError.code}` : ''
+        ].filter(Boolean).join(' · ');
+        setWorkspaceError(detail || 'Não foi possível carregar o workspace.');
+        setWorkspaceLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [workspaceReload, userId]);
+
+  useEffect(() => {
+    if (!workspaceLoaded || !project) return;
+    let active = true;
+    void loadPublishedMediumPlan(project.id)
+      .then((published) => {
+        if (!active || !published?.length) return;
+        setLatestMediumTasks(published);
+      })
+      .catch(() => {
+        if (active) setLatestMediumTasks([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [project, workspaceLoaded]);
+
+  async function handleMediumPublish(published: Task[]) {
+    if (!project) return;
+    setLatestMediumTasks(published);
+    try {
+      await savePublishedMediumPlan(project.id, published);
+    } catch {
+      // Mantém o fluxo local mesmo se o snapshot persistido falhar.
+    }
+  }
+
+  if (!workspaceLoaded) {
+    return <div className="app"><main className="page"><p>Carregando workspace do Supabase...</p></main></div>;
+  }
+
+  async function handleCreateProject(created: Project) {
+    setCreatingFirstProject(true);
+    try {
+      await saveProject(created);
+      await setProjectAccess(userId, created.id, true);
+      setProjectList((current) => [...current, created]);
+      setProject(created);
+      setPage('projects');
+      setWorkspaceError('');
+    } finally {
+      setCreatingFirstProject(false);
+    }
+  }
+
+  if (workspaceError || !project) {
+    return (
+      <div className="app">
+        <main className="page">
+          <section className="panel" style={{ maxWidth: 720, margin: '48px auto' }}>
+            <h2>{workspaceError ? 'Não foi possível conectar ao Supabase' : 'Nenhum projeto encontrado'}</h2>
+            {workspaceError ? (
+              <>
+                <p>{workspaceError}</p>
+                <button className="primary" onClick={() => setWorkspaceReload((value) => value + 1)}>Tentar novamente</button>
+              </>
+            ) : (
+              <>
+                <p>A conexão está pronta. Cadastre a primeira obra para começar.</p>
+                <ProjectForm onSubmit={handleCreateProject} submitting={creatingFirstProject} />
+              </>
+            )}
+          </section>
+        </main>
+      </div>
     );
   }
 
@@ -82,7 +206,10 @@ function App() {
             <strong>{project.name}</strong>
             <span>{project.address}</span>
           </div>
-          <b className="pill">{isSupabaseConfigured ? 'Supabase conectado' : 'Modo demo local'}</b>
+          <div className="topbar-session">
+            <b className="pill">{isSupabaseConfigured ? 'Supabase conectado' : 'Modo demo local'}</b>
+            <button onClick={() => void supabase?.auth.signOut()}>Sair</button>
+          </div>
         </header>
 
         {page === 'projects' && (
@@ -92,23 +219,27 @@ function App() {
             onUpdate={(updated) => {
               setProjectList(projectList.map((item) => (item.id === updated.id ? updated : item)));
               if (project.id === updated.id) setProject(updated);
+              void saveProject(updated);
             }}
+            onCreate={handleCreateProject}
             onCalendar={() => setPage('globalCalendar')}
+            onClimate={() => setPage('climate')}
             onSelect={(p) => {
               setProject(p);
               setPage('dashboard');
             }}
           />
         )}
-        {page === 'globalCalendar' && <AnnualCalendar projects={projectList} title="Calendário geral" subtitle="Feriados nacionais e datas compartilhadas entre todas as obras." events={calendarEvents.filter((event) => !event.projectId)} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId), ...events])} />}
-        {page === 'workCalendar' && <AnnualCalendar projects={projectList} projectId={project.id} title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id))))} onChange={(events) => setCalendarEvents([...calendarEvents.filter((event) => event.projectId !== project.id && event.projectId), ...calendarEvents.filter((event) => !event.projectId), ...events.filter((event) => event.projectId === project.id)])} />}
+        {page === 'climate' && <ClimateData onBack={() => setPage('projects')} />}
+        {page === 'globalCalendar' && <AnnualCalendar projects={projectList} title="Calendário geral" subtitle="Feriados nacionais e datas compartilhadas entre todas as obras." events={calendarEvents.filter((event) => !event.projectId)} onChange={(events) => { const next = [...calendarEvents.filter((event) => event.projectId), ...events]; setCalendarEvents(next); void saveCalendarEvents('global', next); }} />}
+        {page === 'workCalendar' && <AnnualCalendar projects={projectList} projectId={project.id} title={`Calendário · ${project.name}`} subtitle="Rotinas, feriados e datas importantes desta obra." events={calendarEvents.filter((event) => event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id))))} onChange={(events) => { const next = [...calendarEvents.filter((event) => event.projectId !== project.id && event.projectId), ...calendarEvents.filter((event) => !event.projectId), ...events.filter((event) => event.projectId === project.id)]; setCalendarEvents(next); void saveCalendarEvents(project.id, next); }} />}
         {page === 'dashboard' && <Dashboard tasks={tasks} />}
-        {page === 'schedule' && <Schedule tasks={tasks} setTasks={setTasks} />}
-        {page === 'line' && <LineBalance tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
+        {page === 'schedule' && <Schedule projectKey={project.id} tasks={tasks} setTasks={setTasks} />}
+        {page === 'line' && <LineBalance projectKey={project.id} projectStartDate={project.startDate} plannedEndDate={project.plannedEndDate} tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'procurement' && <Procurement />}
-        {page === 'medium' && <MediumPlan tasks={tasks} onPublish={setLatestMediumTasks} />}
-        {page === 'short' && <ShortTerm tasks={latestMediumTasks.length ? latestMediumTasks : tasks} projectId={project.id} setTasks={setTasks} />}
-        {page === 'financial' && <Financial tasks={tasks} />}
+        {page === 'medium' && <MediumPlan tasks={tasks} projectId={project.id} onPublish={handleMediumPublish} />}
+        {page === 'short' && <ShortTerm tasks={latestMediumTasks.length ? latestMediumTasks : tasks} projectId={project.id} />}
+        {page === 'financial' && <Financial projectKey={project.id} tasks={tasks} setTasks={setTasks} />}
         {page === 'settings' && <SettingsPage />}
       </main>
     </div>
@@ -127,8 +258,58 @@ function PageHeader({ title, subtitle, children }: { title: string; subtitle: st
   );
 }
 
-function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }: { projects: Project[]; selected: Project; onSelect: (p: Project) => void; onCalendar: () => void; onUpdate: (p: Project) => void }) {
+function emptyProject(): Project {
+  const today = new Date();
+  const end = new Date(today);
+  end.setFullYear(end.getFullYear() + 2);
+  return {
+    id: crypto.randomUUID(),
+    name: '',
+    imageUrl: '',
+    address: '',
+    area: 0,
+    status: 'ativo',
+    startDate: toIsoDate(today),
+    plannedEndDate: toIsoDate(end),
+    city: '',
+    state: '',
+    ibgeCode: ''
+  };
+}
+
+function ProjectForm({ onSubmit, submitting = false }: { onSubmit: (project: Project) => void | Promise<void>; submitting?: boolean }) {
+  const [draft, setDraft] = useState<Project>(emptyProject);
+  const [error, setError] = useState('');
+  return (
+    <form className="project-form" onSubmit={async (event) => {
+      event.preventDefault();
+      setError('');
+      try {
+        await onSubmit({ ...draft, address: [draft.city, draft.state].filter(Boolean).join(' - ') });
+      } catch (caught) {
+        setError((caught as { message?: string })?.message ?? 'Não foi possível salvar o projeto.');
+      }
+    }}>
+      <label>Nome da obra<input required value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+      <div className="project-form-row">
+        <label>Cidade<input required value={draft.city ?? ''} onChange={(event) => setDraft({ ...draft, city: event.target.value })} /></label>
+        <label>UF<input required maxLength={2} value={draft.state ?? ''} onChange={(event) => setDraft({ ...draft, state: event.target.value.toUpperCase() })} /></label>
+      </div>
+      <div className="project-form-row">
+        <label>Data de início<input required type="date" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} /></label>
+        <label>Término previsto<input required type="date" value={draft.plannedEndDate} onChange={(event) => setDraft({ ...draft, plannedEndDate: event.target.value })} /></label>
+      </div>
+      <label>Área (m²)<input min="0" type="number" value={draft.area || ''} onChange={(event) => setDraft({ ...draft, area: Number(event.target.value) })} /></label>
+      {error && <p className="form-error">{error}</p>}
+      <button className="primary" type="submit" disabled={submitting}>{submitting ? 'Criando projeto...' : 'Criar projeto'}</button>
+    </form>
+  );
+}
+
+function Projects({ projects: items, selected, onSelect, onCalendar, onClimate, onUpdate, onCreate }: { projects: Project[]; selected: Project; onSelect: (p: Project) => void; onCalendar: () => void; onClimate: () => void; onUpdate: (p: Project) => void; onCreate: (p: Project) => void | Promise<void> }) {
   const [editing, setEditing] = useState<Project | null>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageError, setImageError] = useState('');
   const cityOptions = [
     { city: 'Curitiba', state: 'PR', ibge: '4106902' },
     { city: 'São Paulo', state: 'SP', ibge: '3550308' },
@@ -139,25 +320,33 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }:
   ];
   return (
     <section className="page">
-      <PageHeader title="Projetos" subtitle="Selecione uma obra para abrir o planejamento integrado.">
+      <PageHeader title="Meus projetos" subtitle="Selecione uma obra abaixo para acessar as medições e o planejamento.">
+        <button onClick={onClimate}>
+          <CloudRain size={17} /> Dados Clima
+        </button>
         <button onClick={onCalendar}>
           <CalendarRange size={17} /> Calendário
         </button>
-        <button className="primary">Novo projeto</button>
+        <button className="primary" onClick={() => setEditing(emptyProject())}>Novo projeto</button>
       </PageHeader>
       <div className="project-grid">
         {items.map((p) => (
           <article className={`project-card ${selected.id === p.id ? 'selected' : ''}`} key={p.id}>
-            <img src={p.imageUrl} />
-            <div>
-              <span className="pill">{p.status}</span>
+            <header className="project-card-header">
               <h2>{p.name}</h2>
-              <p>{p.address}</p>
-              <small>
-                {p.area.toLocaleString('pt-BR')} m² · {p.startDate} até {p.plannedEndDate}
-              </small>
-              <button onClick={() => onSelect(p)}>Selecionar</button>
-              <button
+              <span>Obra</span>
+            </header>
+            {p.imageUrl ? <img src={p.imageUrl} alt={`Foto da obra ${p.name}`} /> : (
+              <div className="project-image-placeholder"><Building2 size={38} /><span>Adicione uma foto da obra</span></div>
+            )}
+            <div className="project-card-details">
+              <p><Ruler size={17} /><strong>{p.area.toLocaleString('pt-BR')} m²</strong></p>
+              <p><Users size={17} /><span>Equipe da obra</span></p>
+              <p><MapPin size={17} /><span>{p.address || 'Endereço não informado'}</span></p>
+            </div>
+            <footer className="project-card-actions">
+              <button className="primary project-select" onClick={() => onSelect(p)}>Selecionar</button>
+              <button className="project-edit"
                 onClick={() =>
                   setEditing({
                     ...p,
@@ -168,7 +357,7 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }:
               >
                 Editar projeto
               </button>
-            </div>
+            </footer>
           </article>
         ))}
       </div>
@@ -178,16 +367,40 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }:
         </button>
         {editing && (
           <form
-            onSubmit={(event) => {
+            onSubmit={async (event) => {
               event.preventDefault();
-              onUpdate({
+              const saved = {
                 ...editing,
                 address: `${editing.city ?? ''} - ${editing.state ?? ''}`
-              });
+              };
+              if (items.some((item) => item.id === editing.id)) onUpdate(saved);
+              else await onCreate(saved);
               setEditing(null);
             }}
           >
-            <h3>Editar projeto</h3>
+            <h3>{items.some((item) => item.id === editing.id) ? 'Editar projeto' : 'Novo projeto'}</h3>
+            <label className="project-image-upload">
+              Foto da obra
+              <span className="project-upload-preview">
+                {editing.imageUrl ? <img src={editing.imageUrl} alt="Prévia da obra" /> : <><ImagePlus size={28} />Escolher imagem</>}
+              </span>
+              <input type="file" accept="image/jpeg,image/png,image/webp" disabled={uploadingImage} onChange={async (event) => {
+                const file = event.target.files?.[0];
+                if (!file) return;
+                setImageError('');
+                setUploadingImage(true);
+                try {
+                  const imageUrl = await uploadProjectImage(editing.id, file);
+                  setEditing((current) => current ? { ...current, imageUrl } : current);
+                } catch (caught) {
+                  setImageError((caught as { message?: string })?.message ?? 'Não foi possível enviar a imagem.');
+                } finally {
+                  setUploadingImage(false);
+                }
+              }} />
+              <small>{uploadingImage ? 'Enviando imagem...' : 'JPG, PNG ou WebP · máximo 5 MB'}</small>
+              {imageError && <span className="form-error">{imageError}</span>}
+            </label>
             <label>
               Nome
               <input value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} />
@@ -244,12 +457,141 @@ function Projects({ projects: items, selected, onSelect, onCalendar, onUpdate }:
               Término previsto
               <input type="date" value={editing.plannedEndDate} onChange={(e) => setEditing({ ...editing, plannedEndDate: e.target.value })} />
             </label>
-            <button className="primary" type="submit">
-              Salvar projeto
+            <button className="primary" type="submit" disabled={uploadingImage}>
+              {uploadingImage ? 'Aguarde o envio...' : 'Salvar projeto'}
             </button>
           </form>
         )}
       </aside>
+    </section>
+  );
+}
+
+function climateDate(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  }
+  if (typeof value === 'number') {
+    const parsed = XLSX.SSF.parse_date_code(value);
+    return parsed ? `${parsed.y}-${String(parsed.m).padStart(2, '0')}-${String(parsed.d).padStart(2, '0')}` : null;
+  }
+  const text = String(value ?? '').trim();
+  const br = text.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})/);
+  if (br) return `${br[3]}-${br[2].padStart(2, '0')}-${br[1].padStart(2, '0')}`;
+  const iso = text.match(/^(\d{4})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}-${iso[3].padStart(2, '0')}`;
+  return null;
+}
+
+function displayClimateDate(value: string | null) {
+  if (!value) return '—';
+  const [year, month, day] = value.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function ClimateData({ onBack }: { onBack: () => void }) {
+  const [cities, setCities] = useState<ClimateCity[]>([]);
+  const [cityName, setCityName] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busyCity, setBusyCity] = useState('');
+  const [error, setError] = useState('');
+
+  async function refresh() {
+    setLoading(true);
+    try {
+      setCities(await loadClimateCities());
+      setError('');
+    } catch (caught) {
+      setError((caught as { message?: string })?.message ?? 'Não foi possível carregar os dados climáticos.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void refresh(); }, []);
+
+  async function addCity(event: React.FormEvent) {
+    event.preventDefault();
+    if (!cityName.trim()) return;
+    try {
+      await createClimateCity(cityName);
+      setCityName('');
+      await refresh();
+    } catch (caught) {
+      setError((caught as { message?: string })?.message ?? 'Não foi possível adicionar a cidade.');
+    }
+  }
+
+  async function importFile(city: ClimateCity, file: File) {
+    setBusyCity(city.id);
+    setError('');
+    try {
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: null, raw: true });
+      if (!rawRows.length) throw new Error('A planilha não contém registros.');
+      const dateColumn = Object.keys(rawRows[0]).find((key) => key.trim().toLocaleLowerCase('pt-BR') === 'data');
+      if (!dateColumn) throw new Error('A coluna "Data" não foi encontrada na primeira linha da planilha.');
+      const rows: ClimateImportRow[] = rawRows.map((row) => ({
+        observationDate: climateDate(row[dateColumn]),
+        data: row
+      })).filter((row): row is ClimateImportRow => Boolean(row.observationDate));
+      if (!rows.length) throw new Error('Nenhuma data válida foi encontrada na coluna "Data".');
+      await replaceClimateRecords(city.id, rows);
+      await refresh();
+    } catch (caught) {
+      setError((caught as { message?: string })?.message ?? 'Não foi possível importar a planilha.');
+    } finally {
+      setBusyCity('');
+    }
+  }
+
+  return (
+    <section className="page climate-page">
+      <PageHeader title="Dados Clima" subtitle="Cadastre cidades e mantenha o histórico climático importado por Excel.">
+        <button onClick={onBack}><ChevronLeft size={17} /> Meus projetos</button>
+      </PageHeader>
+      <form className="climate-add" onSubmit={(event) => void addCity(event)}>
+        <label>Nova cidade<input placeholder="Ex.: Curitiba" value={cityName} onChange={(event) => setCityName(event.target.value)} /></label>
+        <button className="primary" type="submit" disabled={!cityName.trim()}><Plus size={17} /> Adicionar linha</button>
+      </form>
+      {error && <p className="form-error climate-error">{error}</p>}
+      <div className="card climate-table-wrap">
+        <table className="climate-table">
+          <thead><tr><th>Cidade</th><th>Início Banco</th><th>Término Banco</th><th>Registros</th><th>Ações</th></tr></thead>
+          <tbody>
+            {cities.map((city) => (
+              <tr key={city.id}>
+                <td><strong>{city.name}</strong></td>
+                <td>{displayClimateDate(city.startDate)}</td>
+                <td>{displayClimateDate(city.endDate)}</td>
+                <td>{city.recordCount.toLocaleString('pt-BR')}</td>
+                <td className="climate-actions">
+                  <label className={`file-button ${busyCity === city.id ? 'disabled' : ''}`}>
+                    <Upload size={16} /> {busyCity === city.id ? 'Importando...' : 'Importar'}
+                    <input type="file" accept=".xlsx,.xls,.csv" disabled={Boolean(busyCity)} onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void importFile(city, file);
+                      event.target.value = '';
+                    }} />
+                  </label>
+                  <button className="danger-button" disabled={Boolean(busyCity)} onClick={async () => {
+                    if (!window.confirm(`Excluir ${city.name} e todos os seus dados climáticos?`)) return;
+                    try {
+                      await deleteClimateCity(city.id);
+                      await refresh();
+                    } catch (caught) {
+                      setError((caught as { message?: string })?.message ?? 'Não foi possível excluir a cidade.');
+                    }
+                  }}><Trash2 size={16} /> Excluir</button>
+                </td>
+              </tr>
+            ))}
+            {!loading && !cities.length && <tr><td colSpan={5} className="climate-empty">Nenhuma cidade cadastrada.</td></tr>}
+            {loading && <tr><td colSpan={5} className="climate-empty">Carregando...</td></tr>}
+          </tbody>
+        </table>
+      </div>
     </section>
   );
 }
@@ -534,13 +876,88 @@ const importFields: Array<{
   }
 ];
 
-function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
+function Schedule({ projectKey, tasks, setTasks }: { projectKey: string; tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
   const [importData, setImportData] = useState<{
     fileName: string;
     rows: unknown[][];
     headerRow: number;
   } | null>(null);
   const [mapping, setMapping] = useState<Partial<Record<ImportField, number>>>({});
+  const [savedVersions, setSavedVersions] = useState<SavedScheduleVersion[]>([]);
+  const [versionMessage, setVersionMessage] = useState('');
+  const [clearingBudget, setClearingBudget] = useState(false);
+
+  async function refreshVersions() {
+    try {
+      setSavedVersions(await loadScheduleVersions(projectKey));
+      setVersionMessage('');
+    } catch (error) {
+      setVersionMessage((error as Error).message);
+    }
+  }
+  useEffect(() => { void refreshVersions(); }, [projectKey]);
+
+  async function createCopy() {
+    await createScheduleVersion(projectKey, `Cronograma V${String(savedVersions.length + 1).padStart(2, '0')}`, tasks, savedVersions.length === 0);
+    await refreshVersions();
+  }
+  async function chooseVersion(version: SavedScheduleVersion, field: 'is_active' | 'is_baseline') {
+    await selectScheduleVersion(projectKey, version.id, field);
+    if (field === 'is_active') {
+      const snapshot = version.tasks.map((task) => ({ ...task }));
+      setTasks(snapshot);
+      await saveScheduleTasks(projectKey, snapshot);
+    }
+    await refreshVersions();
+  }
+  async function removeVersion(version: SavedScheduleVersion) {
+    const remaining = savedVersions.filter((item) => item.id !== version.id);
+    const deletingLast = remaining.length === 0;
+    const deletingActive = version.isActive;
+    const warning = deletingLast
+      ? `Excluir "${version.name}" vai limpar o cronograma deste projeto.\n\nRiscos:\n- todas as atividades importadas serão removidas;\n- telas que dependem do cronograma podem ficar sem base até uma nova importação;\n- esta ação não pode ser desfeita por esta tela.\n\nDeseja continuar?`
+      : deletingActive
+        ? `Excluir "${version.name}" vai remover a versão ativa. A próxima versão salva será definida como ativa e substituirá as atividades atuais do cronograma.\n\nDeseja continuar?`
+        : `Excluir "${version.name}"?`;
+    if (!window.confirm(warning)) return;
+    setVersionMessage(deletingLast ? 'Limpando cronograma do projeto...' : 'Excluindo versão...');
+    try {
+      await deleteScheduleVersion(projectKey, version.id);
+      if (deletingLast) {
+        await saveScheduleTasks(projectKey, []);
+        setTasks([]);
+      } else if (deletingActive) {
+        const nextActive = remaining[0];
+        await selectScheduleVersion(projectKey, nextActive.id, 'is_active');
+        const snapshot = nextActive.tasks.map((task) => ({ ...task }));
+        await saveScheduleTasks(projectKey, snapshot);
+        setTasks(snapshot);
+      }
+      await refreshVersions();
+      setVersionMessage(deletingLast ? 'Cronograma removido. Importe uma nova planilha para recomeçar.' : 'Versão excluída.');
+    } catch (error) {
+      setVersionMessage(`Não foi possível excluir a versão: ${(error as Error).message}`);
+    }
+  }
+  async function clearScheduleBudget() {
+    if (!tasks.length || clearingBudget) return;
+    if (!window.confirm('Limpar o orçamento importado do cronograma? As atividades, datas e dependências serão mantidas.')) return;
+    const cleaned = tasks.map((task) => ({ ...task, cost: undefined }));
+    setClearingBudget(true);
+    setVersionMessage('Limpando orçamento do cronograma...');
+    try {
+      await deleteProjectBudget(projectKey);
+      await saveScheduleTasks(projectKey, cleaned);
+      await updateActiveScheduleVersion(projectKey, cleaned);
+      setTasks(cleaned);
+      await refreshVersions();
+      setVersionMessage('Orçamento limpo. Você já pode recomeçar a importação.');
+    } catch (error) {
+      setVersionMessage(`Não foi possível limpar o orçamento: ${(error as Error).message}`);
+    } finally {
+      setClearingBudget(false);
+    }
+  }
 
   async function readFile(file: File) {
     const buffer = await file.arrayBuffer();
@@ -569,7 +986,7 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
     setImportData({ ...importData, headerRow });
     setMapping(detectMapping(importData.rows[headerRow - 1] ?? []));
   }
-  function importSchedule() {
+  async function importSchedule() {
     if (!importData) return;
     const missing = importFields.filter((field) => field.required && mapping[field.key] === undefined);
     if (missing.length) return;
@@ -582,7 +999,12 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
     const splitIds = (input: unknown) =>
       String(input ?? '')
         .split(/[;,]/)
-        .map((item) => item.trim())
+        .map((item) =>
+          item
+            .trim()
+            .replace(/\s*(FS|SS|FF|SF)\s*(?:[+-]\s*\d+\s*[a-z]*)?$/i, '')
+            .trim()
+        )
         .filter((item) => item && item !== '-');
     const parsed = importData.rows
       .slice(importData.headerRow)
@@ -615,6 +1037,7 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
       })
       .filter((task): task is Task => task !== null);
     const parents: Task[] = [];
+    const sourceToParent = new Map<string, string>();
     let currentParent: Task | null = null;
     parsed.forEach((task) => {
       const isParent = !task.service || task.service === '-';
@@ -622,14 +1045,20 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
       if (isParent) {
         currentParent = { ...task, service: undefined, services: [] };
         parents.push(currentParent);
+        sourceToParent.set(task.id, currentParent.id);
       } else if (sameContext && currentParent) {
         currentParent.services = Array.from(new Set([...(currentParent.services ?? []), task.service!]));
+        currentParent.predecessors = Array.from(new Set([...(currentParent.predecessors ?? []), ...(task.predecessors ?? [])]));
+        currentParent.successors = Array.from(new Set([...(currentParent.successors ?? []), ...(task.successors ?? [])]));
+        sourceToParent.set(task.id, currentParent.id);
       } else {
         currentParent = { ...task, services: [task.service!] };
         parents.push(currentParent);
+        sourceToParent.set(task.id, currentParent.id);
       }
     });
     const consolidated = new Map<string, Task>();
+    const parentToConsolidated = new Map<string, string>();
     parents.forEach((task) => {
       const key = `${task.lotMother}||${task.lot}||${task.packageName}`.toLocaleLowerCase('pt-BR');
       const existing = consolidated.get(key);
@@ -638,14 +1067,32 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
           ...task,
           services: [...(task.services ?? [])]
         });
+        parentToConsolidated.set(task.id, task.id);
         return;
       }
+      parentToConsolidated.set(task.id, existing.id);
       existing.services = Array.from(new Set([...(existing.services ?? []), ...(task.services ?? [])]));
       if (parseDate(task.startDate) < parseDate(existing.startDate)) existing.startDate = task.startDate;
       if (parseDate(task.endDate) > parseDate(existing.endDate)) existing.endDate = task.endDate;
       existing.duration = diffDays(parseDate(existing.startDate), parseDate(existing.endDate)) + 1;
       existing.predecessors = Array.from(new Set([...(existing.predecessors ?? []), ...(task.predecessors ?? [])]));
       existing.successors = Array.from(new Set([...(existing.successors ?? []), ...(task.successors ?? [])]));
+    });
+    const resolveImportedId = (id: string) => parentToConsolidated.get(sourceToParent.get(id) ?? id) ?? sourceToParent.get(id) ?? id;
+    consolidated.forEach((task) => {
+      task.predecessors = Array.from(new Set((task.predecessors ?? []).map(resolveImportedId))).filter((id) => id !== task.id);
+      task.successors = Array.from(new Set((task.successors ?? []).map(resolveImportedId))).filter((id) => id !== task.id);
+    });
+    const consolidatedById = new Map(Array.from(consolidated.values()).map((task) => [task.id, task]));
+    consolidated.forEach((task) => {
+      task.predecessors?.forEach((predecessorId) => {
+        const predecessor = consolidatedById.get(predecessorId);
+        if (predecessor) predecessor.successors = Array.from(new Set([...(predecessor.successors ?? []), task.id]));
+      });
+      task.successors?.forEach((successorId) => {
+        const successor = consolidatedById.get(successorId);
+        if (successor) successor.predecessors = Array.from(new Set([...(successor.predecessors ?? []), task.id]));
+      });
     });
     const palette = ['#4f46e5', '#f97316', '#0f766e', '#a855f7', '#2563eb', '#ca8a04', '#dc2626', '#059669', '#7c3aed', '#475569'];
     const packageIndexes = new Map<string, Map<string, number>>();
@@ -660,8 +1107,17 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
         lane: (index % 3) + 1
       };
     });
-    setTasks(imported);
-    setImportData(null);
+    try {
+      setVersionMessage(`Salvando ${imported.length.toLocaleString('pt-BR')} atividades consolidadas...`);
+      await saveScheduleTasks(projectKey, imported);
+      await createScheduleVersion(projectKey, `Cronograma V${String(savedVersions.length + 1).padStart(2, '0')}`, imported, savedVersions.length === 0);
+      setTasks(imported);
+      setImportData(null);
+      await refreshVersions();
+      setVersionMessage(`${parsed.length.toLocaleString('pt-BR')} linhas válidas processadas em ${imported.length.toLocaleString('pt-BR')} atividades consolidadas.`);
+    } catch (error) {
+      setVersionMessage(`A importação não foi concluída: ${(error as Error).message}`);
+    }
   }
 
   return (
@@ -671,30 +1127,79 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
           Importar XLSX/CSV
           <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => e.target.files?.[0] && readFile(e.target.files[0])} />
         </label>
-        <button>Criar cópia</button>
-        <button>Linha de base</button>
+        <button className="danger-button" disabled={!tasks.some((task) => task.cost != null) || clearingBudget} onClick={() => void clearScheduleBudget()}>
+          <Trash2 size={16} /> {clearingBudget ? 'Limpando...' : 'Limpar orçamento'}
+        </button>
+        <button onClick={() => void createCopy()}>Criar cópia</button>
       </PageHeader>
-      <div className="card table-wrap">
+      <div className="card">
+        <h3>Versões salvas</h3>
+        {versionMessage && <p className="form-error">{versionMessage}</p>}
+        {!savedVersions.length && <p>Nenhuma versão salva.</p>}
+        <div className="version-list">
+          {savedVersions.map((version) => (
+            <div className="version-row" key={version.id}>
+              <div><strong>{version.name}</strong><small>{new Date(version.createdAt).toLocaleString('pt-BR')}</small></div>
+              <div className="actions">
+                <button className={version.isActive ? 'primary' : ''} onClick={() => void chooseVersion(version, 'is_active')}>
+                  {version.isActive ? 'Versão ativa' : 'Definir ativa'}
+                </button>
+                <button className={version.isBaseline ? 'primary' : ''} onClick={() => void chooseVersion(version, 'is_baseline')}>
+                  {version.isBaseline ? 'Linha de base' : 'Usar como linha de base'}
+                </button>
+                <button className="danger-button" onClick={() => void removeVersion(version)}>Excluir</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="card table-wrap schedule-full-table">
         <table>
           <thead>
             <tr>
+              <th>ID</th>
               <th>Lote-mãe</th>
               <th>Lote</th>
+              <th>Família</th>
               <th>Pacote</th>
+              <th>Serviço</th>
+              <th>Todos os serviços</th>
               <th>Início</th>
               <th>Fim</th>
+              <th>Duração</th>
+              <th>Quantidade</th>
+              <th>Unidade</th>
+              <th>Custo</th>
+              <th>Responsável</th>
+              <th>Predecessoras</th>
+              <th>Sucessoras</th>
               <th>Avanço</th>
+              <th>Raia</th>
+              <th>Cor</th>
             </tr>
           </thead>
           <tbody>
             {tasks.map((t) => (
               <tr key={t.id}>
+                <td>{t.id}</td>
                 <td>{t.lotMother}</td>
                 <td>{t.lot}</td>
+                <td>{t.packageFamily || '—'}</td>
                 <td>{t.packageName}</td>
+                <td>{t.service || '—'}</td>
+                <td>{Array.from(new Set([t.service, ...(t.services ?? [])].filter(Boolean))).join(', ') || '—'}</td>
                 <td>{t.startDate}</td>
                 <td>{t.endDate}</td>
+                <td>{t.duration ?? '—'}</td>
+                <td>{t.quantity ?? '—'}</td>
+                <td>{t.unit || '—'}</td>
+                <td>{t.cost != null ? t.cost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '—'}</td>
+                <td>{t.responsible || '—'}</td>
+                <td>{t.predecessors?.join(', ') || '—'}</td>
+                <td>{t.successors?.join(', ') || '—'}</td>
                 <td>{t.progress}%</td>
+                <td>{t.lane ?? '—'}</td>
+                <td><span className="schedule-color" style={{ background: t.color }} title={t.color} /> {t.color || '—'}</td>
               </tr>
             ))}
           </tbody>
@@ -747,7 +1252,7 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
                 <strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong>
                 <span>{importFields.filter((field) => field.required && mapping[field.key] === undefined).length ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para importar.'}</span>
               </div>
-              <button className="primary import-confirm" disabled={importFields.some((field) => field.required && mapping[field.key] === undefined)} onClick={importSchedule}>
+              <button className="primary import-confirm" disabled={importFields.some((field) => field.required && mapping[field.key] === undefined)} onClick={() => void importSchedule()}>
                 Importar cronograma
               </button>
             </div>
@@ -758,12 +1263,13 @@ function Schedule({ tasks, setTasks }: { tasks: Task[]; setTasks: (tasks: Task[]
   );
 }
 
-function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (tasks: Task[]) => void; holidays: CalendarEvent[] }) {
+function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setTasks, holidays }: { projectKey: string; projectStartDate: string; plannedEndDate: string; tasks: Task[]; setTasks: (tasks: Task[]) => void; holidays: CalendarEvent[] }) {
   const [zoom, setZoom] = useState(3);
   const [editMode, setEditMode] = useState(true);
   const [dependencyMode, setDependencyMode] = useState(true);
   const [showDeps, setShowDeps] = useState(true);
   const [snapWeek, setSnapWeek] = useState(false);
+  const [allowDependencyGaps, setAllowDependencyGaps] = useState(true);
   const [dependencies, setDependencies] = useState<ScheduleDependency[]>(() =>
     tasks.flatMap((task) =>
       (task.predecessors ?? []).map((from) => ({
@@ -791,7 +1297,7 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
       name: 'Cronograma inicial · V00',
       createdAt: new Date().toISOString(),
       kind: 'scenario',
-      tasks: initialTasks.map((task) => ({ ...task }))
+      tasks: tasks.map((task) => ({ ...task }))
     }
   ]);
   const [selectedVersionId, setSelectedVersionId] = useState('v00');
@@ -811,11 +1317,18 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   const [packageColors, setPackageColors] = useState<Record<string, string>>(() => Object.fromEntries(tasks.map((task) => [`${task.lotMother}||${task.packageName}`, task.color])));
   const [groupOrder, setGroupOrder] = useState<string[]>(() => Array.from(new Set(tasks.map((task) => task.lotMother))));
   const [lotOrder, setLotOrder] = useState<Record<string, string[]>>(() => Object.fromEntries(Array.from(new Set(tasks.map((task) => task.lotMother))).map((group) => [group, Array.from(new Set(tasks.filter((task) => task.lotMother === group).map((task) => task.lot)))])));
-  const [ordering, setOrdering] = useState<{
-    type: 'group' | 'lot';
-    key: string;
-    group?: string;
-  } | null>(null);
+  const [ordering, setOrdering] = useState<
+    | {
+        type: 'group';
+        group: string;
+      }
+    | {
+        type: 'lot';
+        group: string;
+        lot: string;
+      }
+    | null
+  >(null);
   const [drag, setDrag] = useState<null | {
     id: string;
     mode: 'pending' | 'move' | 'resize' | 'link';
@@ -828,6 +1341,108 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   const [linkPoint, setLinkPoint] = useState<{ x: number; y: number } | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const longPressRef = useRef<number | null>(null);
+  const lineBalanceReady = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    lineBalanceReady.current = false;
+    if (!projectKey) return;
+    void loadLineBalanceData(projectKey)
+      .then((data) => {
+        if (cancelled || !data) return;
+        if (data.settings) {
+          setZoom(data.settings.zoom ?? 3);
+          setEditMode(data.settings.editMode ?? true);
+          setDependencyMode(data.settings.dependencyMode ?? true);
+          setShowDeps(data.settings.showDeps ?? true);
+          setSnapWeek(data.settings.snapWeek ?? false);
+          setAllowDependencyGaps(data.settings.allowDependencyGaps ?? true);
+          setMonthFormat(data.settings.monthFormat ?? 'numeric');
+          setWeekFormat(data.settings.weekFormat ?? 'day');
+          setGroupLines((data.settings.groupLines as Record<string, number>) ?? {});
+          setFamilyLane((data.settings.familyLane as Record<string, number>) ?? {});
+          setPackageLanes((data.settings.packageLanes as Record<string, number>) ?? {});
+          setPackageColors((data.settings.packageColors as Record<string, string>) ?? {});
+          setGroupOrder((data.settings.groupOrder as string[]) ?? []);
+          setLotOrder((data.settings.lotOrder as Record<string, string[]>) ?? {});
+        }
+        if (data.versions?.length) {
+          setVersions(data.versions);
+          setSelectedVersionId(data.versions[0].id);
+        }
+        const taskIds = new Set(tasks.map((task) => task.id));
+        const importedDependencies: ScheduleDependency[] = tasks.flatMap((task) =>
+          (task.predecessors ?? [])
+            .filter((from) => taskIds.has(from) && from !== task.id)
+            .map((from) => ({ from, to: task.id, type: 'FS' as const }))
+        );
+        const storedDependencies = (data.dependencies ?? []).filter(
+          (dependency) => taskIds.has(dependency.from) && taskIds.has(dependency.to) && dependency.from !== dependency.to
+        );
+        const mergedDependencies = new Map<string, ScheduleDependency>();
+        [...storedDependencies, ...importedDependencies].forEach((dependency) => {
+          mergedDependencies.set(`${dependency.from}→${dependency.to}`, dependency);
+        });
+        setDependencies(Array.from(mergedDependencies.values()));
+        lineBalanceReady.current = true;
+      })
+      .catch(() => {
+        lineBalanceReady.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectKey]);
+
+  useEffect(() => {
+    if (!projectKey || !lineBalanceReady.current) return;
+    void saveLineBalanceData(projectKey, {
+      versions,
+      dependencies,
+      settings: {
+        zoom,
+        editMode,
+        dependencyMode,
+        showDeps,
+        snapWeek,
+        allowDependencyGaps,
+        monthFormat,
+        weekFormat,
+        groupLines,
+        familyLane,
+        packageLanes,
+        packageColors,
+        groupOrder,
+        lotOrder
+      }
+    });
+  }, [
+    projectKey,
+    versions,
+    dependencies,
+    zoom,
+    editMode,
+    dependencyMode,
+    showDeps,
+    snapWeek,
+    allowDependencyGaps,
+    monthFormat,
+    weekFormat,
+    groupLines,
+    familyLane,
+    packageLanes,
+    packageColors,
+    groupOrder,
+    lotOrder
+  ]);
+
+  useEffect(() => {
+    if (!projectKey || !lineBalanceReady.current) return;
+    const timer = window.setTimeout(() => {
+      void Promise.all([saveScheduleTasks(projectKey, tasks), updateActiveScheduleVersion(projectKey, tasks)]);
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [projectKey, tasks]);
 
   const taskGroups = Array.from(new Set(tasks.map((t) => t.lotMother)));
   const groups = [...groupOrder.filter((group) => taskGroups.includes(group)), ...taskGroups.filter((group) => !groupOrder.includes(group))];
@@ -855,7 +1470,6 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
       group?: string;
     }> = [];
     for (const g of groups) {
-      result.push({ type: 'group', key: g, label: g, tasks: [], height: 30 });
       const taskLots = Array.from(new Set(tasks.filter((t) => t.lotMother === g).map((t) => t.lot)));
       const lots = [...(lotOrder[g] ?? []).filter((lot) => taskLots.includes(lot)), ...taskLots.filter((lot) => !(lotOrder[g] ?? []).includes(lot))];
       for (const lot of lots) {
@@ -872,7 +1486,19 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
     return result;
   }, [tasks, groupLines, groupOrder, lotOrder]);
 
-  const width = Math.max(1300, diffDays(projectStart, chartEnd) * zoomPx[zoom] + 160);
+  const validTaskStarts = tasks.map((task) => parseDate(task.startDate)).filter((date) => !Number.isNaN(date.getTime()));
+  const validTaskEnds = tasks.map((task) => parseDate(task.endDate)).filter((date) => !Number.isNaN(date.getTime()));
+  const configuredStart = parseDate(projectStartDate);
+  const configuredEnd = parseDate(plannedEndDate);
+  const projectStart = Number.isNaN(configuredStart.getTime())
+    ? (validTaskStarts.length ? new Date(Math.min(...validTaskStarts.map((date) => date.getTime()))) : new Date())
+    : configuredStart;
+  const lastTaskEnd = validTaskEnds.length ? new Date(Math.max(...validTaskEnds.map((date) => date.getTime()))) : projectStart;
+  const chartEnd = Number.isNaN(configuredEnd.getTime()) || configuredEnd < lastTaskEnd ? lastTaskEnd : configuredEnd;
+  const chartDayCount = Math.max(1, diffDays(projectStart, chartEnd) + 1);
+  const chartWeekCount = Math.ceil(chartDayCount / 7);
+  const chartMonthCount = Math.max(1, (chartEnd.getFullYear() - projectStart.getFullYear()) * 12 + chartEnd.getMonth() - projectStart.getMonth() + 1);
+  const width = Math.max(1300, chartDayCount * zoomPx[zoom] + 160);
   const height = 90 + rows.reduce((s, r) => s + r.height, 0) + 40;
 
   function xFor(d: Date) {
@@ -886,20 +1512,36 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
   }
   function updateTask(id: string, patch: Partial<Task>) {
     const next = tasks.map((task) => (task.id === id ? { ...task, ...patch } : { ...task }));
+    const requiredStartFor = (taskId: string) => {
+      const predecessorEnds = dependencies
+        .filter((dependency) => dependency.to === taskId)
+        .map((dependency) => next.find((task) => task.id === dependency.from))
+        .filter((task): task is Task => Boolean(task))
+        .map((task) => parseDate(task.endDate));
+      if (!predecessorEnds.length) return null;
+      return addDays(new Date(Math.max(...predecessorEnds.map((date) => date.getTime()))), 1);
+    };
+    const enforceTaskStart = (task: Task, useEarliestStart = false) => {
+      const requiredStart = requiredStartFor(task.id);
+      if (!requiredStart) return false;
+      const currentStart = parseDate(task.startDate);
+      if (currentStart >= requiredStart && (!useEarliestStart || currentStart.getTime() === requiredStart.getTime())) return false;
+      const duration = diffDays(parseDate(task.startDate), parseDate(task.endDate));
+      task.startDate = toIsoDate(requiredStart);
+      task.endDate = toIsoDate(addDays(requiredStart, duration));
+      return true;
+    };
+    const editedTask = next.find((task) => task.id === id);
+    if (editedTask) enforceTaskStart(editedTask);
     const propagate = (fromId: string, visited = new Set<string>()) => {
       if (visited.has(fromId)) return;
       visited.add(fromId);
-      const predecessor = next.find((task) => task.id === fromId);
-      if (!predecessor) return;
       dependencies
         .filter((dependency) => dependency.from === fromId)
         .forEach((dependency) => {
           const successor = next.find((task) => task.id === dependency.to);
           if (!successor) return;
-          const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
-          const requiredStart = addDays(parseDate(predecessor.endDate), 1);
-          successor.startDate = toIsoDate(requiredStart);
-          successor.endDate = toIsoDate(addDays(requiredStart, duration));
+          enforceTaskStart(successor, !allowDependencyGaps);
           propagate(successor.id, visited);
         });
     };
@@ -986,7 +1628,12 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
         const successor = tasks.find((task) => task.id === drag.target);
         if (predecessor && successor) {
           const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
-          const start = addDays(parseDate(predecessor.endDate), 1);
+          const predecessorEnds = nextDependencies
+            .filter((dependency) => dependency.to === successor.id)
+            .map((dependency) => tasks.find((task) => task.id === dependency.from))
+            .filter((task): task is Task => Boolean(task))
+            .map((task) => parseDate(task.endDate).getTime());
+          const start = addDays(new Date(Math.max(...predecessorEnds)), 1);
           setTasks(
             tasks.map((task) =>
               task.id === successor.id
@@ -1018,6 +1665,16 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
     labelY += row.height;
     return { ...row, top };
   });
+  const groupLabelLayouts = Array.from(
+    labelRows.reduce((map, row) => {
+      if (!row.group) return map;
+      const current = map.get(row.group);
+      const top = current ? Math.min(current.top, row.top) : row.top;
+      const bottom = current ? Math.max(current.bottom, row.top + row.height) : row.top + row.height;
+      map.set(row.group, { top, bottom });
+      return map;
+    }, new Map<string, { top: number; bottom: number }>())
+  ).map(([group, layout]) => ({ group, top: layout.top, height: layout.bottom - layout.top }));
   const dayNames = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
   const microservices: Record<string, string> = {
     ALVENARIA: 'Marcação 20% · Elevação 80%',
@@ -1055,28 +1712,38 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
     setVersions(remaining);
     setSelectedVersionId(remaining[0].id);
   }
-  function reorderRow(target: { type: 'group' | 'lot'; key: string; group?: string }) {
-    if (!ordering || ordering.type !== target.type || ordering.key === target.key) return;
+  function reorderRow(target: { type: 'group'; group: string } | { type: 'lot'; group: string; lot: string }) {
+    if (!ordering || ordering.type !== target.type) return;
     if (ordering.type === 'group') {
+      if (target.type !== 'group' || ordering.group === target.group) return;
       const current = [...groups];
-      const from = current.indexOf(ordering.key);
-      const to = current.indexOf(target.key);
+      const from = current.indexOf(ordering.group);
+      const to = current.indexOf(target.group);
+      if (from < 0 || to < 0) return;
       current.splice(from, 1);
-      current.splice(to, 0, ordering.key);
+      current.splice(to, 0, ordering.group);
       setGroupOrder(current);
-    } else if (ordering.group && ordering.group === target.group) {
+    } else if (target.type === 'lot' && ordering.group === target.group) {
+      if (ordering.lot === target.lot) return;
       const taskLots = Array.from(new Set(tasks.filter((task) => task.lotMother === ordering.group).map((task) => task.lot)));
       const current = [...(lotOrder[ordering.group] ?? taskLots)];
       taskLots.forEach((lot) => {
         if (!current.includes(lot)) current.push(lot);
       });
-      const from = current.indexOf(ordering.key);
-      const to = current.indexOf(target.key);
+      const from = current.indexOf(ordering.lot);
+      const to = current.indexOf(target.lot);
+      if (from < 0 || to < 0) return;
       current.splice(from, 1);
-      current.splice(to, 0, ordering.key);
+      current.splice(to, 0, ordering.lot);
       setLotOrder({ ...lotOrder, [ordering.group]: current });
     }
     setOrdering(null);
+  }
+  function sortLots(group: string, direction: 'asc' | 'desc') {
+    const lots = Array.from(new Set(tasks.filter((task) => task.lotMother === group).map((task) => task.lot)));
+    const collator = new Intl.Collator('pt-BR', { numeric: true, sensitivity: 'base' });
+    const sorted = [...lots].sort((left, right) => collator.compare(left, right) * (direction === 'asc' ? 1 : -1));
+    setLotOrder({ ...lotOrder, [group]: sorted });
   }
   return (
     <section className="page">
@@ -1090,6 +1757,9 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
         </label>
         <label>
           <input type="checkbox" checked={showDeps} onChange={(e) => setShowDeps(e.target.checked)} /> mostrar dependências
+        </label>
+        <label title="Desmarque para trazer a cadeia posterior para a menor data permitida">
+          <input type="checkbox" checked={allowDependencyGaps} onChange={(e) => setAllowDependencyGaps(e.target.checked)} /> permitir folgas entre dependências
         </label>
         <label>
           <input type="checkbox" checked={snapWeek} onChange={(e) => setSnapWeek(e.target.checked)} /> encaixar por semana
@@ -1140,26 +1810,6 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
                   <option value={2}>2 linhas</option>
                   <option value={3}>3 linhas</option>
                   <option value={4}>4 linhas</option>
-                </select>
-              </label>
-            ))}
-            <h4>Linha por família</h4>
-            {families.map((f) => (
-              <label key={f}>
-                {f}
-                <select
-                  value={familyLane[f] ?? 1}
-                  onChange={(e) =>
-                    setFamilyLane({
-                      ...familyLane,
-                      [f]: Number(e.target.value)
-                    })
-                  }
-                >
-                  <option value={1}>Linha 1</option>
-                  <option value={2}>Linha 2</option>
-                  <option value={3}>Linha 3</option>
-                  <option value={4}>Linha 4</option>
                 </select>
               </label>
             ))}
@@ -1256,38 +1906,154 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
         </aside>
         <div className="chart-scroll">
           <div className="lot-labels" style={{ height }}>
-            <div className="lot-label-header">Lotes</div>
-            {labelRows.map((row) => (
+            <div className="lot-label-header">
+              <span>LM</span>
+              <b>Lotes</b>
+            </div>
+            {groupLabelLayouts.map((layout) => (
               <div
-                key={row.key}
+                key={layout.group}
                 draggable
-                className={`lot-label ${row.type} ${ordering?.key === row.key ? 'ordering' : ''}`}
-                style={{ top: row.top, height: row.height }}
+                className={`lot-mother-band ${ordering?.type === 'group' && ordering.group === layout.group ? 'ordering' : ''}`}
+                style={{ top: layout.top, height: layout.height }}
+                title={layout.group}
                 onDragStart={() =>
                   setOrdering({
-                    type: row.type,
-                    key: row.type === 'lot' ? row.label : row.key,
-                    group: row.group
+                    type: 'group',
+                    group: layout.group
                   })
                 }
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() =>
                   reorderRow({
-                    type: row.type,
-                    key: row.type === 'lot' ? row.label : row.key,
-                    group: row.group
+                    type: 'group',
+                    group: layout.group
+                  })
+                }
+                onDragEnd={() => setOrdering(null)}
+              >
+                <strong>{layout.group}</strong>
+                <span className="lot-mother-actions">
+                  <button
+                    title="Classificar lotes em ordem ascendente"
+                    draggable={false}
+                    onDragStart={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      sortLots(layout.group, 'asc');
+                    }}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    title="Classificar lotes em ordem descendente"
+                    draggable={false}
+                    onDragStart={(event) => event.preventDefault()}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      sortLots(layout.group, 'desc');
+                    }}
+                  >
+                    ↓
+                  </button>
+                </span>
+              </div>
+            ))}
+            {labelRows.map((row) => (
+              <div
+                key={row.key}
+                draggable
+                className={`lot-label ${row.type} ${ordering?.type === 'lot' && ordering.group === row.group && ordering.lot === row.label ? 'ordering' : ''}`}
+                style={{ top: row.top, height: row.height }}
+                onDragStart={() =>
+                  setOrdering({
+                    type: 'lot',
+                    group: row.group!,
+                    lot: row.label
+                  })
+                }
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={() =>
+                  reorderRow({
+                    type: 'lot',
+                    group: row.group!,
+                    lot: row.label
                   })
                 }
                 onDragEnd={() => setOrdering(null)}
               >
                 <span className="drag-grip">⠿</span>
-                {row.label}
+                <span className="lot-label-text">{row.label}</span>
+                {row.type === 'group' && (
+                  <span className="lot-sort-actions">
+                    <button
+                      title="Classificar lotes em ordem ascendente"
+                      draggable={false}
+                      onDragStart={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        sortLots(row.key, 'asc');
+                      }}
+                    >
+                      ↑
+                    </button>
+                    <button
+                      title="Classificar lotes em ordem descendente"
+                      draggable={false}
+                      onDragStart={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        sortLots(row.key, 'desc');
+                      }}
+                    >
+                      ↓
+                    </button>
+                  </span>
+                )}
               </div>
             ))}
           </div>
+          <div className="line-time-header-wrap" style={{ width }}>
+          <svg className="line-time-header" width={width} height={90} aria-hidden="true">
+            <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
+            {Array.from({ length: chartDayCount }).map((_, i) => {
+              const date = addDays(projectStart, i);
+              const x = xFor(date);
+              return (
+                <g key={`sticky-day-${i}`}>
+                  <line x1={x} x2={x} y1={66} y2={90} stroke={date.getDay() === 0 ? '#cbd5e1' : '#eef0f4'} />
+                  <text x={x + 2} y={84} fontSize={9} fill="#64748b">{dayNames[date.getDay()]}</text>
+                </g>
+              );
+            })}
+            {Array.from({ length: chartWeekCount }).map((_, i) => {
+              const date = addDays(projectStart, i * 7);
+              const weekEnd = addDays(date, 6);
+              const format = (value: Date) => weekFormat === 'day'
+                ? value.toLocaleDateString('pt-BR', { day: '2-digit' })
+                : value.toLocaleDateString('pt-BR', weekFormat === 'numeric' ? { day: '2-digit', month: '2-digit' } : { day: '2-digit', month: 'short' });
+              return (
+                <g key={`sticky-week-${i}`}>
+                  <line x1={xFor(date)} x2={xFor(date)} y1={38} y2={90} stroke="#d9dde6" />
+                  <text x={xFor(date) + 3} y={59} fontSize={10}>{format(date)}–{format(weekEnd)}</text>
+                </g>
+              );
+            })}
+            {Array.from({ length: chartMonthCount }).map((_, i) => {
+              const date = new Date(projectStart.getFullYear(), projectStart.getMonth() + i, 1);
+              const label = monthFormat === 'index' ? `M${i + 1}` : date.toLocaleDateString('pt-BR', { month: '2-digit', year: '2-digit' });
+              return (
+                <g key={`sticky-month-${i}`}>
+                  <line x1={xFor(date)} x2={xFor(date)} y1={0} y2={90} stroke="#aeb4c2" />
+                  <text x={xFor(date) + 4} y={24} fontSize={12} fontWeight={700}>{label}</text>
+                </g>
+              );
+            })}
+          </svg>
+          </div>
           <svg ref={svgRef} width={width} height={height} onPointerDown={closeDrawersOnEmpty} onPointerMove={onMove} onPointerUp={finishDrag} onPointerCancel={finishDrag}>
             <rect x={0} y={0} width={width} height={90} fill="#fafafa" />
-            {Array.from({ length: diffDays(projectStart, chartEnd) + 1 }).map((_, index) => {
+            {Array.from({ length: chartDayCount }).map((_, index) => {
               const date = addDays(projectStart, index);
               const iso = toIsoDate(date);
               const isWeekend = date.getDay() === 0 || date.getDay() === 6;
@@ -1299,7 +2065,7 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
                 </rect>
               );
             })}
-            {Array.from({ length: diffDays(projectStart, chartEnd) + 1 }).map((_, i) => {
+            {Array.from({ length: chartDayCount }).map((_, i) => {
               const date = addDays(projectStart, i);
               const x = xFor(date);
               return (
@@ -1311,7 +2077,7 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
                 </g>
               );
             })}
-            {Array.from({ length: 75 }).map((_, i) => {
+            {Array.from({ length: chartWeekCount }).map((_, i) => {
               const d = addDays(projectStart, i * 7);
               const weekEnd = addDays(d, 6);
               const x = xFor(d);
@@ -1328,7 +2094,7 @@ function LineBalance({ tasks, setTasks, holidays }: { tasks: Task[]; setTasks: (
                 </g>
               );
             })}
-            {Array.from({ length: 18 }).map((_, i) => {
+            {Array.from({ length: chartMonthCount }).map((_, i) => {
               const date = new Date(projectStart.getFullYear(), projectStart.getMonth() + i, 1);
               const label =
                 monthFormat === 'index'
@@ -1544,7 +2310,7 @@ function Procurement() {
   );
 }
 
-function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Task[]) => void }) {
+function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId: string; onPublish: (tasks: Task[]) => void }) {
   type Unit = {
     id: string;
     parentId?: string;
@@ -1563,9 +2329,18 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
     createdAt: string;
     tasks: Task[];
   };
+  type SavedWindow = {
+    analysisStart: string;
+    windowData: Window;
+    units: Record<string, Unit[]>;
+    backlogTaskIds?: string[];
+    savedAt: string;
+  };
   const [analysisStart, setAnalysisStart] = useState(() => tasks[0]?.startDate ?? toIsoDate(new Date()));
   const [windowData, setWindowData] = useState<Window | null>(null);
   const [units, setUnits] = useState<Record<string, Unit[]>>({});
+  const [backlogTaskIds, setBacklogTaskIds] = useState<string[]>([]);
+  const [windowsByMonth, setWindowsByMonth] = useState<Record<string, SavedWindow>>({});
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [selectedMediumTaskIds, setSelectedMediumTaskIds] = useState<string[]>([]);
   const [newUnitName, setNewUnitName] = useState('');
@@ -1597,6 +2372,9 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
   const mediumPanRef = useRef<null | { x: number; y: number; left: number; top: number }>(null);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [monthPickerStartYear, setMonthPickerStartYear] = useState(() => parseDate(tasks[0]?.startDate ?? toIsoDate(new Date())).getFullYear());
+  const [mediumWindowReady, setMediumWindowReady] = useState(false);
+  const [creatingMediumWindow, setCreatingMediumWindow] = useState(false);
+  const [draggingBacklogTaskId, setDraggingBacklogTaskId] = useState<string | null>(null);
   useEffect(() => {
     const element = mediumTimelineScrollRef.current;
     if (!element) return;
@@ -1606,6 +2384,26 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
     observer.observe(element);
     return () => observer.disconnect();
   }, [windowData]);
+  useEffect(() => {
+    let active = true;
+    setMediumWindowReady(false);
+    void loadMediumWindowState(projectId)
+      .then((state) => {
+        if (!active || !state) return;
+        if (state.analysisStart) setAnalysisStart(state.analysisStart);
+        if (state.windowData) setWindowData(state.windowData as Window);
+        if (state.units) setUnits(state.units as Record<string, Unit[]>);
+        if (state.backlogTaskIds) setBacklogTaskIds(state.backlogTaskIds);
+        if (state.windowsByMonth) setWindowsByMonth(state.windowsByMonth as Record<string, SavedWindow>);
+        if (active) setMediumWindowReady(true);
+      })
+      .catch(() => {
+        if (active) setMediumWindowReady(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, [projectId]);
   useEffect(() => {
     if (!windowData) return;
     const published = windowData.tasks.flatMap((task) =>
@@ -1625,7 +2423,25 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
       }))
     );
     onPublish(published);
-  }, [windowData, units, onPublish]);
+    if (!mediumWindowReady) return;
+    void saveMediumWindowState(projectId, {
+      analysisStart,
+      windowData,
+      units,
+      backlogTaskIds,
+      windowsByMonth
+    });
+  }, [windowData, units, backlogTaskIds, analysisStart, projectId, onPublish, mediumWindowReady, windowsByMonth]);
+  useEffect(() => {
+    if (!mediumWindowReady) return;
+    void saveMediumWindowState(projectId, {
+      analysisStart,
+      windowData,
+      units,
+      backlogTaskIds,
+      windowsByMonth
+    });
+  }, [analysisStart, windowData, units, backlogTaskIds, windowsByMonth, projectId, mediumWindowReady]);
   function threeMonthsAfter(value: string) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return toIsoDate(addDays(new Date(), 90));
     const date = parseDate(value);
@@ -1634,51 +2450,192 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
     return toIsoDate(date);
   }
   const analysisEnd = threeMonthsAfter(analysisStart);
-  const previewTasks = tasks.filter((task) => task.startDate <= analysisEnd && task.endDate >= analysisStart);
-  function createWindow() {
-    const snapshot = previewTasks
-      .map((task) => ({
-        ...task,
-        services: [...(task.services ?? [])]
-      }))
-      .sort((a, b) => `${a.lotMother}|${a.lot}|${a.packageName}`.localeCompare(`${b.lotMother}|${b.lot}|${b.packageName}`, 'pt-BR'));
-    setWindowData({
-      id: crypto.randomUUID(),
-      startDate: analysisStart,
-      endDate: analysisEnd,
-      createdAt: new Date().toISOString(),
-      tasks: snapshot
-    });
+  function monthKey(value: string) {
+    return value.slice(0, 7);
+  }
+  function previousMonthKey(value: string) {
+    const date = parseDate(`${monthKey(value)}-01`);
+    date.setMonth(date.getMonth() - 1);
+    return toIsoDate(date).slice(0, 7);
+  }
+  function rootActivityId(activityId: string) {
+    return activityId.split(':')[0];
+  }
+  const currentMonthKey = monthKey(analysisStart);
+  const previousSavedWindow = windowsByMonth[previousMonthKey(analysisStart)];
+  const currentSavedWindow = windowsByMonth[currentMonthKey];
+  const previewSourceTasks = previousSavedWindow?.windowData.tasks ?? tasks;
+  const previewTasks = previewSourceTasks.filter((task) => task.startDate <= analysisEnd && task.endDate >= analysisStart);
+  function buildRootUnits(snapshot: Task[]): Record<string, Unit[]> {
     const rootIds = new Map(snapshot.map((task) => [task.id, crypto.randomUUID()]));
     const resolveTaskId = (reference: string) => {
       if (rootIds.has(reference)) return reference;
       const numeric = reference.match(/\d+/)?.[0];
       return snapshot.find((task) => task.id === numeric || task.id.match(/\d+/)?.[0] === numeric)?.id;
     };
-    setUnits(
-      Object.fromEntries(
-        snapshot.map((task) => {
-          const predecessorUnits = (task.predecessors ?? []).map(resolveTaskId).filter((id): id is string => Boolean(id)).map((id) => rootIds.get(id)!).filter(Boolean);
-          return [
-            task.id,
-            [
-              {
-                id: rootIds.get(task.id)!,
-                name: task.lot,
-                weight: 100,
-                quantity: task.quantity ?? 0,
-                startDate: task.startDate,
-                endDate: task.endDate,
-                responsible: task.responsible ?? '',
-                predecessors: predecessorUnits
-              }
-            ]
-          ];
-        })
-      )
+    return Object.fromEntries(
+      snapshot.map((task) => {
+        const predecessorUnits = (task.predecessors ?? []).map(resolveTaskId).filter((id): id is string => Boolean(id)).map((id) => rootIds.get(id)!).filter(Boolean);
+        return [
+          task.id,
+          [
+            {
+              id: rootIds.get(task.id)!,
+              name: task.lot,
+              weight: 100,
+              quantity: task.quantity ?? 0,
+              startDate: task.startDate,
+              endDate: task.endDate,
+              responsible: task.responsible ?? '',
+              predecessors: predecessorUnits
+            }
+          ]
+        ];
+      })
     );
+  }
+  function cloneUnits(source: Record<string, Unit[]>, taskIds: Set<string>): Record<string, Unit[]> {
+    const unitIds = new Map(Object.values(source).flat().map((unit) => [unit.id, crypto.randomUUID()]));
+    return Object.fromEntries(
+      Object.entries(source)
+        .filter(([taskId]) => taskIds.has(taskId))
+        .map(([taskId, list]) => [
+          taskId,
+          list.map((unit) => ({
+            ...unit,
+            id: unitIds.get(unit.id)!,
+            parentId: unit.parentId ? unitIds.get(unit.parentId) : undefined,
+            predecessors: (unit.predecessors ?? []).map((id) => unitIds.get(id)).filter(Boolean) as string[]
+          }))
+        ])
+    );
+  }
+  function minimumFsStart(unit: Unit, allUnits: Unit[]) {
+    const predecessorEnds = (unit.predecessors ?? [])
+      .map((id) => allUnits.find((item) => item.id === id))
+      .filter((item): item is Unit => Boolean(item))
+      .map((item) => parseDate(item.endDate).getTime())
+      .filter((time) => !Number.isNaN(time));
+    return predecessorEnds.length ? addDays(new Date(Math.max(...predecessorEnds)), 1) : null;
+  }
+  function unitDependsOn(sourceId: string, targetId: string, sourceUnits = units, visited = new Set<string>()): boolean {
+    if (sourceId === targetId) return true;
+    if (visited.has(sourceId)) return false;
+    visited.add(sourceId);
+    const source = Object.values(sourceUnits).flat().find((unit) => unit.id === sourceId);
+    return (source?.predecessors ?? []).some((predecessorId) => unitDependsOn(predecessorId, targetId, sourceUnits, visited));
+  }
+  function propagateMediumUnits(sourceUnits: Record<string, Unit[]>, changedUnitIds: Set<string>) {
+    const next = Object.fromEntries(Object.entries(sourceUnits).map(([owner, list]) => [owner, list.map((unit) => ({ ...unit }))]));
+    const changed = Array.from(changedUnitIds);
+    changed.forEach((id) => {
+      const allUnits = Object.values(next).flat();
+      const unit = allUnits.find((item) => item.id === id);
+      if (!unit) return;
+      const minimumStart = minimumFsStart(unit, allUnits);
+      if (!minimumStart || parseDate(unit.startDate) >= minimumStart) return;
+      const duration = diffDays(parseDate(unit.startDate), parseDate(unit.endDate));
+      unit.startDate = toIsoDate(minimumStart);
+      unit.endDate = toIsoDate(addDays(minimumStart, duration));
+    });
+    const propagate = (sourceUnitId: string, visited = new Set<string>()) => {
+      if (visited.has(sourceUnitId)) return;
+      visited.add(sourceUnitId);
+      const allUnits = Object.values(next).flat();
+      allUnits
+        .filter((unit) => (unit.predecessors ?? []).includes(sourceUnitId))
+        .forEach((successor) => {
+          const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
+          const minimumStart = minimumFsStart(successor, allUnits);
+          if (minimumStart && parseDate(successor.startDate) < minimumStart) {
+            successor.startDate = toIsoDate(minimumStart);
+            successor.endDate = toIsoDate(addDays(minimumStart, duration));
+          }
+          propagate(successor.id, visited);
+        });
+    };
+    changed.forEach((id) => propagate(id));
+    return next;
+  }
+  async function applyShortTermCarryOver(sourceUnits: Record<string, Unit[]>) {
+    const shortState = await loadShortTermState(projectId).catch(() => null);
+    const unfinishedIds = new Set(
+      (shortState?.weekly ?? [])
+        .filter((item) => !item.finalized || (item.executedBefore ?? 0) + (item.progressThisWeek ?? 0) < (item.plannedThisWeek ?? 100))
+        .map((item) => rootActivityId(item.activityId))
+    );
+    if (!unfinishedIds.size) return { units: sourceUnits, backlogTaskIds: [] as string[] };
+    const shifted = Object.fromEntries(Object.entries(sourceUnits).map(([owner, list]) => [owner, list.map((unit) => ({ ...unit }))]));
+    const changedUnitIds = new Set<string>();
+    const delayedTaskIds = new Set<string>();
+    Object.entries(shifted).forEach(([taskId, list]) => {
+      if (!unfinishedIds.has(rootActivityId(taskId))) return;
+      list.forEach((unit) => {
+        if (unit.endDate > analysisStart) return;
+        const duration = diffDays(parseDate(unit.startDate), parseDate(unit.endDate));
+        unit.startDate = analysisStart;
+        unit.endDate = toIsoDate(addDays(parseDate(analysisStart), Math.max(0, duration)));
+        changedUnitIds.add(unit.id);
+        delayedTaskIds.add(taskId);
+      });
+    });
+    return {
+      units: changedUnitIds.size ? propagateMediumUnits(shifted, changedUnitIds) : shifted,
+      backlogTaskIds: Array.from(delayedTaskIds)
+    };
+  }
+  async function createWindow() {
+    if (currentSavedWindow) {
+      const overwrite = window.confirm(`JÃ¡ existe uma janela salva para ${currentMonthKey}. Deseja sobrescrever esse perÃ­odo?`);
+      if (!overwrite) return;
+    }
+    setCreatingMediumWindow(true);
+    try {
+      const sourceTasks = previousSavedWindow?.windowData.tasks ?? tasks;
+      const sourceUnits = previousSavedWindow?.units;
+      const snapshot = sourceTasks
+        .filter((task) => task.startDate <= analysisEnd && task.endDate >= analysisStart)
+      .map((task) => ({
+        ...task,
+        services: [...(task.services ?? [])]
+      }))
+      .sort((a, b) => `${a.lotMother}|${a.lot}|${a.packageName}`.localeCompare(`${b.lotMother}|${b.lot}|${b.packageName}`, 'pt-BR'));
+      const windowSnapshot: Window = {
+        id: crypto.randomUUID(),
+        startDate: analysisStart,
+        endDate: analysisEnd,
+        createdAt: new Date().toISOString(),
+        tasks: snapshot
+      };
+      const snapshotTaskIds = new Set(snapshot.map((task) => task.id));
+      const baseUnits = sourceUnits ? cloneUnits(sourceUnits, snapshotTaskIds) : buildRootUnits(snapshot);
+      const carryOver = previousSavedWindow ? await applyShortTermCarryOver(baseUnits) : { units: baseUnits, backlogTaskIds: [] };
+      const unitSnapshot = carryOver.units;
+      const nextBacklogTaskIds = carryOver.backlogTaskIds;
+      const savedWindow = {
+        analysisStart,
+        windowData: windowSnapshot,
+        units: unitSnapshot,
+        backlogTaskIds: nextBacklogTaskIds,
+        savedAt: new Date().toISOString()
+      };
+      const nextWindowsByMonth = { ...windowsByMonth, [currentMonthKey]: savedWindow };
+    setWindowData(windowSnapshot);
+    setUnits(unitSnapshot);
+      setBacklogTaskIds(nextBacklogTaskIds);
+      setWindowsByMonth(nextWindowsByMonth);
     setSelectedTaskId(null);
     setSelectedMediumTaskIds([]);
+    void saveMediumWindowState(projectId, {
+      analysisStart,
+        windowData: windowSnapshot,
+        units: unitSnapshot,
+        backlogTaskIds: nextBacklogTaskIds,
+        windowsByMonth: nextWindowsByMonth
+    });
+    } finally {
+      setCreatingMediumWindow(false);
+    }
   }
   function addUnit(task: Task) {
     if (!newUnitName.trim()) return;
@@ -1713,22 +2670,88 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
     setUnits({ ...units, [task.id]: distributed });
     setNewUnitName('');
   }
+  function openLotFromTask(sourceTask: Task) {
+    if (!windowData || !newUnitName.trim()) return;
+    const lotName = newUnitName.trim();
+    const sourceLotTasks = windowData.tasks.filter((task) => task.lotMother === sourceTask.lotMother && task.lot === sourceTask.lot);
+    if (!sourceLotTasks.length) return;
+    const lotExists = windowData.tasks.some((task) => task.lotMother === sourceTask.lotMother && task.lot.toLocaleLowerCase('pt-BR') === lotName.toLocaleLowerCase('pt-BR'));
+    if (lotExists) {
+      window.alert('Já existe um lote com esse nome dentro deste lote-mãe.');
+      return;
+    }
+    const sourceTaskIds = new Set(sourceLotTasks.map((task) => task.id));
+    const cloneIds = new Map<string, string>(sourceLotTasks.map((task) => [task.id, crypto.randomUUID()]));
+    const clonedTasks: Task[] = sourceLotTasks.map((task) => {
+      const mappedPredecessors = (task.predecessors ?? []).map((id) => cloneIds.get(id)).filter((id): id is string => typeof id === 'string');
+      return {
+        ...task,
+        id: cloneIds.get(task.id)!,
+        lot: lotName,
+        progress: 0,
+        predecessors: Array.from(new Set([task.id, ...mappedPredecessors])),
+        successors: []
+      };
+    });
+    const clonedUnits: Record<string, Unit[]> = Object.fromEntries(
+      sourceLotTasks.map((task) => {
+        const sourceLeaves = leafUnits(task.id);
+        const sourceEndTimes = sourceLeaves.map((unit) => parseDate(unit.endDate).getTime()).filter((time) => !Number.isNaN(time));
+        const sourceEnd = sourceEndTimes.length ? new Date(Math.max(...sourceEndTimes)) : parseDate(task.endDate);
+        const sourceStart = parseDate(task.startDate);
+        const sourceDuration = diffDays(sourceStart, parseDate(task.endDate));
+        const start = addDays(Number.isNaN(sourceEnd.getTime()) ? parseDate(task.endDate) : sourceEnd, 1);
+        return [
+          cloneIds.get(task.id)!,
+          [
+            {
+              id: crypto.randomUUID(),
+              name: lotName,
+              weight: 100,
+              quantity: task.quantity ?? 0,
+              startDate: toIsoDate(start),
+              endDate: toIsoDate(addDays(start, Math.max(0, sourceDuration))),
+              responsible: task.responsible ?? '',
+              predecessors: sourceLeaves.map((unit) => unit.id)
+            }
+          ]
+        ];
+      })
+    );
+    const lastSourceIndex = Math.max(...windowData.tasks.map((task, index) => (sourceTaskIds.has(task.id) ? index : -1)));
+    const nextTasks = [...windowData.tasks.slice(0, lastSourceIndex + 1), ...clonedTasks, ...windowData.tasks.slice(lastSourceIndex + 1)];
+    setWindowData({ ...windowData, tasks: nextTasks });
+    setUnits({ ...units, ...clonedUnits });
+    setSelectedMediumTaskIds(clonedTasks.map((task) => task.id));
+    setSelectedTaskId(clonedTasks[0]?.id ?? null);
+    setNewUnitName('');
+    setUnitParentId(null);
+  }
   function updateUnit(taskId: string, unitId: string, patch: Partial<Unit>) {
     const next = Object.fromEntries(Object.entries(units).map(([owner, list]) => [owner, list.map((unit) => ({ ...unit }))]));
     const source = next[taskId]?.find((unit) => unit.id === unitId);
     if (!source) return;
     Object.assign(source, patch);
+    const sourceMinimumStart = minimumFsStart(source, Object.values(next).flat());
+    if (sourceMinimumStart && parseDate(source.startDate) < sourceMinimumStart) {
+      const duration = diffDays(parseDate(source.startDate), parseDate(source.endDate));
+      source.startDate = toIsoDate(sourceMinimumStart);
+      source.endDate = toIsoDate(addDays(sourceMinimumStart, duration));
+    }
     const propagate = (sourceUnit: Unit, visited = new Set<string>()) => {
       if (visited.has(sourceUnit.id)) return;
       visited.add(sourceUnit.id);
+      const allUnits = Object.values(next).flat();
       Object.values(next)
         .flat()
         .filter((unit) => (unit.predecessors ?? []).includes(sourceUnit.id))
         .forEach((successor) => {
           const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
-          const start = addDays(parseDate(sourceUnit.endDate), 1);
-          successor.startDate = toIsoDate(start);
-          successor.endDate = toIsoDate(addDays(start, duration));
+          const minimumStart = minimumFsStart(successor, allUnits);
+          if (minimumStart && parseDate(successor.startDate) < minimumStart) {
+            successor.startDate = toIsoDate(minimumStart);
+            successor.endDate = toIsoDate(addDays(minimumStart, duration));
+          }
           propagate(successor, visited);
         });
     };
@@ -1801,13 +2824,15 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
     setSelectedTaskId(task.id);
     setSelectedMediumTaskIds([task.id]);
   }
-  function reorderMediumTask(targetId: string) {
-    if (!windowData || !mediumOrdering || mediumOrdering === targetId) return;
-    const next = [...windowData.tasks];
-    const from = next.findIndex((task) => task.id === mediumOrdering);
-    const to = next.findIndex((task) => task.id === targetId);
-    const [moved] = next.splice(from, 1);
-    next.splice(to, 0, moved);
+  function reorderMediumTask(targetKey: string) {
+    if (!windowData || !mediumOrdering || mediumOrdering === targetKey) return;
+    const groupKey = (task: Task) => `${task.lotMother}||${task.lot}`;
+    const moving = windowData.tasks.filter((task) => groupKey(task) === mediumOrdering);
+    if (!moving.length) return;
+    const remaining = windowData.tasks.filter((task) => groupKey(task) !== mediumOrdering);
+    const targetIndex = remaining.findIndex((task) => groupKey(task) === targetKey);
+    if (targetIndex < 0) return;
+    const next = [...remaining.slice(0, targetIndex), ...moving, ...remaining.slice(targetIndex)];
     setWindowData({ ...windowData, tasks: next });
     setMediumOrdering(null);
   }
@@ -1896,22 +2921,19 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
       const source = allUnits.find((unit) => unit.id === mediumDrag.unitId);
       const target = allUnits.find((unit) => unit.id === mediumDrag.target);
       const targetOwner = Object.entries(units).find(([, list]) => list.some((unit) => unit.id === target?.id))?.[0];
-      if (source && target && targetOwner) {
-        const duration = diffDays(parseDate(target.startDate), parseDate(target.endDate));
-        const requiredStart = addDays(parseDate(source.endDate), 1);
-        setUnits({
+      if (source && target && targetOwner && !unitDependsOn(source.id, target.id)) {
+        const withDependency = {
           ...units,
           [targetOwner]: units[targetOwner].map((unit) =>
             unit.id === target.id
               ? {
                   ...unit,
-                  predecessors: Array.from(new Set([...(unit.predecessors ?? []), source.id])),
-                  startDate: toIsoDate(requiredStart),
-                  endDate: toIsoDate(addDays(requiredStart, duration))
+                  predecessors: Array.from(new Set([...(unit.predecessors ?? []), source.id]))
                 }
               : unit
-          )
-        });
+            )
+        };
+        setUnits(propagateMediumUnits(withDependency, new Set([source.id])));
       }
     }
     setMediumDrag(null);
@@ -1934,6 +2956,49 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
     setUnits(Object.fromEntries(Object.entries(units).filter(([taskId]) => !deleting.has(taskId))));
     setSelectedMediumTaskIds([]);
     setSelectedTaskId(null);
+  }
+  function scheduleBacklogTask(taskId: string, startDate: string) {
+    if (!windowData) return;
+    const taskUnits = leafUnits(taskId);
+    const targetUnit = taskUnits[0] ?? units[taskId]?.[0];
+    if (!targetUnit) return;
+    const duration = diffDays(parseDate(targetUnit.startDate), parseDate(targetUnit.endDate));
+    const nextUnits = propagateMediumUnits(
+      {
+        ...units,
+        [taskId]: (units[taskId] ?? []).map((unit) =>
+          unit.id === targetUnit.id
+            ? {
+                ...unit,
+                startDate,
+                endDate: toIsoDate(addDays(parseDate(startDate), Math.max(0, duration)))
+              }
+            : unit
+        )
+      },
+      new Set([targetUnit.id])
+    );
+    const nextBacklogTaskIds = backlogTaskIds.filter((id) => id !== taskId);
+    const nextWindowsByMonth = {
+      ...windowsByMonth,
+      [currentMonthKey]: {
+        ...(windowsByMonth[currentMonthKey] ?? {
+          analysisStart,
+          windowData,
+          units: nextUnits,
+          savedAt: new Date().toISOString()
+        }),
+        windowData,
+        units: nextUnits,
+        backlogTaskIds: nextBacklogTaskIds,
+        savedAt: new Date().toISOString()
+      }
+    };
+    setUnits(nextUnits);
+    setBacklogTaskIds(nextBacklogTaskIds);
+    setWindowsByMonth(nextWindowsByMonth);
+    setSelectedTaskId(taskId);
+    setSelectedMediumTaskIds([taskId]);
   }
   const selectedTask = windowData?.tasks.find((task) => task.id === selectedTaskId);
   const activeUnitParentId = selectedTask ? ((units[selectedTask.id] ?? []).some((unit) => unit.id === unitParentId) ? unitParentId! : units[selectedTask.id]?.[0]?.id) : undefined;
@@ -1964,13 +3029,18 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
     const responsibleMatches = responsibleNames.join(' ').toLocaleLowerCase('pt-BR').includes(mediumResponsibleSearch.trim().toLocaleLowerCase('pt-BR'));
     return activityMatches && responsibleMatches && (!mediumOnlyUnassigned || responsibleNames.length === 0);
   });
-  const firstTaskByLot = new Map<string, string>();
-  visibleMediumTasks.forEach((task) => {
-    const key = `${task.lotMother}||${task.lot}`;
-    if (!firstTaskByLot.has(key)) firstTaskByLot.set(key, task.id);
-  });
   const maxSublotDepth = Math.max(0, ...visibleMediumTasks.flatMap((task) => leafUnits(task.id).map((unit) => unitPath(task.id, unit).length)), 0);
   const labelColumnWidth = 182 + maxSublotDepth * 145;
+  const mediumMotherImportOrder = new Map<string, number>();
+  const mediumLotImportOrder = new Map<string, number>();
+  visibleMediumTasks.forEach((task) => {
+    if (!mediumMotherImportOrder.has(task.lotMother)) mediumMotherImportOrder.set(task.lotMother, mediumMotherImportOrder.size);
+    const lotKey = `${task.lotMother}||${task.lot}`;
+    if (!mediumLotImportOrder.has(lotKey)) mediumLotImportOrder.set(lotKey, mediumLotImportOrder.size);
+  });
+  const backlogTasks = backlogTaskIds
+    .map((taskId) => windowData?.tasks.find((task) => task.id === taskId))
+    .filter((task): task is Task => Boolean(task));
   const mediumLotGroups = Array.from(
     visibleMediumTasks.reduce((map, task) => {
       const key = `${task.lotMother}||${task.lot}`;
@@ -1982,15 +3052,20 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
   )
     .map(([, group]) => group)
     .sort((a, b) => {
-      const numericCompare = (left: string, right: string, direction: 'import' | 'asc' | 'desc') => {
-        if (direction === 'import') return 0;
+      const numericCompare = (left: string, right: string, direction: 'asc' | 'desc') => {
         const leftMatch = left.match(/\d+/)?.[0];
         const rightMatch = right.match(/\d+/)?.[0];
         const comparison = leftMatch && rightMatch ? Number(leftMatch) - Number(rightMatch) : left.localeCompare(right, 'pt-BR');
         return direction === 'asc' ? comparison : -comparison;
       };
-      const mother = numericCompare(a.lotMother, b.lotMother, mediumMotherSort);
-      return mother || numericCompare(a.lot, b.lot, mediumLotSort);
+      const mother =
+        mediumMotherSort === 'import'
+          ? (mediumMotherImportOrder.get(a.lotMother) ?? 0) - (mediumMotherImportOrder.get(b.lotMother) ?? 0)
+          : numericCompare(a.lotMother, b.lotMother, mediumMotherSort);
+      if (mother) return mother;
+      return mediumLotSort === 'import'
+        ? (mediumLotImportOrder.get(a.key) ?? 0) - (mediumLotImportOrder.get(b.key) ?? 0)
+        : numericCompare(a.lot, b.lot, mediumLotSort);
     });
   const mediumRowLayout = new Map<string, { top: number; height: number }>();
   const mediumUnitLayout = new Map<string, { x: number; y: number; width: number; height: number; lane: number; truncatedStart: boolean; truncatedEnd: boolean }>();
@@ -2030,6 +3105,17 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
     });
     mediumRowTop += height;
   });
+  const mediumMotherLayouts = Array.from(
+    mediumLotGroups.reduce((map, group) => {
+      const groupLayout = mediumGroupLayout.get(group.key);
+      if (!groupLayout) return map;
+      const current = map.get(group.lotMother);
+      const top = current ? Math.min(current.top, groupLayout.top) : groupLayout.top;
+      const bottom = current ? Math.max(current.bottom, groupLayout.top + groupLayout.height) : groupLayout.top + groupLayout.height;
+      map.set(group.lotMother, { top, bottom });
+      return map;
+    }, new Map<string, { top: number; bottom: number }>())
+  ).map(([lotMother, layout]) => ({ lotMother, top: layout.top, height: layout.bottom - layout.top }));
   return (
     <section className="page medium-page">
       <PageHeader title="Médio prazo" subtitle="Janela independente de três meses para abertura e detalhamento dos lotes." />
@@ -2056,6 +3142,14 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
           <small>Atividades encontradas</small>
           <strong>{previewTasks.length}</strong>
         </div>
+        <div>
+          <small>Origem da janela</small>
+          <strong>{previousSavedWindow ? `Janela ${previousMonthKey(analysisStart)}` : 'Cronograma base'}</strong>
+        </div>
+        <div>
+          <small>Período salvo</small>
+          <strong>{currentSavedWindow ? 'Sim' : 'Não'}</strong>
+        </div>
         {windowData && (
           <>
             <label className="medium-check">
@@ -2064,8 +3158,8 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
             <button onClick={addManualActivity}>＋ Atividade livre</button>
           </>
         )}
-        <button className="primary" onClick={createWindow}>
-          {windowData ? 'Criar nova janela' : 'Filtrar e criar janela'}
+        <button className="primary" disabled={creatingMediumWindow} onClick={() => void createWindow()}>
+          {creatingMediumWindow ? 'Criando janela...' : windowData ? 'Criar nova janela' : 'Filtrar e criar janela'}
         </button>
       </div>
       {!windowData && (
@@ -2133,15 +3227,50 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
           <div
             className="medium-timeline-shell"
             style={{
-              gridTemplateColumns: `${labelColumnWidth}px minmax(0,1fr)`
+              gridTemplateColumns: `230px ${labelColumnWidth}px minmax(0,1fr)`
             }}
             onPointerDown={(event) => {
-              if (!(event.target as Element).closest('.medium-task-card,.medium-label-row,button,input,select')) {
+              if (!(event.target as Element).closest('.medium-task-card,.medium-backlog-card,.medium-label-row,.medium-mother-band,button,input,select')) {
                 setSelectedTaskId(null);
                 setSelectedMediumTaskIds([]);
               }
             }}
           >
+            <aside className="medium-backlog-column">
+              <header>
+                <small>Backlog</small>
+                <h3>Atividades atrasadas</h3>
+                <span>{backlogTasks.length} item(ns)</span>
+              </header>
+              <div className="medium-backlog-list">
+                {backlogTasks.map((task) => {
+                  const firstUnit = leafUnits(task.id)[0] ?? units[task.id]?.[0];
+                  return (
+                    <button
+                      draggable
+                      className={`medium-backlog-card ${draggingBacklogTaskId === task.id ? 'dragging' : ''}`}
+                      key={task.id}
+                      onClick={() => {
+                        setSelectedTaskId(task.id);
+                        setSelectedMediumTaskIds([task.id]);
+                      }}
+                      onDragStart={(event) => {
+                        event.dataTransfer.setData('text/plain', task.id);
+                        event.dataTransfer.effectAllowed = 'move';
+                        setDraggingBacklogTaskId(task.id);
+                      }}
+                      onDragEnd={() => setDraggingBacklogTaskId(null)}
+                    >
+                      <i style={{ background: task.color }} />
+                      <strong>{task.packageName}</strong>
+                      <span>{task.lot}</span>
+                      <small>{firstUnit ? `${parseDate(firstUnit.startDate).toLocaleDateString('pt-BR')} a ${parseDate(firstUnit.endDate).toLocaleDateString('pt-BR')}` : 'Sem data'}</small>
+                    </button>
+                  );
+                })}
+                {!backlogTasks.length && <p>Nenhuma atividade atrasada da janela anterior.</p>}
+              </div>
+            </aside>
             <div ref={mediumLabelsRef} className="medium-label-column">
               <div
                 className="medium-label-head medium-location-grid"
@@ -2155,20 +3284,32 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
                   <b key={index}>Sublote {index + 1}</b>
                 ))}
               </div>
+              {mediumMotherLayouts.map((layout) => (
+                <div
+                  className="medium-mother-band"
+                  key={layout.lotMother}
+                  style={{
+                    top: layout.top,
+                    height: layout.height
+                  }}
+                  title={layout.lotMother}
+                >
+                  {layout.lotMother}
+                </div>
+              ))}
               {mediumLotGroups.map((group) => {
                 const paths = group.tasks.flatMap((task) => leafUnits(task.id).map((unit) => unitPath(task.id, unit)));
                 return (
                 <div
                   draggable
-                  className={`medium-label-row ${mediumOrdering === group.tasks[0].id ? 'ordering' : ''}`}
+                  className={`medium-label-row ${mediumOrdering === group.key ? 'ordering' : ''}`}
                   key={group.key}
                   style={{ height: mediumGroupLayout.get(group.key)?.height ?? 116 }}
-                  onDragStart={() => setMediumOrdering(group.tasks[0].id)}
+                  onDragStart={() => setMediumOrdering(group.key)}
                   onDragOver={(event) => event.preventDefault()}
-                  onDrop={() => reorderMediumTask(group.tasks[0].id)}
+                  onDrop={() => reorderMediumTask(group.key)}
                   onDragEnd={() => setMediumOrdering(null)}
                 >
-                  <span className="medium-parent-mother">{group.lotMother}</span>
                   <span className="medium-parent-lot">⠿ {group.lot}</span>
                   <div className="medium-location-grid medium-location-line" style={{ gridTemplateColumns: `32px 150px repeat(${maxSublotDepth},145px)` }}>
                     <span />
@@ -2193,6 +3334,22 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
             <div
               ref={mediumTimelineScrollRef}
               className="medium-timeline-scroll"
+              onDragOver={(event) => {
+                if (!draggingBacklogTaskId) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+              }}
+              onDrop={(event) => {
+                const taskId = event.dataTransfer.getData('text/plain') || draggingBacklogTaskId;
+                if (!taskId || !mediumTimelineRef.current) return;
+                event.preventDefault();
+                const rect = mediumTimelineRef.current.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const dayOffset = Math.max(0, Math.round(x / dayWidth));
+                const start = toIsoDate(addDays(parseDate(windowData.startDate), dayOffset));
+                scheduleBacklogTask(taskId, start);
+                setDraggingBacklogTaskId(null);
+              }}
               onPointerDown={startMediumPan}
               onPointerMove={moveMediumPan}
               onPointerUp={finishMediumPan}
@@ -2389,26 +3546,19 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
                 ) : null;
               })}
             </div>
-            <h3>Abrir local</h3>
+            <h3>Abrir novo lote</h3>
             <p>
-              <b>{selectedTask.packageName}</b>
+              <b>{selectedTask.lot}</b>
               <br />
-              {selectedTask.lotMother} · {selectedTask.lot}
+              {selectedTask.lotMother} · copia todas as atividades deste lote e cria vínculos sucessores.
             </p>
             <div className="medium-unit-add">
               <label>
-                Abrir dentro de
-                <select value={unitParentId ?? (units[selectedTask.id] ?? [])[0]?.id ?? ''} onChange={(event) => setUnitParentId(event.target.value)}>
-                  {(units[selectedTask.id] ?? []).map((unit) => (
-                    <option value={unit.id} key={unit.id}>
-                      {unit.name}
-                    </option>
-                  ))}
-                </select>
+                Nome do novo lote
               </label>
-              <input value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Ex.: Balancim 1, Apto 101..." />
-              <button className="primary" onClick={() => addUnit(selectedTask)}>
-                Adicionar unidade
+              <input value={newUnitName} onChange={(event) => setNewUnitName(event.target.value)} placeholder="Ex.: 8º pavimento, Torre B, Frente 02..." />
+              <button className="primary" onClick={() => openLotFromTask(selectedTask)}>
+                Criar lote com mesmas atividades
               </button>
             </div>
             <div className="medium-unit-list">
@@ -2508,10 +3658,10 @@ function MediumPlan({ tasks, onPublish }: { tasks: Task[]; onPublish: (tasks: Ta
   );
 }
 
-function Financial({ tasks }: { tasks: Task[] }) {
+function LegacyFinancial({ projectKey, tasks, setTasks }: { projectKey: string; tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
   const total = tasks.reduce((s, t) => s + (t.cost ?? 0), 0);
   const done = tasks.reduce((s, t) => s + ((t.cost ?? 0) * t.progress) / 100, 0);
-  const [budgetItems] = useState(() => {
+  const [budgetItems, setBudgetItems] = useState(() => {
     const items = tasks
       .filter((task) => task.cost)
       .slice(0, 30)
@@ -2521,6 +3671,7 @@ function Financial({ tasks }: { tasks: Task[] }) {
         description: task.packageName,
         value: task.cost ?? 0
       }));
+    if (!items.length) return [];
     return items.length
       ? items
       : [
@@ -2533,6 +3684,8 @@ function Financial({ tasks }: { tasks: Task[] }) {
         ];
   });
   const [budgetId, setBudgetId] = useState<string | null>(null);
+  const [budgetRevisionName, setBudgetRevisionName] = useState('Orçamento vigente');
+  const [editingBudgetName, setEditingBudgetName] = useState(false);
   const [activityIds, setActivityIds] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [mappingOpen, setMappingOpen] = useState(false);
@@ -2543,6 +3696,15 @@ function Financial({ tasks }: { tasks: Task[] }) {
   const selectedTasks = tasks.filter((task) => activityIds.includes(task.id));
   const linkedTasks = new Set(allocations.map((item) => item.taskId));
   const visibleTasks = tasks.filter((task) => `${task.packageName} ${task.lot} ${task.lotMother}`.toLocaleLowerCase('pt-BR').includes(search.toLocaleLowerCase('pt-BR')));
+  useEffect(() => {
+    void loadBudgetRevisionName(projectKey).then(setBudgetRevisionName);
+  }, [projectKey]);
+  async function persistBudgetName() {
+    const name = budgetRevisionName.trim() || 'Orçamento vigente';
+    setBudgetRevisionName(name);
+    await saveBudgetRevisionName(projectKey, name);
+    setEditingBudgetName(false);
+  }
   function openMapping() {
     if (!selectedBudget || !selectedTasks.length) return;
     const basis = selectedTasks.map((task) => (method === 'duration' ? diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1 : method === 'quantity' ? (task.quantity ?? 0) : 1));
@@ -2570,9 +3732,32 @@ function Financial({ tasks }: { tasks: Task[] }) {
     setBudgetId(null);
     setMappingOpen(false);
   }
+  async function deleteBudget() {
+    if (!window.confirm('Excluir todo o orçamento desta obra? As atividades e datas do cronograma serão mantidas.')) return;
+    await deleteProjectBudget(projectKey);
+    setBudgetItems([]);
+    setTasks(tasks.map((task) => ({ ...task, cost: undefined })));
+    setAllocations([]);
+    setBudgetId(null);
+    setActivityIds([]);
+  }
   return (
     <section className="page financial-mapping">
       <PageHeader title="Mapeamento físico-financeiro" subtitle="Vincule a EAP orçamentária às atividades do cronograma." />
+      <div className="financial-delete-action">
+        {editingBudgetName ? (
+          <label className="budget-name-editor">
+            Nome da revisão
+            <input autoFocus value={budgetRevisionName} onChange={(event) => setBudgetRevisionName(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void persistBudgetName()} />
+            <button className="primary" onClick={() => void persistBudgetName()}>Salvar nome</button>
+          </label>
+        ) : (
+          <button onClick={() => setEditingBudgetName(true)}>Editar nome: {budgetRevisionName}</button>
+        )}
+        <button className="danger-button" onClick={() => void deleteBudget()} disabled={!budgetItems.length}>
+          <Trash2 size={16} /> Excluir orçamento
+        </button>
+      </div>
       <div className="metric-grid financial-metrics">
         <Metric label="Orçamento mapeável" value={budgetItems.reduce((sum, item) => sum + item.value, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} />
         <Metric label="Atividades" value={String(tasks.length)} />
@@ -2589,7 +3774,7 @@ function Financial({ tasks }: { tasks: Task[] }) {
         <div className="mapping-panel">
           <div className="mapping-panel-head">
             <small>ORIGEM FINANCEIRA</small>
-            <h3>EAP orçamentária</h3>
+            <h3>{budgetRevisionName}</h3>
             <span>{budgetItems.length} itens</span>
           </div>
           <div className="mapping-table-wrap">
@@ -2784,6 +3969,600 @@ function Financial({ tasks }: { tasks: Task[] }) {
   );
 }
 
+type BudgetImportField = 'level' | 'code' | 'description' | 'material' | 'labor' | 'total' | 'taskId' | 'packageName' | 'service' | 'lot' | 'part' | 'divisionType' | 'weight';
+type BudgetImportMode = 'budget' | 'links' | 'budget-links';
+type ImportReviewRow = { label: string; weight: number; found: boolean; matches: number; allocation?: BudgetAllocation };
+type ImportReviewGroup = { item: BudgetItem; rows: ImportReviewRow[]; total: number; sheetTotal: number; validCount: number };
+const IMPORT_WEIGHT_TOLERANCE = 0.01;
+const isImportReviewGroupComplete = (group: ImportReviewGroup) =>
+  group.rows.length > 0 && group.validCount === group.rows.length && Math.abs(group.total - 100) <= IMPORT_WEIGHT_TOLERANCE;
+const isImportReviewGroupImportable = (group: ImportReviewGroup) =>
+  group.validCount > 0 && group.total > 0 && (group.total <= 100 || isImportReviewGroupComplete(group));
+const budgetImportFields: Array<{ key: BudgetImportField; label: string; required: boolean; aliases: string[] }> = [
+  { key: 'level', label: 'Nível', required: false, aliases: ['nível', 'nivel'] },
+  { key: 'code', label: 'Código', required: true, aliases: ['código', 'codigo'] },
+  { key: 'description', label: 'Descrição', required: true, aliases: ['descrição', 'descricao'] },
+  { key: 'material', label: 'Material (R$)', required: false, aliases: ['material (r$)', 'material'] },
+  { key: 'labor', label: 'Mão de Obra (R$)', required: false, aliases: ['mão de obra (r$)', 'mao de obra (r$)', 'mão de obra'] },
+  { key: 'total', label: 'Custo / Total (R$)', required: true, aliases: ['custo', 'custo (r$)', 'total (r$)', 'total'] },
+  { key: 'taskId', label: 'ID da atividade', required: false, aliases: ['id da atividade', 'id atividade'] },
+  { key: 'packageName', label: 'Pacote de trabalho/tarefas', required: false, aliases: ['pacote de trabalho/tarefas', 'pacote de trabalho', 'tarefas'] },
+  { key: 'service', label: 'Serviço', required: false, aliases: ['serviço', 'servico'] },
+  { key: 'lot', label: 'Lote', required: false, aliases: ['lote'] },
+  { key: 'divisionType', label: 'Tipo de divisão', required: false, aliases: ['tipo de divisão', 'tipo de divisao'] },
+  { key: 'weight', label: 'Peso (% Item)', required: false, aliases: ['peso (% item)', 'peso', 'peso item'] }
+];
+const linkImportFields: Array<{ key: BudgetImportField; label: string; required: boolean; aliases: string[] }> = [
+  { key: 'level', label: 'Nível', required: false, aliases: ['nível', 'nivel'] },
+  { key: 'code', label: 'Código', required: true, aliases: ['código', 'codigo'] },
+  { key: 'description', label: 'Descrição', required: false, aliases: ['descrição', 'descricao'] },
+  { key: 'total', label: 'Custo', required: false, aliases: ['custo', 'custo (r$)', 'total (r$)', 'total'] },
+  { key: 'packageName', label: 'Pacote de trabalho/tarefas', required: false, aliases: ['pacote de trabalho/tarefas', 'pacote de trabalho', 'tarefas'] },
+  { key: 'service', label: 'Serviço', required: false, aliases: ['serviço', 'servico'] },
+  { key: 'lot', label: 'Lote', required: false, aliases: ['lote'] },
+  { key: 'part', label: 'Parte', required: false, aliases: ['parte', 'grupo', 'lote mãe', 'lote mae'] },
+  { key: 'weight', label: 'Peso (% Item)', required: false, aliases: ['peso (% item)', 'peso', 'peso item'] }
+];
+
+function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; setTasks: (tasks: Task[]) => void }) {
+  const [budgets, setBudgets] = useState<BudgetRevision[]>([]);
+  const [type, setType] = useState<BudgetType>('contractor');
+  const [budgetId, setBudgetId] = useState<string | null>(null);
+  const [activityIds, setActivityIds] = useState<string[]>([]);
+  const [budgetSearch, setBudgetSearch] = useState('');
+  const [activitySearch, setActivitySearch] = useState('');
+  const [editingName, setEditingName] = useState(false);
+  const [message, setMessage] = useState('');
+  const [importMode, setImportMode] = useState<BudgetImportMode>('budget');
+  const [importData, setImportData] = useState<{ fileName: string; rows: unknown[][]; headerRow: number; type: BudgetType; mode: BudgetImportMode } | null>(null);
+  const [mapping, setMapping] = useState<Partial<Record<BudgetImportField, number>>>({});
+  const [weightModalOpen, setWeightModalOpen] = useState(false);
+  const [weightMethod, setWeightMethod] = useState<'duration' | 'quantity' | 'area' | 'percentage'>('duration');
+  const [linkWeights, setLinkWeights] = useState<Record<string, number>>({});
+  const [lockedWeights, setLockedWeights] = useState<Set<string>>(new Set());
+  const [savingLinks, setSavingLinks] = useState(false);
+  const [lotAreasOpen, setLotAreasOpen] = useState(false);
+  const [lotAreas, setLotAreas] = useState<Record<string, number>>({});
+  const [savingLotAreas, setSavingLotAreas] = useState(false);
+  const [weightIssues, setWeightIssues] = useState<Array<{ code: string; description: string; total: number; linkCount: number }>>([]);
+  const [confirmAdjustedImport, setConfirmAdjustedImport] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState('');
+  const [importReview, setImportReview] = useState<ImportReviewGroup[]>([]);
+  const [reviewCode, setReviewCode] = useState('');
+  const [reviewOnlyInvalid, setReviewOnlyInvalid] = useState(false);
+  const [reviewImportError, setReviewImportError] = useState('');
+  const current = budgets.find((budget) => budget.type === type);
+  const items = current?.items ?? [];
+  const allocations = current?.allocations ?? [];
+  const selected = items.find((item) => item.id === budgetId);
+  const linkedTasks = new Set(allocations.map((item) => item.taskId));
+  const visibleItems = items.filter((item) => `${item.code} ${item.description}`.toLocaleLowerCase('pt-BR').includes(budgetSearch.toLocaleLowerCase('pt-BR')));
+  const visibleTasks = tasks.filter((task) => `${task.packageName} ${task.service ?? ''} ${task.lot} ${task.lotMother}`.toLocaleLowerCase('pt-BR').includes(activitySearch.toLocaleLowerCase('pt-BR')));
+  const itemLevel = (item: BudgetItem) => {
+    const parsed = Number(String(item.level).replace(',', '.'));
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+    return item.code.split(/[.\-\/]/).filter(Boolean).length;
+  };
+  const descendantIds = (itemId: string) => {
+    const index = items.findIndex((item) => item.id === itemId);
+    if (index < 0) return new Set<string>();
+    const level = itemLevel(items[index]);
+    const descendants = new Set<string>();
+    for (let cursor = index + 1; cursor < items.length; cursor += 1) {
+      if (itemLevel(items[cursor]) <= level) break;
+      descendants.add(items[cursor].id);
+    }
+    return descendants;
+  };
+  const directWeightByBudgetId = allocations.reduce((totals, allocation) => {
+    totals.set(allocation.budgetId, (totals.get(allocation.budgetId) ?? 0) + allocation.weight);
+    return totals;
+  }, new Map<string, number>());
+  const directlyLinkedBudgetIds = new Set(directWeightByBudgetId.keys());
+  const superiorLinkByItem = new Map<string, BudgetItem>();
+  items.forEach((item) => {
+    if (!directlyLinkedBudgetIds.has(item.id)) return;
+    descendantIds(item.id).forEach((descendantId) => {
+      if (!directlyLinkedBudgetIds.has(descendantId) && !superiorLinkByItem.has(descendantId)) superiorLinkByItem.set(descendantId, item);
+    });
+  });
+  const allVisibleTasksSelected = visibleTasks.length > 0 && visibleTasks.every((task) => activityIds.includes(task.id));
+  const displayedImportFields = importData?.mode === 'links' ? linkImportFields : budgetImportFields;
+  const visibleImportReview = reviewOnlyInvalid ? importReview.filter((group) => !isImportReviewGroupComplete(group)) : importReview;
+  const importableReviewGroups = importReview.filter(isImportReviewGroupImportable);
+  const importableReviewAllocations = importableReviewGroups.flatMap((group) =>
+    group.rows.flatMap((row) => {
+      if (!row.allocation) return [];
+      const normalization = isImportReviewGroupComplete(group) ? 100 / group.total : 1;
+      const weight = row.allocation.weight * normalization;
+      return [{ ...row.allocation, weight, value: group.item.total * weight / 100 }];
+    }));
+  const importableReviewUniqueAllocationCount = new Set(
+    importableReviewAllocations.map((allocation) => `${allocation.budgetId}\u001f${allocation.taskId}`)
+  ).size;
+
+  function toggleVisibleTasks() {
+    const visibleIds = new Set(visibleTasks.map((task) => task.id));
+    setActivityIds((currentIds) => allVisibleTasksSelected
+      ? currentIds.filter((id) => !visibleIds.has(id))
+      : Array.from(new Set([...currentIds, ...visibleIds])));
+  }
+
+  useEffect(() => {
+    loadBudgets(projectKey).then(setBudgets).catch((error) => setMessage((error as Error).message));
+  }, [projectKey]);
+
+  useEffect(() => {
+    if (!confirmAdjustedImport || !importData) return;
+    setConfirmAdjustedImport(false);
+    void confirmImport();
+  }, [confirmAdjustedImport, importData]);
+
+  function detectBudgetMapping(headers: unknown[]) {
+    const result: Partial<Record<BudgetImportField, number>> = {};
+    budgetImportFields.forEach((field) => {
+      const index = headers.findIndex((header) => field.aliases.includes(String(header).trim().toLocaleLowerCase('pt-BR')));
+      if (index >= 0) result[field.key] = index;
+    });
+    return result;
+  }
+  function detectBudgetHeaderRow(rows: unknown[][]) {
+    let bestIndex = 0;
+    let bestScore = -1;
+    rows.slice(0, 30).forEach((row, index) => {
+      const detected = detectBudgetMapping(row);
+      const score = Object.keys(detected).length;
+      if (score > bestScore) { bestIndex = index; bestScore = score; }
+    });
+    return bestIndex + 1;
+  }
+  async function readBudgetFile(file: File) {
+    if (importMode === 'links' && !current) {
+      setMessage('Importe um orçamento antes de importar somente os vínculos.');
+      return;
+    }
+    try {
+      setProcessingMessage('Lendo e analisando a planilha...');
+      const workbook = XLSX.read(await file.arrayBuffer(), { cellDates: true });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '', raw: false });
+      const headerRow = detectBudgetHeaderRow(rows);
+      setImportData({ fileName: file.name, rows, headerRow, type, mode: importMode });
+      setMapping(detectBudgetMapping(rows[headerRow - 1] ?? []));
+    } catch (error) {
+      setMessage(`Não foi possível ler a planilha: ${(error as Error).message}`);
+    } finally {
+      setProcessingMessage('');
+    }
+  }
+  const importFieldRequired = (field: typeof budgetImportFields[number], mode = importData?.mode) =>
+    field.key === 'code' || (mode !== 'links' && field.required);
+  function updateBudgetHeaderRow(value: number) {
+    if (!importData) return;
+    const headerRow = Math.max(1, value);
+    setImportData({ ...importData, headerRow });
+    setMapping(detectBudgetMapping(importData.rows[headerRow - 1] ?? []));
+  }
+  const money = (input: unknown) => {
+    if (typeof input === 'number') return input;
+    const clean = String(input ?? '').replace(/[^\d,.-]/g, '');
+    return Number(clean.includes(',') ? clean.replace(/\./g, '').replace(',', '.') : clean) || 0;
+  };
+  async function openImportReview() {
+    if (!importData || !current) return;
+    setProcessingMessage('Montando a revisão completa da importação...');
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+    try {
+      const get = (row: unknown[], key: BudgetImportField) => mapping[key] === undefined ? '' : row[mapping[key]!];
+      const text = (value: unknown) => {
+        const raw = String(value ?? '').trim();
+        if (/^(-|–|—|n\/?a|não se aplica)$/i.test(raw)) return '';
+        return raw.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+      };
+      const taskData = tasks.map((task) => ({ task, packageName: text(task.packageName), lot: text(task.lot), part: text(task.lotMother), services: [task.service, ...(task.services ?? [])].map(text) }));
+      const byPackage = new Map<string, typeof taskData>();
+      taskData.forEach((entry) => byPackage.set(entry.packageName, [...(byPackage.get(entry.packageName) ?? []), entry]));
+      const rowsByCode = new Map<string, ImportReviewRow[]>();
+      importData.rows.slice(importData.headerRow).forEach((row) => {
+        const code = String(get(row, 'code')).trim();
+        const packageName = text(get(row, 'packageName')), service = text(get(row, 'service')), lot = text(get(row, 'lot')), part = text(get(row, 'part'));
+        const candidates = (packageName ? byPackage.get(packageName) ?? [] : taskData).filter((entry) =>
+          (!service || entry.services.includes(service)) && (!lot || entry.lot === lot) && (!part || entry.part === part));
+        const label = [String(get(row, 'packageName')).trim(), String(get(row, 'service')).trim(), String(get(row, 'lot')).trim(), String(get(row, 'part')).trim()].filter((value) => value && value !== '-').join(' · ');
+        const item = current.items.find((candidate) => candidate.code === code);
+        const task = candidates.length === 1 ? candidates[0].task : undefined;
+        const rawWeight = get(row, 'weight');
+        const weight = String(rawWeight ?? '').trim() === '' ? 100 : money(rawWeight);
+        const allocation = item && task ? {
+          budgetId: item.id,
+          taskId: task.id,
+          packageName: task.packageName,
+          serviceName: task.service,
+          lotName: task.lot,
+          divisionType: 'manual' as const,
+          weight,
+          value: item.total * weight / 100
+        } : undefined;
+        rowsByCode.set(code, [...(rowsByCode.get(code) ?? []), {
+          label, weight, found: candidates.length === 1, matches: candidates.length, allocation
+        }]);
+      });
+      const review = current.items.map((item) => {
+        const related = rowsByCode.get(item.code) ?? [];
+        const valid = related.filter((row) => row.found);
+        return {
+          item, rows: related,
+          total: valid.reduce((sum, row) => sum + row.weight, 0),
+          sheetTotal: related.reduce((sum, row) => sum + row.weight, 0),
+          validCount: valid.length
+        };
+      });
+      setImportReview(review);
+      setReviewCode(review[0]?.item.code ?? '');
+      setReviewOnlyInvalid(false);
+      setReviewImportError('');
+    } finally { setProcessingMessage(''); }
+  }
+  async function importReviewedLinks() {
+    if (!importData || !current || !importableReviewAllocations.length) {
+      setReviewImportError('Não há vínculos com correspondência única e peso importável.');
+      return;
+    }
+    const invalidCount = importReview.length - importableReviewGroups.length;
+    const partialCount = importableReviewGroups.filter((group) => !isImportReviewGroupComplete(group)).length;
+    const warning = [
+      `Esta operação substituirá os ${current.allocations.length.toLocaleString('pt-BR')} vínculo(s) já existentes deste orçamento.`,
+      `${importableReviewAllocations.length.toLocaleString('pt-BR')} correspondência(s) válida(s) serão consolidadas em ${importableReviewUniqueAllocationCount.toLocaleString('pt-BR')} vínculo(s) único(s), distribuídos em ${importableReviewGroups.length.toLocaleString('pt-BR')} item(ns) da EAP.`,
+      partialCount ? `${partialCount.toLocaleString('pt-BR')} item(ns) ficará(ão) parcialmente vinculado(s).` : '',
+      invalidCount ? `${invalidCount.toLocaleString('pt-BR')} item(ns) incompleto(s) não será(ão) importado(s).` : '',
+      'Essa substituição não poderá ser desfeita. Continuar?'
+    ].filter(Boolean).join('\n\n');
+    if (!window.confirm(warning)) return;
+    const next: BudgetRevision = { ...current, allocations: importableReviewAllocations };
+    try {
+      setReviewImportError('');
+      setProcessingMessage(`Gravando ${importableReviewUniqueAllocationCount.toLocaleString('pt-BR')} vínculo(s) único(s) revisado(s)...`);
+      const storedCount = await saveBudgetAllocations(next);
+      const refreshed = await loadBudgets(projectKey);
+      setBudgets(refreshed);
+      setImportReview([]);
+      setImportData(null);
+      setBudgetId(null);
+      setMessage(`${(storedCount ?? importableReviewUniqueAllocationCount).toLocaleString('pt-BR')} vínculo(s) único(s) importado(s). Os vínculos anteriores foram substituídos.`);
+    } catch (error) {
+      const errorMessage = `A substituição não foi concluída e os vínculos anteriores foram preservados: ${(error as Error).message}`;
+      setReviewImportError(errorMessage);
+      setMessage(errorMessage);
+    } finally {
+      setProcessingMessage('');
+    }
+  }
+  async function confirmImport() {
+    setProcessingMessage('Validando a planilha e identificando as atividades...');
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 50));
+    try {
+      await performConfirmImport();
+    } finally {
+      setProcessingMessage('');
+    }
+  }
+  async function performConfirmImport() {
+    if (!importData || displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)) return;
+    const get = (row: unknown[], key: BudgetImportField) => mapping[key] === undefined ? '' : row[mapping[key]!];
+    const sourceRows = importData.rows.slice(importData.headerRow);
+    const old = budgets.find((budget) => budget.type === importData.type);
+    if (importData.mode === 'links' && !old) return setMessage('Não há orçamento ativo para receber os vínculos.');
+    const importedByCode = new Map<string, BudgetItem>();
+    if (importData.mode === 'links') old!.items.forEach((item) => importedByCode.set(item.code, item));
+    else sourceRows.forEach((row) => {
+      const code = String(get(row, 'code')).trim();
+      const description = String(get(row, 'description')).trim();
+      if (!code || !description || importedByCode.has(code)) return;
+      importedByCode.set(code, {
+        id: crypto.randomUUID(), level: String(get(row, 'level')).trim(),
+        code, description, material: money(get(row, 'material')),
+        labor: money(get(row, 'labor')), total: money(get(row, 'total'))
+      });
+    });
+    const imported = Array.from(importedByCode.values());
+    if (!imported.length) return setMessage('Nenhum item válido foi encontrado.');
+    const sameEap = old && old.items.length === imported.length && old.items.every((item, index) => item.code === imported[index]?.code);
+    if (old && !sameEap && !window.confirm('A EAP está diferente. Esta será uma nova importação e todos os vínculos atuais deste orçamento serão perdidos. Continuar?')) return;
+    // Cada versão possui seus próprios itens. Mesmo com EAP idêntica, reutilizar
+    // o UUID da versão anterior violaria a chave primária e misturaria auditorias.
+    const normalized = imported;
+    const matchText = (value: unknown) => {
+      const text = String(value ?? '').trim();
+      if (/^(-|–|—|n\/?a|não se aplica)$/i.test(text)) return '';
+      return text.toLocaleLowerCase('pt-BR')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\s+/g, ' ').trim();
+    };
+    const matchTask = (row: unknown[]) => {
+      const explicitId = String(get(row, 'taskId')).trim();
+      if (explicitId) return tasks.filter((task) => task.id === explicitId);
+      const packageName = matchText(get(row, 'packageName'));
+      const service = matchText(get(row, 'service'));
+      const lot = matchText(get(row, 'lot'));
+      const part = matchText(get(row, 'part'));
+      if (!packageName && !service && !lot && !part) return [];
+      return tasks.filter((task) =>
+        (!packageName || matchText(task.packageName) === packageName) &&
+        (!service || [task.service, ...(task.services ?? [])].some((candidate) => matchText(candidate) === service)) &&
+        (!lot || matchText(task.lot) === lot) &&
+        (!part || matchText(task.lotMother) === part)
+      );
+    };
+    const ambiguous = sourceRows.filter((row) => matchTask(row).length > 1);
+    if (ambiguous.length) return setMessage(`${ambiguous.length} linha(s) encontram mais de uma atividade. Confira Pacote, Serviço, Lote e Parte.`);
+    const itemByCode = new Map(normalized.map((item) => [item.code, item]));
+    const importedAllocations = sourceRows.flatMap((row) => {
+      const task = matchTask(row)[0];
+      const item = itemByCode.get(String(get(row, 'code')).trim());
+      if (!task || !item) return [];
+      const rawWeight = get(row, 'weight');
+      const weight = String(rawWeight ?? '').trim() === '' ? 100 : money(rawWeight);
+      const rawDivision = String(get(row, 'divisionType')).trim().toLocaleLowerCase('pt-BR');
+      const divisionType = rawDivision.includes('dura') || rawDivision.includes('tempo') ? 'duration'
+        : rawDivision.includes('quant') ? 'quantity'
+        : rawDivision.includes('área') || rawDivision.includes('area') ? 'area'
+        : rawDivision.includes('percent') || rawDivision.includes('%') ? 'percentage'
+        : rawDivision.includes('igual') ? 'equal' : 'manual';
+      return [{
+        budgetId: item.id, taskId: task.id, packageName: task.packageName, serviceName: task.service,
+        lotName: task.lot, divisionType: divisionType as 'manual' | 'equal' | 'duration' | 'quantity' | 'area' | 'percentage',
+        weight, value: item.total * weight / 100
+      }];
+    });
+    if (importData.mode === 'links' && !importedAllocations.length) return setMessage('Nenhum vínculo válido foi encontrado. Confira o código do item e a identificação da atividade.');
+    const invalidWeights = normalized.flatMap((item) => {
+      const links = importedAllocations.filter((allocation) => allocation.budgetId === item.id);
+      if (!links.length) return [];
+      const total = links.reduce((sum, allocation) => sum + allocation.weight, 0);
+      return Math.abs(total - 100) > 0.000001 ? [{ code: item.code, description: item.description, total, linkCount: links.length }] : [];
+    });
+    if (invalidWeights.length) {
+      setWeightIssues(invalidWeights);
+      return setMessage(`${invalidWeights.length} item(ns) precisam de ajuste para fechar 100%.`);
+    }
+    const next: BudgetRevision = {
+      projectKey,
+      type: importData.type,
+      name: old?.name ?? (importData.type === 'contractor' ? 'Orçamento da construtora' : 'Orçamento de financiamento'),
+      versionId: importData.mode === 'links' ? old?.versionId : undefined,
+      versionNumber: importData.mode === 'links' ? old?.versionNumber : undefined,
+      items: normalized,
+      allocations: importData.mode === 'budget' ? (sameEap ? old?.allocations ?? [] : []) : importedAllocations
+    };
+    try {
+      setProcessingMessage(`Salvando ${importedAllocations.length.toLocaleString('pt-BR')} vínculo(s)...`);
+      if (importData.mode === 'links') await saveBudgetAllocations(next);
+      else await saveBudget(next);
+      setBudgets([...budgets.filter((budget) => budget.type !== next.type), next]);
+      setType(next.type); setImportData(null); setBudgetId(null);
+      const skipped = Math.max(0, sourceRows.length - importedAllocations.length);
+      setMessage(importData.mode === 'links'
+        ? `${importedAllocations.length.toLocaleString('pt-BR')} vínculo(s) importado(s). ${skipped.toLocaleString('pt-BR')} linha(s) sem correspondência foram ignoradas.`
+        : importData.mode === 'budget-links' ? 'Orçamento e vínculos importados com sucesso.' : 'Orçamento importado com sucesso.');
+    } catch (error) { setMessage(`A importação não foi concluída: ${(error as Error).message}`); }
+    finally { setProcessingMessage(''); }
+  }
+  function applySuggestedWeightAdjustments() {
+    if (!importData || mapping.code === undefined || mapping.weight === undefined) return;
+    const rows = importData.rows.map((row) => [...row]);
+    weightIssues.forEach((issue) => {
+      const rowIndexes: number[] = [];
+      for (let index = importData.headerRow; index < rows.length; index += 1) {
+        if (String(rows[index][mapping.code!]).trim() === issue.code) rowIndexes.push(index);
+      }
+      const currentWeights = rowIndexes.map((index) => money(rows[index][mapping.weight!]));
+      const currentTotal = currentWeights.reduce((sum, value) => sum + value, 0);
+      if (!rowIndexes.length) return;
+      const adjusted = currentTotal > 0
+        ? currentWeights.map((value) => Number((value * 100 / currentTotal).toFixed(8)))
+        : currentWeights.map(() => Number((100 / rowIndexes.length).toFixed(8)));
+      const previousTotal = adjusted.slice(0, -1).reduce((sum, value) => sum + value, 0);
+      adjusted[adjusted.length - 1] = Number((100 - previousTotal).toFixed(8));
+      rowIndexes.forEach((rowIndex, index) => { rows[rowIndex][mapping.weight!] = adjusted[index]; });
+    });
+    setImportData({ ...importData, rows });
+    setWeightIssues([]);
+    setMessage('Pesos ajustados proporcionalmente.');
+    setConfirmAdjustedImport(true);
+  }
+  async function persistName(name: string) {
+    if (!current) return;
+    const next = { ...current, name: name.trim() || current.name };
+    try {
+      await saveBudget(next);
+      setBudgets(budgets.map((budget) => budget.type === type ? next : budget));
+      setEditingName(false); setMessage('Nome salvo.');
+    } catch (error) { setMessage(`Não foi possível salvar: ${(error as Error).message}`); }
+  }
+  async function removeBudget() {
+    if (!current || !window.confirm(`Excluir "${current.name}" e todos os seus vínculos?`)) return;
+    try {
+      await deleteSavedBudget(projectKey, type);
+      setBudgets(budgets.filter((budget) => budget.type !== type)); setBudgetId(null); setMessage('Orçamento excluído.');
+    } catch (error) { setMessage((error as Error).message); }
+  }
+  function exportLinks() {
+    if (!current || !allocations.length) return;
+    const itemById = new Map(items.map((item) => [item.id, item]));
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const rows = allocations.map((allocation) => {
+      const item = itemById.get(allocation.budgetId);
+      const task = taskById.get(allocation.taskId);
+      return {
+        'Nível': item?.level ?? '',
+        'Código': item?.code ?? '',
+        'Descrição': item?.description ?? '',
+        'Custo': item?.total ?? 0,
+        'Pacote de trabalho/tarefas': allocation.packageName ?? task?.packageName ?? '',
+        'Serviço': allocation.serviceName ?? task?.service ?? '',
+        'Lote': allocation.lotName ?? task?.lot ?? '',
+        'Parte': task?.lotMother ?? '',
+        'Peso (% Item)': allocation.weight
+      };
+    });
+    const sheet = XLSX.utils.json_to_sheet(rows);
+    sheet['!cols'] = [
+      { wch: 12 }, { wch: 18 }, { wch: 45 }, { wch: 16 }, { wch: 34 },
+      { wch: 30 }, { wch: 24 }, { wch: 24 }, { wch: 16 }
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, sheet, 'Vínculos');
+    const safeName = current.name.replace(/[\\/:*?"<>|]+/g, '-').trim() || 'orcamento';
+    XLSX.writeFile(workbook, `vinculos-${safeName}.xlsx`);
+    setMessage(`${rows.length} vínculo(s) exportado(s).`);
+  }
+  const groupedLots = Array.from(new Set(tasks.map((task) => task.lotMother))).sort((a, b) => a.localeCompare(b, 'pt-BR')).map((lotMother) => ({
+    lotMother,
+    lots: Array.from(new Set(tasks.filter((task) => task.lotMother === lotMother).map((task) => task.lot))).sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }))
+  }));
+  const lotAreaKey = (lotMother: string, lotName: string) => `${lotMother}\u001f${lotName}`;
+  async function openLotAreas() {
+    setLotAreasOpen(true);
+    try {
+      const saved = await loadFinancialLotAreas(projectKey);
+      setLotAreas(Object.fromEntries(saved.map((area) => [lotAreaKey(area.lotMother, area.lotName), area.projectionArea])));
+    } catch (error) { setMessage(`Não foi possível carregar as áreas: ${(error as Error).message}`); }
+  }
+  async function persistLotAreas() {
+    try {
+      setSavingLotAreas(true);
+      await saveFinancialLotAreas(projectKey, groupedLots.flatMap((group) => group.lots.map((lotName) => ({
+        lotMother: group.lotMother, lotName,
+        projectionArea: Math.max(0, lotAreas[lotAreaKey(group.lotMother, lotName)] ?? 0)
+      }))));
+      setLotAreasOpen(false); setMessage('Áreas de projeção salvas.');
+    } catch (error) { setMessage(`Não foi possível salvar as áreas: ${(error as Error).message}`); }
+    finally { setSavingLotAreas(false); }
+  }
+  function taskBasis(task: Task, method: typeof weightMethod) {
+    if (method === 'duration') return diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1;
+    if (method === 'quantity') return task.quantity ?? 0;
+    if (method === 'area') return /^(m2|m²|metro(s)? quadrado(s)?)$/i.test((task.unit ?? '').trim()) ? (task.quantity ?? 0) : 0;
+    return 1;
+  }
+  function distributeWeights(method: typeof weightMethod, locks = lockedWeights, source = linkWeights) {
+    const selectedTasks = tasks.filter((task) => activityIds.includes(task.id));
+    const lockedTotal = selectedTasks.reduce((sum, task) => sum + (locks.has(task.id) ? (source[task.id] ?? 0) : 0), 0);
+    const unlocked = selectedTasks.filter((task) => !locks.has(task.id));
+    const remaining = Math.max(0, 100 - lockedTotal);
+    const bases = unlocked.map((task) => method === 'percentage' ? 1 : taskBasis(task, method));
+    const basisTotal = bases.reduce((sum, value) => sum + value, 0);
+    const next = { ...source };
+    unlocked.forEach((task, index) => { next[task.id] = basisTotal ? remaining * bases[index] / basisTotal : remaining / Math.max(1, unlocked.length); });
+    setLinkWeights(next);
+  }
+  function openWeightModal() {
+    const selectedTasks = tasks.filter((task) => activityIds.includes(task.id));
+    const total = selectedTasks.reduce((sum, task) => sum + taskBasis(task, 'duration'), 0);
+    setLinkWeights(Object.fromEntries(selectedTasks.map((task) => [task.id, total ? taskBasis(task, 'duration') * 100 / total : 100 / selectedTasks.length])));
+    setLockedWeights(new Set()); setWeightMethod('duration'); setWeightModalOpen(true);
+  }
+  function changeManualWeight(taskId: string, value: number) {
+    const next = { ...linkWeights, [taskId]: Math.max(0, Math.min(100, value)) };
+    const locks = new Set(lockedWeights); locks.add(taskId);
+    setLockedWeights(locks); distributeWeights('percentage', locks, next);
+  }
+  async function linkSelected() {
+    if (!current || !selected || !activityIds.length || savingLinks) return;
+    const inheritedFrom = superiorLinkByItem.get(selected.id);
+    if (inheritedFrom) {
+      setMessage(`Este item já está contemplado pelo vínculo do nível superior ${inheritedFrom.code}.`);
+      return;
+    }
+    const selectedAndDescendants = new Set([selected.id, ...descendantIds(selected.id)]);
+    const next: BudgetRevision = {
+      ...current,
+      allocations: [
+        ...allocations.filter((item) => !selectedAndDescendants.has(item.budgetId)),
+        ...activityIds.map((taskId) => {
+          const task = tasks.find((candidate) => candidate.id === taskId);
+          return {
+            budgetId: selected.id, taskId, packageName: task?.packageName,
+            serviceName: task?.service, lotName: task?.lot, divisionType: weightMethod,
+            weight: linkWeights[taskId] ?? 0, value: selected.total * (linkWeights[taskId] ?? 0) / 100
+          };
+        })
+      ]
+    };
+    try {
+      setSavingLinks(true);
+      await saveBudgetAllocations(next);
+      setBudgets(budgets.map((budget) => budget.type === type ? next : budget)); setActivityIds([]); setWeightModalOpen(false); setMessage('Vínculo salvo.');
+    } catch (error) { setMessage(`Não foi possível salvar o vínculo: ${(error as Error).message}`); }
+    finally { setSavingLinks(false); }
+  }
+
+  return (
+    <section className="page financial-mapping">
+      <PageHeader title="Mapeamento físico-financeiro" subtitle="Vincule os orçamentos de despesas e financiamento às atividades do cronograma." />
+      <div className="financial-toolbar">
+        <div className="mapping-methods">
+          <button className={type === 'contractor' ? 'active' : ''} onClick={() => { setType('contractor'); setBudgetId(null); }}>Construtora · saídas</button>
+          <button className={type === 'financing' ? 'active' : ''} onClick={() => { setType('financing'); setBudgetId(null); }}>Financiamento · entradas</button>
+        </div>
+        <select className="budget-import-mode" value={importMode} onChange={(event) => setImportMode(event.target.value as BudgetImportMode)} aria-label="Tipo de importação"><option value="budget">Importar orçamento</option><option value="links">Importar vínculos</option><option value="budget-links">Importar orçamento + vínculos</option></select>
+        <label className="primary budget-upload"><Upload size={15} /> Selecionar arquivo<input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readBudgetFile(file); event.currentTarget.value = ''; }} /></label>
+        <button type="button" disabled={!current || !allocations.length} onClick={exportLinks}><Download size={15} /> Exportar vínculos</button>
+        <button type="button" disabled={!tasks.length} onClick={() => void openLotAreas()}><Settings size={15} /> Configurar pavimentos</button>
+        <button className="danger-button" disabled={!current} onClick={() => void removeBudget()}><Trash2 size={15} /> Excluir</button>
+      </div>
+      {message && <p className="financial-message">{message}</p>}
+      {!current ? <div className="card empty-state"><h3>Nenhum orçamento de {type === 'contractor' ? 'construtora' : 'financiamento'} importado</h3><p>Importe uma planilha para começar. Projetos novos permanecem sem orçamento até essa etapa.</p></div> : <>
+        <div className="financial-delete-action">
+          {editingName ? <label className="budget-name-editor">Nome <input autoFocus defaultValue={current.name} onKeyDown={(event) => { if (event.key === 'Enter') void persistName(event.currentTarget.value); }} /><button className="primary" onClick={(event) => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) void persistName(input.value); }}>Salvar nome</button></label> : <button onClick={() => setEditingName(true)}>Editar nome: {current.name}</button>}
+        </div>
+        <div className="metric-grid financial-metrics">
+          <Metric label={type === 'contractor' ? 'Total de despesas' : 'Total de entradas'} value={items.reduce((sum, item) => sum + item.total, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} />
+          <Metric label="Itens da EAP" value={String(items.length)} /><Metric label="Atividades vinculadas" value={`${linkedTasks.size}/${tasks.length}`} />
+        </div>
+        <div className="mapping-shell">
+          <div className="mapping-panel"><div className="mapping-panel-head"><small>ORÇAMENTO</small><h3>{current.name}</h3><span>{visibleItems.length} itens</span></div>
+            <label className="mapping-search"><Search size={15}/><input value={budgetSearch} onChange={(e) => setBudgetSearch(e.target.value)} placeholder="Buscar código ou descrição..." /></label>
+            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código / descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linkedWeight = directWeightByBudgetId.get(item.id) ?? 0; const linked = linkedWeight > 0; const fullyLinked = linked && Math.abs(linkedWeight - 100) <= IMPORT_WEIGHT_TOLERANCE; const superior = superiorLinkByItem.get(item.id); const status = fullyLinked ? 'Vinculado totalmente' : linked ? `Vinculado parcial (${linkedWeight.toFixed(2)}%)` : superior ? 'Vinculado no nível superior' : 'Livre'; return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => { setBudgetId(item.id); if (superior) setMessage(`Item contemplado pelo vínculo do nível superior ${superior.code}.`); }}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={fullyLinked || superior ? 'mapping-status linked' : linked ? 'mapping-status partial' : 'mapping-status'} title={superior ? `Contemplado por ${superior.code}` : linked ? `${linkedWeight.toFixed(8)}% vinculado` : undefined}>{status}</span></td></tr>; })}</tbody></table></div>
+          </div>
+          <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FÍSICA</small><h3>Cronograma da obra</h3><div className="mapping-panel-head-actions"><span>{visibleTasks.length} atividades</span><button type="button" disabled={!visibleTasks.length} onClick={toggleVisibleTasks}><CheckSquare size={15}/>{allVisibleTasksSelected ? 'Limpar seleção' : 'Selecionar todos'}</button></div></div>
+            <div className="mapping-filter-actions"><label className="mapping-search"><Search size={15}/><input value={activitySearch} onChange={(e) => setActivitySearch(e.target.value)} placeholder="Buscar atividade, serviço, lote ou grupo..." /></label>{activityIds.length > 0 && <strong>{activityIds.length} selecionada(s)</strong>}</div>
+            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Atividade</th><th>Lote</th><th>Prazo</th><th>Status</th></tr></thead><tbody>{visibleTasks.map((task) => <tr key={task.id} className={activityIds.includes(task.id) ? 'mapping-selected' : ''} onClick={() => setActivityIds((currentIds) => currentIds.includes(task.id) ? currentIds.filter((id) => id !== task.id) : [...currentIds, task.id])}><td><input type="checkbox" checked={activityIds.includes(task.id)} readOnly /></td><td><small>{task.service || task.lotMother}</small><strong>{task.packageName}</strong></td><td>{task.lot}</td><td>{diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1}d</td><td><span className={linkedTasks.has(task.id) ? 'mapping-status linked' : 'mapping-status'}>{linkedTasks.has(task.id) ? 'Vinculada' : 'Livre'}</span></td></tr>)}</tbody></table></div>
+          </div>
+        </div>
+        <div className="mapping-action"><Link2 size={18}/><div><strong>{selected?.code ?? 'Selecione um item'} · {activityIds.length} atividade(s)</strong><small>{selected && superiorLinkByItem.has(selected.id) ? `Contemplado pelo nível superior ${superiorLinkByItem.get(selected.id)?.code}.` : 'Defina o critério de ponderação antes de confirmar.'}</small></div><button className="primary" disabled={!selected || !activityIds.length || superiorLinkByItem.has(selected.id)} onClick={openWeightModal}><ArrowLeftRight size={15}/> Vincular</button></div>
+      </>}
+      {weightModalOpen && selected && <div className="mapping-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setWeightModalOpen(false)}><div className="mapping-modal"><div className="chart-drawer-head"><div><small>{selected.code}</small><h3>Ponderar vínculo</h3><span>{selected.description}</span></div><button className="drawer-close" onClick={() => setWeightModalOpen(false)}>×</button></div><div className="mapping-modal-body">
+        <div className="mapping-methods">{([['duration','Por tempo'],['quantity','Por quantidade'],['area','Por área'],['percentage','Percentual']] as const).map(([value,label]) => <button key={value} className={weightMethod === value ? 'active' : ''} onClick={() => { setWeightMethod(value); const locks = value === 'percentage' ? lockedWeights : new Set<string>(); setLockedWeights(locks); distributeWeights(value, locks); }}>{label}</button>)}</div>
+        {weightMethod === 'area' && !tasks.some((task) => activityIds.includes(task.id) && taskBasis(task, 'area') > 0) && <p className="financial-message">As atividades selecionadas não possuem quantidade com unidade de área (m²).</p>}
+        <table><thead><tr><th>Atividade / lote</th><th>Base</th><th>Peso</th><th>Valor</th></tr></thead><tbody>{tasks.filter((task) => activityIds.includes(task.id)).map((task) => <tr key={task.id}><td><small>{task.lot}</small><strong>{task.packageName}</strong></td><td>{weightMethod === 'duration' ? `${taskBasis(task, weightMethod)} dias` : weightMethod === 'area' ? `${taskBasis(task, weightMethod)} m²` : weightMethod === 'quantity' ? `${task.quantity ?? 0} ${task.unit ?? ''}` : 'Manual'}</td><td><div className="weight-lock-cell">{weightMethod === 'percentage' ? <input type="number" min="0" max="100" step=".01" value={(linkWeights[task.id] ?? 0).toFixed(2)} onChange={(e) => changeManualWeight(task.id, Number(e.target.value))}/> : <b>{(linkWeights[task.id] ?? 0).toFixed(2)}%</b>}{weightMethod === 'percentage' && <button title={lockedWeights.has(task.id) ? 'Destravar percentual' : 'Travar percentual'} onClick={() => { const locks = new Set(lockedWeights); lockedWeights.has(task.id) ? locks.delete(task.id) : locks.add(task.id); setLockedWeights(locks); distributeWeights('percentage', locks); }}>{lockedWeights.has(task.id) ? <Lock size={15}/> : <Unlock size={15}/>}</button>}</div></td><td>{(selected.total * (linkWeights[task.id] ?? 0) / 100).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</td></tr>)}</tbody></table>
+        <aside className="mapping-total"><span>Valor a distribuir</span><strong>{selected.total.toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><p>Soma dos pesos <b>{activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0).toFixed(2)}%</b></p>{Math.abs(activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0)-100) > .05 && <small>Para confirmar, a soma dos pesos deve ser 100%.</small>}<button type="button" disabled={savingLinks || Math.abs(activityIds.reduce((sum,id) => sum + (linkWeights[id] ?? 0),0)-100) > .05} onClick={() => void linkSelected()}>{savingLinks ? 'Salvando...' : 'Confirmar vínculo'}</button></aside>
+      </div></div></div>}
+      {lotAreasOpen && <div className="mapping-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setLotAreasOpen(false)}><div className="mapping-modal lot-areas-modal"><div className="chart-drawer-head"><div><small>CONFIGURAÇÃO FÍSICA</small><h3>Configurar pavimentos</h3><span>Informe a área de projeção de cada lote.</span></div><button className="drawer-close" onClick={() => setLotAreasOpen(false)}>×</button></div><div className="mapping-modal-body lot-areas-body">
+        {groupedLots.map((group) => <section className="lot-area-group" key={group.lotMother}><h4>{group.lotMother}</h4>{group.lots.map((lotName) => <label key={lotName}><span>{lotName}</span><div><input type="number" min="0" step=".01" value={lotAreas[lotAreaKey(group.lotMother, lotName)] ?? ''} onChange={(event) => setLotAreas({ ...lotAreas, [lotAreaKey(group.lotMother, lotName)]: Math.max(0, Number(event.target.value)) })}/><small>m²</small></div></label>)}</section>)}
+        <div className="lot-areas-actions"><button type="button" onClick={() => setLotAreasOpen(false)}>Cancelar</button><button type="button" className="primary" disabled={savingLotAreas} onClick={() => void persistLotAreas()}>{savingLotAreas ? 'Salvando...' : 'Salvar áreas'}</button></div>
+      </div></div></div>}
+      {weightIssues.length > 0 && <div className="mapping-modal-backdrop"><div className="mapping-modal weight-adjust-modal"><div className="chart-drawer-head"><div><small>REVISÃO DA IMPORTAÇÃO</small><h3>Ajustar pesos dos vínculos</h3><span>Os itens abaixo não fecham exatamente 100%.</span></div><button className="drawer-close" onClick={() => setWeightIssues([])}>×</button></div><div className="mapping-modal-body">
+        <p className="import-help">A sugestão mantém a proporção atual. Se a soma estiver acima de 100%, reduz os pesos; se estiver abaixo, aumenta proporcionalmente.</p>
+        <div className="mapping-table-wrap"><table><thead><tr><th>Código / descrição</th><th>Vínculos</th><th>Soma atual</th><th>Ajuste</th></tr></thead><tbody>{weightIssues.map((issue) => <tr key={issue.code}><td><small>{issue.code}</small><strong>{issue.description}</strong></td><td>{issue.linkCount}</td><td><b>{issue.total.toFixed(8)}%</b></td><td className={issue.total > 100 ? 'weight-over' : 'weight-under'}>{issue.total > 100 ? `Reduzir ${(issue.total - 100).toFixed(8)}%` : `Aumentar ${(100 - issue.total).toFixed(8)}%`}</td></tr>)}</tbody></table></div>
+        <div className="lot-areas-actions"><button type="button" onClick={() => setWeightIssues([])}>Voltar sem ajustar</button><button type="button" className="primary" onClick={applySuggestedWeightAdjustments}>Ajustar e importar vínculos</button></div>
+      </div></div></div>}
+      {importReview.length > 0 && <div className="mapping-modal-backdrop"><div className="mapping-modal import-review-modal"><div className="chart-drawer-head"><div><small>REVISÃO TOTAL</small><h3>Vínculos de todos os níveis da EAP</h3><span>A correspondência usa Pacote + Serviço + Lote. Confira os pesos antes de substituir os vínculos atuais.</span><label className="import-review-filter"><input type="checkbox" checked={reviewOnlyInvalid} onChange={(event) => { const checked = event.target.checked; setReviewOnlyInvalid(checked); if (checked) setReviewCode(importReview.find((group) => !isImportReviewGroupComplete(group))?.item.code ?? ''); else setReviewCode(importReview[0]?.item.code ?? ''); }} />Mostrar somente itens sem 100% de vínculos válidos</label></div><button className="drawer-close" onClick={() => setImportReview([])}>×</button></div>{reviewImportError && <p className="import-review-error" role="alert">{reviewImportError}</p>}<div className="import-review-layout">
+        <aside className="import-review-items">{visibleImportReview.map((group) => { const unresolved = group.rows.length - group.validCount; return <button key={group.item.code} className={reviewCode === group.item.code ? 'active' : ''} onClick={() => setReviewCode(group.item.code)}><span>{group.item.code}</span><strong>{group.item.description}</strong><small>{group.validCount}/{group.rows.length} vínculo(s) válido(s) · {group.total.toFixed(4)}%{unresolved ? ` · ${unresolved} pendente(s)` : ''}</small></button>; })}{!visibleImportReview.length && <p className="empty-state">Todos os itens com vínculos informados estão completos e totalizam 100%.</p>}</aside>
+        <section className="import-review-detail">{(() => { const group = importReview.find((entry) => entry.item.code === reviewCode); if (!group) return null; return <><header><div><small>{group.item.code}</small><h3>{group.item.description}</h3><small>{group.validCount} vínculo(s) importável(is) de {group.rows.length} linha(s). Total original da planilha: {group.sheetTotal.toFixed(6)}%.</small></div><b className={isImportReviewGroupComplete(group) ? 'review-ok' : 'review-warning'}>{group.total.toFixed(6)}% válido · {isImportReviewGroupComplete(group) ? 'total' : isImportReviewGroupImportable(group) ? 'parcial' : 'não importável'}</b></header><table><thead><tr><th>Atividade da planilha</th><th>No planejamento</th><th>Peso</th></tr></thead><tbody>{group.rows.map((row, index) => <tr key={index} className={!row.found ? 'review-row-invalid' : ''}><td>{row.label || 'Sem identificação'}</td><td>{row.found ? 'Sim' : row.matches > 1 ? `${row.matches} correspondências` : 'Não'}</td><td>{row.weight.toFixed(8)}%</td></tr>)}</tbody></table>{!group.rows.length && <p className="empty-state">Nenhum vínculo informado para este item.</p>}</>; })()}</section>
+      </div><p className="import-review-warning"><strong>Atenção:</strong> ao importar, todos os {current?.allocations.length ?? 0} vínculo(s) já iniciados neste orçamento serão apagados e substituídos pelos vínculos válidos desta revisão. Itens abaixo de 100% serão gravados como parciais.</p><div className="lot-areas-actions import-review-actions"><span>{importableReviewGroups.length} item(ns) · {importableReviewAllocations.length} correspondência(s) · {importableReviewUniqueAllocationCount} vínculo(s) único(s) serão gravados.</span><button onClick={() => setImportReview([])}>Voltar</button><button className="primary" disabled={!importableReviewAllocations.length || Boolean(processingMessage)} onClick={() => void importReviewedLinks()}>Sobrescrever e importar vínculos válidos</button></div></div></div>}
+      {processingMessage && <div className="processing-backdrop" role="status" aria-live="polite"><div className="processing-card"><span className="processing-spinner"/><strong>{processingMessage}</strong><small>Não feche esta tela enquanto o processamento estiver em andamento.</small></div></div>}
+      <aside className={`import-drawer ${importData ? 'open' : ''}`}>{importData && <><div className="chart-drawer-head"><div><small>IMPORTAÇÃO DE ORÇAMENTO</small><h3>Mapear colunas</h3><span>{importData.fileName}</span></div><button className="drawer-close" onClick={() => setImportData(null)}>×</button></div><div className="drawer-content">
+        <label className="import-header-row">Conteúdo<select value={importData.mode} onChange={(e) => setImportData({ ...importData, mode: e.target.value as BudgetImportMode })}><option value="budget">Somente orçamento</option><option value="links">Somente vínculos</option><option value="budget-links">Orçamento e vínculos</option></select></label>
+        <label className="import-header-row">Tipo de orçamento<select value={importData.type} onChange={(e) => setImportData({ ...importData, type: e.target.value as BudgetType })}><option value="contractor">Construtora (saída)</option><option value="financing">Financiamento (entrada)</option></select></label>
+        <label className="import-header-row">Linha dos títulos<input type="number" min={1} value={importData.headerRow} onChange={(e) => updateBudgetHeaderRow(Number(e.target.value))}/></label><p className="import-help">Informe em qual coluna está cada informação. Os campos com * são obrigatórios.</p>
+        <div className="mapping-grid">{displayedImportFields.map((field) => <label key={field.key}>{field.label}{importFieldRequired(field, importData.mode) ? ' *' : ''}<select value={mapping[field.key] ?? ''} onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value === '' ? undefined : Number(e.target.value) })}><option value="">Não importar</option>{(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => <option key={index} value={index}>{String(header) || `Coluna ${index + 1}`}</option>)}</select></label>)}</div>
+        <div className="import-summary"><strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong><span>{displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined) ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para revisar.'}</span></div><button className="primary import-confirm" disabled={displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)} onClick={() => importData.mode === 'links' ? void openImportReview() : void confirmImport()}>{importData.mode === 'links' ? 'Revisar vínculos' : 'Confirmar importação'}</button>
+      </div></>}</aside>
+    </section>
+  );
+}
+
 function SettingsPage() {
   return (
     <section className="page">
@@ -2798,4 +4577,6 @@ function SettingsPage() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(<App />);
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  <AuthGate>{(userId) => <App userId={userId} />}</AuthGate>
+);
