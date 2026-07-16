@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { isSupabaseConfigured } from '../lib/supabase';
-import { loadShortTermState, saveShortTermState, type ShortTermWeeklyItem, type ShortTermHistory } from '../lib/shortTermRepository';
+import { loadShortTermState, saveShortTermState, type ShortTermWeeklyItem, type ShortTermHistory, type ShortTermState } from '../lib/shortTermRepository';
 import { getSimpleServiceInstruction } from '../lib/shortTermText';
 import type { Task } from '../types';
 
@@ -102,6 +102,7 @@ function DaysSelector({ dailyWork, disabled, onChange, currentWeekStart, weather
     }
     window.removeEventListener('pointerup', stopDrag);
     window.removeEventListener('pointercancel', stopDrag);
+    window.removeEventListener('pointermove', handleWindowPointerMove);
     window.removeEventListener('touchend', stopDrag);
   };
 
@@ -117,6 +118,7 @@ function DaysSelector({ dailyWork, disabled, onChange, currentWeekStart, weather
 
     window.addEventListener('pointerup', stopDrag);
     window.addEventListener('pointercancel', stopDrag);
+    window.addEventListener('pointermove', handleWindowPointerMove, { passive: false });
     window.addEventListener('touchend', stopDrag);
   };
 
@@ -129,14 +131,24 @@ function DaysSelector({ dailyWork, disabled, onChange, currentWeekStart, weather
     setLocalDW(next);
   };
 
+  const enterDragAtPoint = (clientX: number, clientY: number) => {
+    const element = document.elementFromPoint(clientX, clientY);
+    const dayButton = element?.closest('[data-day-index]') as HTMLElement | null;
+    const idx = Number(dayButton?.dataset.dayIndex);
+    if (Number.isInteger(idx)) enterDrag(idx);
+  };
+
+  const handleWindowPointerMove = (event: PointerEvent) => {
+    if (!isDragging.current || disabled) return;
+    event.preventDefault();
+    enterDragAtPoint(event.clientX, event.clientY);
+  };
+
   const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
     if (!isDragging.current || disabled) return;
     if (event.cancelable) event.preventDefault();
     const touch = event.touches[0];
-    const element = document.elementFromPoint(touch.clientX, touch.clientY);
-    const dayButton = element?.closest('[data-day-index]') as HTMLElement | null;
-    const idx = Number(dayButton?.dataset.dayIndex);
-    if (Number.isInteger(idx)) enterDrag(idx);
+    enterDragAtPoint(touch.clientX, touch.clientY);
   };
 
   return (
@@ -157,7 +169,11 @@ function DaysSelector({ dailyWork, disabled, onChange, currentWeekStart, weather
               data-day-index={idx}
               onPointerDown={(event) => {
                 event.preventDefault();
-                event.currentTarget.setPointerCapture?.(event.pointerId);
+                try {
+                  event.currentTarget.releasePointerCapture?.(event.pointerId);
+                } catch {
+                  // Some browsers do not expose implicit pointer capture for mouse input.
+                }
                 startDrag(idx);
               }}
               onPointerEnter={() => enterDrag(idx)}
@@ -234,7 +250,10 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
   });
 
   const [persistenceReady, setPersistenceReady] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<'local' | 'saving' | 'saved' | 'error'>('local');
+  const [syncStatus, setSyncStatus] = useState<'local' | 'pending' | 'saving' | 'saved' | 'error'>('local');
+  const saveTimeoutRef = useRef<number | null>(null);
+  const pendingSaveStateRef = useRef<ShortTermState | null>(null);
+  const skipNextAutosaveRef = useRef(false);
 
   // Modais e Diálogos
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -444,6 +463,7 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
           setMatrices([]);
           setAccessControl({ users: [], projectAccess: {}, logs: [] });
         }
+        skipNextAutosaveRef.current = true;
         setSyncStatus(isSupabaseConfigured ? 'saved' : 'local');
         setPersistenceReady(true);
       })
@@ -462,27 +482,53 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
   // --- SALVAMENTO COM DEBOUNCE NO SUPABASE ---
   useEffect(() => {
     if (!persistenceReady || !isSupabaseConfigured) return;
-    setSyncStatus('saving');
-    const timer = window.setTimeout(() => {
-      const stateToSave = {
-        weekly: planning,
-        teams,
-        reasons: delayReasons,
-        history: ppcHistory,
-        teamPhones,
-        projectCity,
-        weatherApiKey,
-        matrices,
-        accessControl
-      };
-      void saveShortTermState(projectId, stateToSave)
+    const stateToSave: ShortTermState = {
+      weekly: planning,
+      teams,
+      reasons: delayReasons,
+      history: ppcHistory,
+      teamPhones,
+      projectCity,
+      weatherApiKey,
+      matrices,
+      accessControl
+    };
+
+    if (skipNextAutosaveRef.current) {
+      skipNextAutosaveRef.current = false;
+      pendingSaveStateRef.current = null;
+      return;
+    }
+
+    pendingSaveStateRef.current = stateToSave;
+    setSyncStatus('pending');
+
+    if (saveTimeoutRef.current !== null) {
+      window.clearTimeout(saveTimeoutRef.current);
+    }
+
+    saveTimeoutRef.current = window.setTimeout(() => {
+      const pendingState = pendingSaveStateRef.current;
+      if (!pendingState) return;
+
+      pendingSaveStateRef.current = null;
+      saveTimeoutRef.current = null;
+      setSyncStatus('saving');
+
+      void saveShortTermState(projectId, pendingState)
         .then(() => setSyncStatus('saved'))
         .catch((err) => {
           console.error('Error saving short term state:', err);
           setSyncStatus('error');
         });
-    }, 800);
-    return () => window.clearTimeout(timer);
+    }, 1500);
+
+    return () => {
+      if (saveTimeoutRef.current !== null) {
+        window.clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+    };
   }, [projectId, planning, teams, delayReasons, ppcHistory, teamPhones, projectCity, weatherApiKey, matrices, accessControl, persistenceReady]);
 
   // --- Registrar log silencioso ao entrar na obra ---
@@ -1620,9 +1666,21 @@ rt();
               ? 'bg-emerald-50 border-emerald-300 text-emerald-800' 
               : syncStatus === 'saving' 
               ? 'bg-amber-50 border-amber-300 text-amber-800 animate-pulse'
+              : syncStatus === 'pending'
+              ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
+              : syncStatus === 'local'
+              ? 'bg-slate-50 border-slate-300 text-slate-700'
               : 'bg-rose-50 border-rose-300 text-rose-800'
           }`}>
-            {syncStatus === 'saved' ? 'Supabase sincronizado' : syncStatus === 'saving' ? 'Salvando...' : 'Erro de sincronização'}
+            {syncStatus === 'saved'
+              ? 'Supabase sincronizado'
+              : syncStatus === 'saving'
+              ? 'Salvando...'
+              : syncStatus === 'pending'
+              ? 'Alteracoes pendentes'
+              : syncStatus === 'local'
+              ? 'Modo local'
+              : 'Erro de sincronizacao'}
           </span>
         </div>
       </div>
