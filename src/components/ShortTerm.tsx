@@ -1469,7 +1469,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
   ];
 
   return (
-    <section className="page short-term font-sans text-slate-950 animate-in fade-in duration-300">
+    <section className="page short-term font-sans text-slate-900 animate-in fade-in duration-300">
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-200 pb-4 mb-5 gap-3 no-print">
         <div>
@@ -1499,10 +1499,10 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
         {tabLabels.map(([value, label]) => (
           <button 
             key={value}
-            className={`px-4 py-3 text-xs font-black uppercase tracking-wider rounded-t-xl transition-all duration-200 ${
+            className={`px-4 py-3 text-xs font-black uppercase tracking-wider rounded-t-xl transition-all duration-300 whitespace-nowrap ${
               activeTab === value 
-                ? 'bg-indigo-600 text-white shadow-md' 
-                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                ? 'bg-indigo-600 text-white shadow-lg -translate-y-1'
+                : 'bg-slate-200 text-slate-500 hover:bg-slate-300'
             }`}
             onClick={() => setActiveTab(value)}
           >
@@ -1539,7 +1539,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
       )}
 
       {confirmDialog?.isOpen && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-xl max-w-sm w-full space-y-4">
             <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">{confirmDialog.title}</h3>
             <p className="text-xs text-slate-500 leading-relaxed font-bold">{confirmDialog.message}</p>
@@ -1804,7 +1804,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                   <th className="p-3 text-center w-28">Avanço Físico</th>
                   <th className="p-3 text-center w-28">Desvio / Atraso</th>
                   <th className="p-3 w-40">Observações</th>
-                  <th className="p-2 text-center w-16 bg-slate-850">
+                  <th className="p-2 text-center w-16 bg-slate-800">
                     <div className="flex items-center justify-center gap-1">
                       <input 
                         type="checkbox" 
@@ -1827,7 +1827,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                   const showDelayAlert = currentPlan > progVal;
 
                   return (
-                    <tr key={t.id} className={`hover:bg-slate-50 transition ${t.finalized ? 'bg-slate-100 opacity-70' : showDelayAlert && (progVal > 0 || currentPlan > 0) ? 'bg-red-50/20' : ''}`}>
+                    <tr key={t.id} className={`hover:bg-slate-50 transition ${t.finalized ? 'bg-slate-100/70 opacity-75' : showDelayAlert && (progVal > 0 || currentPlan > 0) ? 'bg-red-50/40' : ''}`}>
                       <td className="p-3 border-r font-bold text-slate-800 uppercase text-[10px]">
                         <div className="flex items-start gap-1">
                           {t.finalized && <span className="text-[10px] text-slate-400 mt-0.5">🔒</span>}
@@ -1879,16 +1879,17 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                         <input type="number" min="0" disabled={t.finalized} className="w-12 p-1 border border-slate-300 bg-slate-50 text-center font-bold rounded-lg text-xs outline-none focus:bg-white focus:border-indigo-500" value={t.efetivo ?? ''} onChange={e => handleUpdateTaskField(t.id, 'efetivo', e.target.value === '' ? null : parseInt(e.target.value, 10))} />
                       </td>
 
-                      <td className="p-3 border-r align-middle bg-emerald-50/5">
+                      <td className="p-3 border-r align-middle bg-emerald-50/30">
                         <div className="flex gap-1 justify-center">
                           {[25, 50, 75, 100].map(val => {
-                            const execBefore = t.executedBefore ?? 0;
+                            const execBefore = t.executedBeforeRaw ?? t.executedBefore ?? 0;
+                            const execBeforeStep = roundDown25(execBefore);
                             const isPlanned = currentPlan === val;
-                            const isExecuted = execBefore > 0 && val <= execBefore;
+                            const isExecuted = execBeforeStep > 0 && val === execBeforeStep;
 
-                            let btnClass = 'bg-slate-100 text-slate-600 hover:bg-emerald-50 hover:text-emerald-700';
-                            if (isPlanned) btnClass = 'bg-emerald-600 text-white font-black scale-110 shadow-xs border-emerald-600';
-                            else if (isExecuted) btnClass = 'bg-slate-300 text-slate-800 border-slate-300';
+                            let btnClass = 'bg-slate-100 text-slate-500 hover:bg-emerald-100 hover:text-emerald-700';
+                            if (isPlanned) btnClass = 'bg-emerald-600 text-white font-black scale-110 shadow-md ring-2 ring-emerald-300 border-emerald-600';
+                            else if (isExecuted) btnClass = 'bg-slate-500 text-white shadow-sm ring-2 ring-slate-400 border-slate-500';
 
                             return (
                               <button key={val} disabled={t.finalized} onClick={() => handlePlannedChange(t.id, val)} className={`w-7 h-7 rounded-full text-[9px] font-black flex items-center justify-center border border-transparent transition active:scale-90 cursor-pointer ${btnClass}`}>
@@ -1907,15 +1908,17 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                         <div className="flex flex-col items-center gap-1">
                           <div className="flex gap-1 justify-center">
                             {[25, 50, 75, 100].map(val => {
-                              const isActive = progVal === val;
-                              const isPrefilled = t.preFilledProgress === val;
+                              const progressStep = roundDown25(progVal);
+                              const prefilledStep = roundDown25(t.preFilledProgress ?? 0);
+                              const isActive = progressStep > 0 && progressStep === val;
+                              const isPrefilled = prefilledStep > 0 && prefilledStep === val;
                               const isOk = val >= currentPlan;
-                              const btnColor = isOk ? 'bg-indigo-600 border-indigo-600' : 'bg-rose-600 border-rose-600';
-                              const prefillClass = (isPrefilled && !isActive) ? 'ring-2 ring-dashed ring-purple-400 text-purple-700 bg-purple-50' : '';
+                              const btnColor = isOk ? 'bg-blue-600 border-blue-600 ring-blue-300' : 'bg-red-600 border-red-600 ring-red-300';
+                              const prefillClass = (isPrefilled && !isActive) ? 'ring-2 ring-dashed ring-purple-500 text-purple-700 bg-purple-50' : '';
 
                               return (
                                 <button key={val} disabled={t.finalized} onClick={() => handleWeeklyProgressChange(t.id, val)} className={`w-7 h-7 rounded-full text-[9px] font-black flex items-center justify-center border border-transparent transition active:scale-90 cursor-pointer ${
-                                  isActive ? `${btnColor} text-white scale-110 shadow-xs` : prefillClass ? prefillClass : 'bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800'
+                                  isActive ? `${btnColor} text-white scale-110 shadow-md ring-2` : prefillClass ? prefillClass : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-800'
                                 }`}>
                                   {val}%
                                 </button>
@@ -1933,7 +1936,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                       <td className="p-3 border-r align-middle text-center">
                         {showDelayAlert ? (
                           <div className="space-y-1">
-                            <div className="relative inline-block w-full min-h-[26px] bg-rose-50 border border-rose-200 text-rose-800 rounded-lg hover:bg-rose-100 transition">
+                            <div className="relative inline-block w-full min-h-[26px] bg-red-100/80 border border-red-200 text-red-800 rounded-lg hover:bg-red-200/80 transition">
                               <span className="block text-[8px] font-black py-1 px-1 text-center truncate">{t.delayReason || '⚠️ MOTIVO...'}</span>
                               <select disabled={t.finalized} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" value={t.delayReason || ''} onChange={e => handleUpdateTaskField(t.id, 'delayReason', e.target.value)}>
                                 <option value="">⚠️ Escolha o Motivo</option>
@@ -2024,7 +2027,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                         <button onClick={(e) => { e.stopPropagation(); removeMatrixColumn(matrix.id, mId); }} className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 text-red-400 font-bold">&times;</button>
                       </th>
                     ))}
-                    <th onClick={() => setMatrixSelection({ isOpen: true, matrixId: matrix.id, type: 'macro' })} className="p-3 text-center text-indigo-400 hover:bg-slate-850 hover:text-white transition cursor-pointer font-bold">+ ADICIONAR ETAPA</th>
+                    <th onClick={() => setMatrixSelection({ isOpen: true, matrixId: matrix.id, type: 'macro' })} className="p-3 text-center text-indigo-400 hover:bg-slate-800 hover:text-white transition cursor-pointer font-bold">+ ADICIONAR ETAPA</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
@@ -2095,11 +2098,11 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
         )}
 
         {matrixSelection?.isOpen && (
-          <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-xl max-w-sm w-full space-y-4">
               <div className="flex justify-between items-center border-b pb-2">
                 <h3 className="text-xs font-black text-slate-800 uppercase tracking-tight">Adicionar ao Painel</h3>
-                <button onClick={() => setMatrixSelection(null)} className="text-slate-400 hover:text-slate-650 font-bold text-base">&times;</button>
+                <button onClick={() => setMatrixSelection(null)} className="text-slate-400 hover:text-slate-600 font-bold text-base">&times;</button>
               </div>
               <div className="max-h-[220px] overflow-y-auto space-y-1.5">
                 {(matrixSelection.type === 'macro' ? allPossibleMacros : floors).map(item => {
@@ -2306,7 +2309,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
             </div>
             <div>
               <label className="block text-[8px] font-black uppercase text-slate-600 mb-1">Estado</label>
-              <select className="w-full p-2 border rounded-lg text-xs bg-white outline-none font-bold text-slate-850" value={giantStatusFilter} onChange={e => setHistoryStatusFilter(e.target.value)}>
+              <select className="w-full p-2 border rounded-lg text-xs bg-white outline-none font-bold text-slate-800" value={giantStatusFilter} onChange={e => setHistoryStatusFilter(e.target.value)}>
                 <option value="">-- Todos --</option>
                 <option value="finalized">🔒 Finalizadas</option>
                 <option value="active">🔓 Ativas</option>
@@ -2359,7 +2362,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                       <td className="p-2.5 border-r text-center font-black text-emerald-600">{t.progressThisWeek}%</td>
                       <td className="p-2.5 border-r text-center font-black">{totalAcc}%</td>
                       <td className="p-2.5 border-r text-center font-bold">
-                        {isDelayed ? <span className="text-rose-600 font-black text-[9px] uppercase">⚠️ {t.delayReason || 'Sem motivo'}</span> : <span className="text-emerald-600 font-bold uppercase text-[9px]">✓ Conforme</span>}
+                        {isDelayed ? <span className="text-red-600 font-black text-[9px] uppercase">⚠️ {t.delayReason || 'Sem motivo'}</span> : <span className="text-emerald-600 font-bold uppercase text-[9px]">✓ Conforme</span>}
                       </td>
                       <td className="p-2.5 border-r italic text-[9px] max-w-xs truncate" title={t.observations}>{t.observations || '-'}</td>
                       <td className="p-2.5 text-center font-black text-[9px] uppercase">{t.finalized ? '🔒 Fechada' : '🔓 Ativa'}</td>
@@ -2397,7 +2400,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
       <div className="space-y-6 animate-in fade-in duration-300 pb-20">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="bg-white p-6 rounded-3xl border border-slate-200 space-y-4 shadow-sm">
-            <h2 className="text-xs font-black uppercase border-b pb-2 text-slate-850 tracking-wider">1. Cadastro de Equipes</h2>
+            <h2 className="text-xs font-black uppercase border-b pb-2 text-slate-800 tracking-wider">1. Cadastro de Equipes</h2>
             <div className="flex gap-2">
               <input type="text" placeholder="EX: EQUIPE ALFA..." className="flex-1 p-2.5 text-xs border border-slate-200 rounded-xl outline-none bg-slate-50 focus:bg-white uppercase font-bold text-slate-800" value={newTeamName} onChange={e => setNewTeamName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddTeam()} />
               <button onClick={handleAddTeam} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer">Registrar</button>
@@ -2405,7 +2408,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
             <div className="space-y-2">
               {teams.map(team => (
                 <div key={team} className="flex justify-between items-center p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                  <span className="font-bold text-xs text-slate-850 truncate uppercase">{team}</span>
+                  <span className="font-bold text-xs text-slate-800 truncate uppercase">{team}</span>
                   <div className="flex items-center gap-2 font-bold text-slate-700">
                     <span className="text-[9px] uppercase">Tel:</span>
                     <input type="text" placeholder="+55 11..." className="w-32 p-1 border border-slate-200 bg-white rounded-lg text-[10px] font-bold outline-none" value={teamPhones[team] || ''} onChange={e => setTeamPhones({ ...teamPhones, [team]: e.target.value })} />
@@ -2417,14 +2420,14 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
           </div>
 
           <div className="bg-white p-6 rounded-3xl border border-slate-200 space-y-4 shadow-sm">
-            <h2 className="text-xs font-black uppercase border-b pb-2 text-slate-850 tracking-wider">2. Padronização de Causas de Atraso</h2>
+            <h2 className="text-xs font-black uppercase border-b pb-2 text-slate-800 tracking-wider">2. Padronização de Causas de Atraso</h2>
             <div className="flex gap-2">
               <input type="text" placeholder="EX: FALTA DE MATERIAL..." className="flex-1 p-2.5 text-xs border border-slate-200 rounded-xl outline-none bg-slate-50 focus:bg-white uppercase font-bold text-slate-800" value={newDelayReason} onChange={e => setNewDelayReason(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddDelayReason()} />
               <button onClick={handleAddDelayReason} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition cursor-pointer">Registrar</button>
             </div>
             <div className="space-y-2">
               {delayReasons.map(reason => (
-                <div key={reason} className="flex justify-between items-center p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-750 uppercase">
+                <div key={reason} className="flex justify-between items-center p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 uppercase">
                   <span>{reason}</span>
                   <button onClick={() => setConfirmDialog({ isOpen: true, title: 'Remover Motivo', message: `Deseja remover o motivo "${reason}"?`, onConfirm: () => setDelayReasons(prev => prev.filter(r => r !== reason)) })} className="text-red-500 font-bold hover:text-red-700 text-xs ml-1">&times;</button>
                 </div>
@@ -2434,7 +2437,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
         </div>
 
         <div className="bg-white p-6 rounded-3xl border border-slate-200 space-y-4 shadow-sm">
-          <h2 className="text-xs font-black uppercase border-b pb-2 text-slate-850 tracking-wider">3. Clima e Localidade</h2>
+          <h2 className="text-xs font-black uppercase border-b pb-2 text-slate-800 tracking-wider">3. Clima e Localidade</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 font-bold text-slate-700">
             <div>
               <label className="block text-[8px] uppercase mb-1">Cidade da Obra</label>
@@ -2456,9 +2459,9 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
 
   function renderFinalizeWeekModal() {
     return (
-      <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
         <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-xl max-w-sm w-full space-y-4">
-          <h3 className="text-sm font-black text-slate-850 uppercase tracking-tight">🏁 Finalizar Semana</h3>
+          <h3 className="text-sm font-black text-slate-800 uppercase tracking-tight">🏁 Finalizar Semana</h3>
           <p className="text-xs text-slate-500 leading-normal font-bold">
             Isto fechará o PPC semanal ativo e integrará o progresso acumulado de volta ao cronograma geral.
           </p>
@@ -2479,11 +2482,11 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
     const availableTeams = getWhatsappAvailableTeams();
 
     return (
-      <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-205">
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
         <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-xl max-w-md w-full space-y-4">
           <div className="flex justify-between items-center border-b pb-2">
             <h3 className="text-xs font-black text-slate-800 uppercase tracking-tight">Compartilhar WhatsApp</h3>
-            <button onClick={() => setWhatsappModal(prev => ({ ...prev, isOpen: false }))} className="text-slate-400 hover:text-slate-650 font-bold text-base">&times;</button>
+            <button onClick={() => setWhatsappModal(prev => ({ ...prev, isOpen: false }))} className="text-slate-400 hover:text-slate-600 font-bold text-base">&times;</button>
           </div>
           <div className="space-y-3">
             <div>
@@ -2534,8 +2537,8 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
 
       return (
         <div className="fixed inset-0 z-50 overflow-hidden">
-          <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-xs" onClick={() => setIsDrawerOpen(false)} />
-          <div className="absolute inset-y-0 right-0 w-full max-w-md bg-white shadow-2xl flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-300">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={() => setIsDrawerOpen(false)} />
+          <div className="absolute inset-y-0 right-0 w-screen max-w-md bg-white shadow-2xl flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-300">
             <div className="p-5 bg-indigo-950 text-white flex justify-between items-center">
               <div>
                 <h3 className="font-black text-sm uppercase tracking-wider">Adicionar Atividades</h3>
@@ -2558,7 +2561,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                       className={`w-full text-left p-3 rounded-xl border transition ${
                         drawerSourceMode === option.id
                           ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
-                          : 'bg-white text-slate-650 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50'
+                          : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50'
                       }`}
                     >
                       <span className="block text-[10px] font-black uppercase tracking-wider">{option.label}</span>
@@ -2731,7 +2734,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
     if (drawerSearch) candidates = candidates.filter(c => c.service.toLowerCase().includes(drawerSearch.toLowerCase()));
 
     return (
-      <div className="fixed inset-0 bg-slate-950/40 backdrop-blur-xs z-50 flex justify-end animate-in fade-in duration-300">
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-end animate-in fade-in duration-300">
         <div className="w-full max-w-md bg-white h-full shadow-2xl p-6 flex flex-col justify-between border-l border-slate-200 overflow-y-auto">
           <div className="space-y-6">
             <div className="flex justify-between items-center border-b pb-4">
