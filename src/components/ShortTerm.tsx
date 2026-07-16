@@ -1737,21 +1737,25 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
 
             <div className="flex gap-2 w-full md:w-auto flex-wrap">
               {weeklyTasks.length > 0 && (
-                <button onClick={handlePrintPlanning} className="flex-1 md:flex-none px-4 py-3 bg-slate-700 hover:bg-slate-800 text-white font-black rounded-xl text-[10px] uppercase tracking-wider cursor-pointer">
-                  🖨️ Impressão
+                <button onClick={handlePrintPlanning} className="flex-1 md:flex-none px-4 py-3 bg-slate-700 hover:bg-slate-800 border border-slate-600 text-white font-black rounded-xl shadow-sm transition active:scale-95 text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer">
+                  <span>🖨️</span> Impressão
                 </button>
               )}
               {teams.length > 0 && weeklyTasks.length > 0 && (
-                <button onClick={openWhatsappShareModal} className="flex-1 md:flex-none px-4 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-black rounded-xl text-[10px] uppercase tracking-wider border border-indigo-200 cursor-pointer">
-                  💬 WhatsApp
+                <button onClick={openWhatsappShareModal} className="flex-1 md:flex-none px-4 py-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 hover:border-indigo-300 text-indigo-700 font-black rounded-xl shadow-sm transition active:scale-95 text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer">
+                  <span>💬</span> WhatsApp
                 </button>
               )}
               <button 
                 onClick={() => setFinalizeModal({ isOpen: true, carryOverUnfinished: true })}
                 disabled={weeklyTasks.length === 0}
-                className="flex-1 md:flex-none px-4 py-3 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-black rounded-xl text-[10px] uppercase tracking-wider cursor-pointer"
+                className={`flex-1 md:flex-none px-4 py-3 font-black rounded-xl shadow transition active:scale-95 text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 ${
+                  weeklyTasks.length === 0
+                    ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                }`}
               >
-                🏁 Finalizar Semana
+                <span>🏁</span> Finalizar Semana
               </button>
               <button 
                 onClick={() => {
@@ -1763,9 +1767,9 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                   setDrawerWarning('');
                   setIsDrawerOpen(true);
                 }}
-                className="flex-1 md:flex-none px-4 py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] uppercase tracking-wider hover:bg-indigo-700 cursor-pointer"
+                className="flex-1 md:flex-none px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl shadow transition active:scale-95 text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
               >
-                ➕ Programar Tarefas
+                <span>➕</span> Adicionar Atividades
               </button>
             </div>
           </div>
@@ -2123,7 +2127,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                         setMatrixSelection(null);
                       }}
                       className={`w-full p-2.5 rounded-xl border text-left text-[10px] font-black uppercase transition flex justify-between items-center ${
-                        isAlreadyIn ? 'bg-slate-50 border-slate-200 text-slate-500 cursor-not-allowed' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50'
+                        isAlreadyIn ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm cursor-not-allowed' : 'bg-white border-slate-200 text-slate-700 hover:bg-indigo-50 hover:border-indigo-300'
                       }`}
                     >
                       <span>{item}</span>
@@ -2632,20 +2636,30 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                     )}
                   </div>
                   <div className={`grid grid-cols-2 gap-2 ${!drawerMacro ? 'pointer-events-none opacity-50' : ''}`}>
-                    {availableFloorsForMacro.map(floor => (
-                      <label key={floor} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border hover:border-indigo-300 transition cursor-pointer">
+                  {availableFloorsForMacro.map(floor => {
+                    const isSelected = drawerFloors.includes(floor);
+                    return (
+                      <label
+                        key={floor}
+                        className={`flex items-center gap-2 p-2 rounded-lg border transition cursor-pointer ${
+                          isSelected
+                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                            : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50'
+                        }`}
+                      >
                         <input
                           type="checkbox"
                           className="w-4 h-4 text-indigo-600 rounded"
-                          checked={drawerFloors.includes(floor)}
+                          checked={isSelected}
                           onChange={(event) => {
                             if (event.target.checked) setDrawerFloors([...drawerFloors, floor]);
                             else setDrawerFloors(drawerFloors.filter(item => item !== floor));
                           }}
                         />
-                        <span className="text-[10px] font-bold text-slate-700 truncate">{floor}</span>
+                        <span className={`text-[10px] font-bold truncate ${isSelected ? 'text-white' : 'text-slate-700'}`}>{floor}</span>
                       </label>
-                    ))}
+                    );
+                  })}
                     {drawerMacro && availableFloorsForMacro.length === 0 && <p className="text-[10px] text-slate-400 italic col-span-2">Nenhum pavimento para esta macro.</p>}
                   </div>
                 </div>
@@ -2665,23 +2679,33 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                   )}
                 </div>
                 <div className="bg-slate-50 border rounded-xl p-3 h-[42vh] min-h-[260px] overflow-y-auto space-y-2">
-                  {availableServicesForMacroAndFloors.map(item => (
-                    <label key={item.id} className="flex items-center gap-3 p-2 bg-white rounded-lg border hover:border-indigo-300 transition cursor-pointer">
+                  {availableServicesForMacroAndFloors.map(item => {
+                    const isSelected = drawerSelectedServices.includes(item.id);
+                    return (
+                    <label
+                      key={item.id}
+                      className={`flex items-center gap-3 p-2 rounded-lg border transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                          : 'bg-white border-slate-200 text-slate-800 hover:border-indigo-300 hover:bg-indigo-50'
+                      }`}
+                    >
                       <input
                         type="checkbox"
                         className="w-4 h-4 text-indigo-600 rounded"
-                        checked={drawerSelectedServices.includes(item.id)}
+                        checked={isSelected}
                         onChange={(event) => {
                           if (event.target.checked) setDrawerSelectedServices([...drawerSelectedServices, item.id]);
                           else setDrawerSelectedServices(drawerSelectedServices.filter(id => id !== item.id));
                         }}
                       />
                       <div className="min-w-0">
-                        <p className="text-xs font-bold text-slate-800 truncate">{item.service}</p>
-                        <p className="text-[9px] text-slate-500 font-bold">{item.floor} | {getMacroTitle(slugify(item.macro))} | {roundPercentValue(item.progress || 0)}%</p>
+                        <p className={`text-xs font-bold truncate ${isSelected ? 'text-white' : 'text-slate-800'}`}>{item.service}</p>
+                        <p className={`text-[9px] font-bold ${isSelected ? 'text-indigo-100' : 'text-slate-500'}`}>{item.floor} | {getMacroTitle(slugify(item.macro))} | {roundPercentValue(item.progress || 0)}%</p>
                       </div>
                     </label>
-                  ))}
+                    );
+                  })}
                   {availableServicesForMacroAndFloors.length === 0 && (
                     <p className="p-4 text-[10px] text-slate-400 italic text-center font-bold">
                       {tasks.length === 0 ? 'Publique uma janela no medio prazo para liberar atividades no curto prazo.' : 'Nenhum servico disponivel para os filtros selecionados.'}

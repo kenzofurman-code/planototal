@@ -280,7 +280,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
           return (
             <div key={t.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-lg space-y-4">
               <div className="space-y-1">
-                <span className="px-2 py-0.5 bg-slate-850 border border-slate-750 text-slate-400 text-[8px] font-black rounded uppercase tracking-wider">
+                <span className="px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-400 text-[8px] font-black rounded uppercase tracking-wider">
                   {t.floor}
                 </span>
                 <h3 className="text-sm font-black text-white uppercase leading-snug">{t.activityName}</h3>
@@ -300,7 +300,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
                   {[0, 25, 50, 75, 100].map(val => {
                     const isActive = input.progress === val;
                     const isOk = val >= planned;
-                    const btnColor = isOk ? 'bg-indigo-600 border-indigo-500' : 'bg-rose-600 border-rose-500';
+                    const btnColor = isOk ? 'bg-blue-600 border-blue-500' : 'bg-red-600 border-red-500';
 
                     return (
                       <button
@@ -309,7 +309,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
                         className={`py-2 rounded-xl text-xs font-black transition active:scale-95 cursor-pointer border ${
                           isActive 
                             ? `${btnColor} text-white shadow-md scale-105` 
-                            : 'bg-slate-950 border-slate-850 text-slate-400 hover:border-slate-700'
+                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
                         }`}
                       >
                         {val}%
@@ -322,10 +322,10 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
               {/* Justificativa de Atraso */}
               {isDelayed && (
                 <div className="space-y-1">
-                  <label className="block text-[9px] font-black text-rose-450 uppercase tracking-wide">
+                  <label className="block text-[9px] font-black text-red-400 uppercase tracking-wide">
                     ⚠️ Motivo do Atraso/Desvio:
                   </label>
-                  <div className="relative inline-block w-full min-h-[36px] bg-slate-950 border border-slate-850 rounded-xl hover:border-slate-750 transition">
+                  <div className="relative inline-block w-full min-h-[36px] bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition">
                     <span className="block text-xs font-black py-2.5 px-3 uppercase text-rose-400 truncate">
                       {input.delayReason || 'Selecione o motivo...'}
                     </span>
@@ -350,7 +350,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
                   <textarea
                     rows={2}
                     placeholder="Descreva problemas, faltas ou observações..."
-                    className="flex-1 p-3 bg-slate-950 border border-slate-850 text-slate-100 rounded-xl text-xs outline-none focus:border-indigo-500 resize-none font-bold text-slate-200 placeholder-slate-600"
+                    className="flex-1 p-3 bg-slate-950 border border-slate-800 text-slate-200 rounded-xl text-xs outline-none focus:border-indigo-500 resize-none font-bold placeholder-slate-600"
                     value={input.observations}
                     onChange={e => handleFieldChange(t.id, 'observations', e.target.value)}
                   />
@@ -359,7 +359,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
                     className={`p-3.5 rounded-full transition active:scale-95 text-sm shrink-0 shadow-lg ${
                       listeningTaskId === t.id 
                         ? 'bg-red-600 text-white animate-pulse'
-                        : 'bg-indigo-900/50 text-indigo-300 border border-indigo-750'
+                        : 'bg-indigo-900/50 text-indigo-300 border border-indigo-700'
                     }`}
                     title="Gravar observação por voz"
                   >
@@ -380,7 +380,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
         {teamTasksList.length > 0 && (
           <button
             onClick={handleSubmit}
-            className="w-full py-3.5 bg-emerald-650 hover:bg-emerald-700 text-white font-black uppercase text-xs tracking-wider rounded-xl shadow-lg transition active:scale-98 cursor-pointer"
+            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-xs tracking-wider rounded-xl shadow-lg transition active:scale-95 cursor-pointer"
           >
             Enviar Apontamentos
           </button>
