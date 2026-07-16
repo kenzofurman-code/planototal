@@ -122,10 +122,11 @@ function App({ userId }: { userId: string }) {
   useEffect(() => {
     if (!workspaceLoaded || !project) return;
     let active = true;
+    setLatestMediumTasks([]);
     void loadPublishedMediumPlan(project.id)
       .then((published) => {
-        if (!active || !published?.length) return;
-        setLatestMediumTasks(published);
+        if (!active) return;
+        setLatestMediumTasks(published ?? []);
       })
       .catch(() => {
         if (active) setLatestMediumTasks([]);
@@ -238,7 +239,7 @@ function App({ userId }: { userId: string }) {
         {page === 'line' && <LineBalance projectKey={project.id} projectStartDate={project.startDate} plannedEndDate={project.plannedEndDate} tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'procurement' && <Procurement />}
         {page === 'medium' && <MediumPlan tasks={tasks} projectId={project.id} onPublish={handleMediumPublish} />}
-        {page === 'short' && <ShortTerm tasks={latestMediumTasks.length ? latestMediumTasks : tasks} projectId={project.id} />}
+        {page === 'short' && <ShortTerm tasks={latestMediumTasks} projectId={project.id} />}
         {page === 'financial' && <Financial projectKey={project.id} tasks={tasks} setTasks={setTasks} />}
         {page === 'settings' && <SettingsPage />}
       </main>

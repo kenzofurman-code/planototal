@@ -52,6 +52,25 @@ const addDays = (date: Date, days: number): Date => {
   return result;
 };
 
+const clampPercent = (value: number): number => {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+};
+
+const roundPercentValue = (value: number): number => {
+  return Math.round(clampPercent(Number(value) || 0) * 1000) / 1000;
+};
+
+const roundDown25 = (value: number): number => {
+  return Math.floor(roundPercentValue(value) / 25) * 25;
+};
+
+const getMacroTitle = (value: string): string => {
+  return String(value || 'GERAL').replace(/[-_]+/g, ' ').toUpperCase();
+};
+
+const rootActivityId = (activityId: string): string => String(activityId || '').split(':')[0];
+
 // Componentes Auxiliares Simples
 function StatCard({ title, value, color }: { title: string; value: string; color: string }) {
   return (
@@ -168,7 +187,7 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
   const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ isOpen: boolean; title: string; message: string; onConfirm: () => void } | null>(null);
   const [finalizeModal, setFinalizeModal] = useState<{ isOpen: boolean; carryOverUnfinished: boolean } | null>(null);
-  const [whatsappModal, setWhatsappModal] = useState<boolean>(false);
+  const [whatsappModal, setWhatsappModal] = useState<{ isOpen: boolean; teamName: string; text: string }>({ isOpen: false, teamName: '', text: '' });
 
   // Clima Cache
   const [weatherCache, setWeatherCache] = useState<{ [key: string]: { conditions: string; tempMin: number; tempMax: number; icon: string } }>({});
@@ -193,6 +212,12 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
   const [isDrawerOpen, setIsDrawerOpen] = useState<boolean>(false);
   const [drawerMacro, setDrawerMacro] = useState<string>('');
   const [drawerFloor, setDrawerFloor] = useState<string>('');
+  const [drawerFloors, setDrawerFloors] = useState<string[]>([]);
+  const [drawerSelectedServices, setDrawerSelectedServices] = useState<string[]>([]);
+  const [drawerResponsible, setDrawerResponsible] = useState<string>('');
+  const [drawerSourceMode, setDrawerSourceMode] = useState<'medium' | 'previous-successors' | 'unfinished'>('medium');
+  const [drawerMacroSearch, setDrawerMacroSearch] = useState<string>('');
+  const [isDrawerMacroDropdownOpen, setIsDrawerMacroDropdownOpen] = useState<boolean>(false);
   const [drawerWarning, setDrawerWarning] = useState<string>('');
   const [drawerSearch, setDrawerSearch] = useState<string>('');
 
@@ -234,13 +259,22 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
   const cronogramaInicial = useMemo(() => {
     return tasks.map(t => ({
       id: t.id,
+      originalId: t.id.includes(':') ? t.id.split(':')[0] : t.id,
       macro: t.packageName || 'GERAL',
       floor: t.lot || 'GERAL',
       service: t.service || t.packageName || 'SERVIÇO',
       duration: t.duration || 1,
+      start: t.startDate,
+      startDate: t.startDate,
+      endDate: t.endDate,
       end: new Date(t.endDate + 'T12:00:00'),
       progress: t.progress || 0,
-      cost: t.cost || 0
+      cost: t.cost || 0,
+      responsible: t.responsible || '',
+      predecessors: t.predecessors ?? [],
+      successors: t.successors ?? [],
+      replicationGroup: t.lotMother || '',
+      isParent: false
     }));
   }, [tasks]);
 
@@ -416,6 +450,7 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
     if (!persistenceReady) return;
 
     const currentSignature = tasks.map(t => t.id).sort().join(',');
+    previousTasksSignature.current = currentSignature;
 
     // Se é o primeiro carregamento, apenas guarda a assinatura atual
     if (previousTasksSignature.current === null) {
@@ -630,8 +665,10 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
 
     const updatedPlanning = planning.map(t => {
       if (t.weekId === weekId) {
-        const isCompleted = (t.progressThisWeek ?? 0) >= (t.plannedThisWeek ?? 100);
-        if (!isCompleted && carryOverUnfinished) {
+        const finalProgress = Math.min(100, (t.executedBefore ?? 0) + (t.progressThisWeek ?? 0));
+        const isCompleted = (t.progressThisWeek ?? 0) >= (t.plannedThisWeek ?? 100) || finalProgress >= 100;
+        const alreadyCarried = planning.some(p => p.weekId === nextWeekStart && p.activityId === t.activityId && p.floor === t.floor);
+        if (!isCompleted && carryOverUnfinished && !alreadyCarried) {
           carryOverTasks.push({
             id: slugify(`${t.activityId}_${nextWeekStart}_${t.responsible || 'extra'}`),
             weekId: nextWeekStart,
@@ -641,14 +678,21 @@ export function ShortTerm({ tasks, projectId, setTasks }: ShortTermProps) {
             sectionId: t.sectionId,
             responsible: t.responsible || '',
             efetivo: t.efetivo,
-            plannedThisWeek: t.plannedThisWeek ?? 100,
+            plannedThisWeek: Math.max(0, 100 - finalProgress),
             progressThisWeek: 0,
-            executedBefore: Math.min(100, (t.executedBefore ?? 0) + (t.progressThisWeek ?? 0)),
+            executedBefore: finalProgress,
+            executedBeforeRaw: finalProgress,
             dailyWork: [0, 0, 0, 0, 0],
             delayReason: '',
-            observations: '',
+            observations: 'Saldo reprogramado da semana anterior',
             finalized: false,
-            isManual: t.isManual
+            isManual: t.isManual,
+            isParent: t.isParent,
+            finishDate: t.finishDate,
+            predecessors: t.predecessors ?? [],
+            successors: t.successors ?? [],
+            originalId: t.originalId,
+            replicationGroup: t.replicationGroup
           });
         }
         return { ...t, finalized: true };
@@ -724,8 +768,9 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
   const currentWeekPpcStats = useMemo(() => {
     const weekId = toLocalDateString(currentWeekStart);
     const weekTasks = planning.filter(t => t.weekId === weekId);
-    const totalPlannedCount = weekTasks.length;
-    const completedCount = weekTasks.filter(t => (t.progressThisWeek ?? 0) >= (t.plannedThisWeek ?? 100)).length;
+    const activePlannedTasks = weekTasks.filter(t => (t.plannedThisWeek ?? 100) > 0);
+    const totalPlannedCount = activePlannedTasks.length;
+    const completedCount = activePlannedTasks.filter(t => (t.progressThisWeek ?? 0) >= (t.plannedThisWeek ?? 100)).length;
     const percent = totalPlannedCount > 0 ? (completedCount / totalPlannedCount) * 100 : 0;
     return { percent, completedCount, totalPlannedCount };
   }, [planning, currentWeekStart]);
@@ -763,6 +808,113 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
     });
   }, [planning]);
 
+  const currentWeekId = toLocalDateString(currentWeekStart);
+  const previousWeekIdForDrawer = toLocalDateString(addDays(currentWeekStart, -7));
+
+  const drawerCandidateActivities = useMemo(() => {
+    const isParentMediumItem = (item: typeof cronogramaInicial[number]) => {
+      return Boolean(item.isParent) || slugify(item.service || '') === slugify(item.macro || '');
+    };
+    const familyKey = (item: typeof cronogramaInicial[number]) => `${item.floor || ''}||${slugify(item.macro || '')}`;
+    const familiesWithChildren = new Set(
+      cronogramaInicial
+        .filter(item => item && !isParentMediumItem(item))
+        .map(item => familyKey(item))
+    );
+    const openMediumItems = cronogramaInicial.filter(item => (
+      item &&
+      (item.progress ?? 0) < 100 &&
+      (!isParentMediumItem(item) || !familiesWithChildren.has(familyKey(item)))
+    ));
+
+    if (drawerSourceMode === 'unfinished') {
+      return openMediumItems.filter(item => (item.progress ?? 0) > 0 && (item.progress ?? 0) < 100);
+    }
+
+    if (drawerSourceMode !== 'previous-successors') return openMediumItems;
+
+    const previousActivityIds = new Set<string>();
+    const successorIds = new Set<string>();
+    planning
+      .filter(task => task.weekId === previousWeekIdForDrawer && task.finalized)
+      .forEach(task => {
+        [task.activityId, rootActivityId(task.activityId)].forEach(id => {
+          if (id) previousActivityIds.add(id);
+        });
+        const mediumItem = cronogramaInicial.find(item => item.id === task.activityId || item.originalId === rootActivityId(task.activityId));
+        [...(task.successors ?? []), ...(mediumItem?.successors ?? [])].forEach(id => {
+          const value = String(id || '').trim();
+          if (value) {
+            successorIds.add(value);
+            successorIds.add(rootActivityId(value));
+          }
+        });
+      });
+
+    if (previousActivityIds.size === 0 && successorIds.size === 0) return [];
+
+    return openMediumItems.filter(item => {
+      const itemIds = [item.id, item.originalId, rootActivityId(item.id)].filter(Boolean).map(String);
+      const directSuccessor = itemIds.some(id => successorIds.has(id));
+      const predecessorReleased = (item.predecessors ?? []).some(id => {
+        const value = String(id || '').trim();
+        return previousActivityIds.has(value) || previousActivityIds.has(rootActivityId(value));
+      });
+      return directSuccessor || predecessorReleased;
+    });
+  }, [cronogramaInicial, drawerSourceMode, planning, previousWeekIdForDrawer]);
+
+  const drawerMacroOptions = useMemo(() => (
+    Array.from(new Set(drawerCandidateActivities.map(item => slugify(item.macro)).filter(Boolean)))
+  ), [drawerCandidateActivities]);
+
+  const filteredMacros = useMemo(() => {
+    const query = drawerMacroSearch.trim().toLocaleLowerCase('pt-BR');
+    if (!query) return drawerMacroOptions;
+    return drawerMacroOptions.filter(macro => (
+      getMacroTitle(macro).toLocaleLowerCase('pt-BR').includes(query) ||
+      macro.toLocaleLowerCase('pt-BR').includes(query)
+    ));
+  }, [drawerMacroOptions, drawerMacroSearch]);
+
+  const availableFloorsForMacro = useMemo(() => {
+    if (drawerSourceMode === 'unfinished' || !drawerMacro) return [];
+    return Array.from(new Set(
+      drawerCandidateActivities
+        .filter(item => slugify(item.macro) === drawerMacro)
+        .map(item => item.floor)
+        .filter(Boolean)
+    ));
+  }, [drawerCandidateActivities, drawerMacro, drawerSourceMode]);
+
+  const availableServicesForMacroAndFloors = useMemo(() => {
+    if (drawerSourceMode === 'unfinished') return drawerCandidateActivities;
+    if (!drawerMacro || drawerFloors.length === 0) return [];
+    return drawerCandidateActivities.filter(item =>
+      slugify(item.macro) === drawerMacro &&
+      drawerFloors.includes(item.floor)
+    );
+  }, [drawerCandidateActivities, drawerMacro, drawerFloors, drawerSourceMode]);
+
+  useEffect(() => {
+    setDrawerFloors([]);
+    setDrawerSelectedServices([]);
+    setDrawerWarning('');
+    if (drawerMacro && !drawerMacroOptions.includes(drawerMacro)) setDrawerMacro('');
+  }, [drawerSourceMode, drawerMacroOptions, drawerMacro]);
+
+  const activityOrderMap = useMemo(() => {
+    const byId = new Map<string, number>();
+    const byComposite = new Map<string, number>();
+    cronogramaInicial.forEach((item, index) => {
+      byId.set(item.id, index);
+      byId.set(rootActivityId(item.id), index);
+      if (item.originalId) byId.set(item.originalId, index);
+      byComposite.set(`${item.floor}||${slugify(item.macro)}||${item.service}`.toLocaleLowerCase('pt-BR'), index);
+    });
+    return { byId, byComposite };
+  }, [cronogramaInicial]);
+
   // --- Filtros de Pesquisa ---
   const filteredWeeklyTasks = useMemo(() => {
     let list = [...weeklyTasks];
@@ -782,8 +934,22 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
       if (planningStatusFilter === 'ok') list = list.filter(t => t.progressThisWeek >= t.plannedThisWeek);
       else if (planningStatusFilter === 'delayed') list = list.filter(t => t.progressThisWeek < t.plannedThisWeek);
     }
-    return list;
-  }, [weeklyTasks, planningSearch, planningTeamFilter, planningStatusFilter]);
+    return list.sort((a, b) => {
+      const aComposite = `${a.floor}||${slugify(a.sectionId)}||${a.activityName}`.toLocaleLowerCase('pt-BR');
+      const bComposite = `${b.floor}||${slugify(b.sectionId)}||${b.activityName}`.toLocaleLowerCase('pt-BR');
+      const aOrder =
+        activityOrderMap.byId.get(a.activityId) ??
+        activityOrderMap.byId.get(rootActivityId(a.activityId)) ??
+        activityOrderMap.byComposite.get(aComposite) ??
+        Number.MAX_SAFE_INTEGER;
+      const bOrder =
+        activityOrderMap.byId.get(b.activityId) ??
+        activityOrderMap.byId.get(rootActivityId(b.activityId)) ??
+        activityOrderMap.byComposite.get(bComposite) ??
+        Number.MAX_SAFE_INTEGER;
+      return aOrder - bOrder || a.floor.localeCompare(b.floor, 'pt-BR') || a.activityName.localeCompare(b.activityName, 'pt-BR');
+    });
+  }, [weeklyTasks, planningSearch, planningTeamFilter, planningStatusFilter, activityOrderMap]);
 
   const filteredGiantPlanningTasks = useMemo(() => {
     let list = [...planning];
@@ -887,39 +1053,85 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
   };
 
   // Adicionar Atividades
-  const handleAddTasksFromDrawer = (tasksList: Array<{ id: string; serviceName: string; lot: string; packageName: string }>, teamName: string) => {
-    const weekId = toLocalDateString(currentWeekStart);
-    const newItems: ShortTermWeeklyItem[] = [];
+  const handleIncludeDrawerActivities = () => {
+    if (drawerSourceMode !== 'unfinished' && (!drawerMacro || drawerFloors.length === 0)) {
+      setNotification({ message: 'Selecione a macroatividade, os pavimentos e pelo menos um servico.', type: 'error' });
+      return;
+    }
+    if (drawerSelectedServices.length === 0) {
+      setNotification({ message: 'Selecione pelo menos um servico.', type: 'error' });
+      return;
+    }
 
-    tasksList.forEach(t => {
-      const uniqueId = slugify(`${t.id}_${weekId}_${teamName || 'extra'}`);
-      if (planning.some(p => p.id === uniqueId)) return;
+    const newItems: ShortTermWeeklyItem[] = [];
+    const duplicates: string[] = [];
+
+    drawerSelectedServices.forEach(serviceId => {
+      const match = drawerCandidateActivities.find(item => item.id === serviceId);
+      if (!match) return;
+
+      const alreadyPlanned = weeklyTasks.some(p => p.activityId === match.id && p.floor === match.floor && !p.finalized);
+      if (alreadyPlanned) {
+        duplicates.push(`${match.service} (${match.floor})`);
+        return;
+      }
+
+      const executedBefore = roundDown25(match.progress || 0);
+      const uniqueId = slugify(`${match.id}_${currentWeekId}_${drawerResponsible || match.responsible || 'sem-equipe'}`);
 
       newItems.push({
         id: uniqueId,
-        weekId,
-        activityId: t.id,
-        activityName: t.serviceName,
-        floor: t.lot,
-        sectionId: t.packageName,
-        responsible: teamName,
+        weekId: currentWeekId,
+        activityId: match.id,
+        activityName: match.service,
+        floor: match.floor,
+        sectionId: match.macro,
+        responsible: drawerResponsible || match.responsible || '',
         efetivo: null,
-        plannedThisWeek: 100,
+        plannedThisWeek: Math.max(25, 100 - executedBefore),
         progressThisWeek: 0,
-        executedBefore: 0,
+        executedBefore,
+        executedBeforeRaw: roundPercentValue(match.progress || 0),
         dailyWork: [0, 0, 0, 0, 0],
         delayReason: '',
         observations: '',
         finalized: false,
-        isManual: false
+        isManual: false,
+        isParent: match.isParent,
+        finishDate: match.endDate,
+        predecessors: match.predecessors ?? [],
+        successors: match.successors ?? [],
+        originalId: match.originalId,
+        replicationGroup: match.replicationGroup
       });
     });
+
+    if (duplicates.length > 0) {
+      setDrawerWarning(`Ja incluidas nesta semana: ${duplicates.join('; ')}`);
+    } else {
+      setDrawerWarning('');
+    }
 
     if (newItems.length > 0) {
       setPlanning(prev => [...prev, ...newItems]);
       setNotification({ message: `${newItems.length} atividades adicionadas!`, type: 'success' });
+      if (duplicates.length === 0) {
+        setDrawerSelectedServices([]);
+        setIsDrawerOpen(false);
+      }
     }
-    setIsDrawerOpen(false);
+  };
+
+  const handleAddTasksFromDrawer = (tasksList: Array<{ id: string; serviceName?: string; lot?: string; packageName?: string }>, teamName: string) => {
+    const previousSelection = drawerSelectedServices;
+    const previousResponsible = drawerResponsible;
+    setDrawerSelectedServices(tasksList.map(item => item.id));
+    setDrawerResponsible(teamName);
+    window.setTimeout(() => {
+      handleIncludeDrawerActivities();
+      setDrawerSelectedServices(previousSelection);
+      setDrawerResponsible(previousResponsible);
+    }, 0);
   };
 
   const handleAddManualTask = () => {
@@ -1075,7 +1287,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
   };
 
   // Enviar WhatsApp
-  const handleSendWhatsApp = (teamName: string) => {
+  const handleSendWhatsAppLegacy = (teamName: string) => {
     const phone = teamPhones[teamName] || '';
     if (!phone) {
       alert(`Cadastre o telefone da equipe ${teamName} nas configurações primeiro.`);
@@ -1094,6 +1306,49 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
   };
 
   // Impressão
+  const getWhatsappAvailableTeams = () => {
+    const weekTeamNames = new Set(
+      weeklyTasks
+        .filter(t => t.responsible && !t.finalized)
+        .map(t => String(t.responsible).trim())
+        .filter(Boolean)
+    );
+    return teams.filter(team => weekTeamNames.has(String(team).trim()));
+  };
+
+  const generateWhatsappMessage = (teamName: string): string => {
+    const weekId = toLocalDateString(currentWeekStart);
+    const weekEndDate = addDays(currentWeekStart, 4);
+    const shareUrl = `${window.location.origin}${window.location.pathname}?mode=team&u=${projectId}&t=${encodeURIComponent(teamName)}&w=${weekId}`;
+    const teamTasks = weeklyTasks.filter(t => t.responsible === teamName && !t.finalized);
+    const taskLines = teamTasks.length
+      ? teamTasks.map((t, idx) => {
+          const complement = t.serviceComplement ? ` - ${t.serviceComplement}` : '';
+          return `${idx + 1}. ${t.activityName}${complement} (${t.floor}) - Meta: ${t.plannedThisWeek}%`;
+        }).join('\n')
+      : 'Sem servicos planejados para esta semana.';
+
+    return `Ola, equipe ${teamName}!\n\nServicos da semana (${formatDateBR(currentWeekStart)} a ${formatDateBR(weekEndDate)}):\n${taskLines}\n\nApontamento de campo: ${shareUrl}`;
+  };
+
+  const openWhatsappShareModal = () => {
+    const availableTeams = getWhatsappAvailableTeams();
+    if (availableTeams.length === 0) {
+      setNotification({ message: 'Nenhuma equipe com atividades planejadas nesta semana.', type: 'error' });
+      return;
+    }
+    const initialTeam = availableTeams[0];
+    setWhatsappModal({ isOpen: true, teamName: initialTeam, text: generateWhatsappMessage(initialTeam) });
+  };
+
+  const handleSendWhatsApp = () => {
+    const phone = teamPhones[whatsappModal.teamName] || '';
+    const cleanPhone = phone.replace(/[^\d+]/g, '');
+    const phoneParam = cleanPhone ? `phone=${cleanPhone}&` : '';
+    window.open(`https://api.whatsapp.com/send?${phoneParam}text=${encodeURIComponent(whatsappModal.text)}`, '_blank');
+    setWhatsappModal(prev => ({ ...prev, isOpen: false }));
+  };
+
   const handlePrintPlanning = () => {
     const weekId = toLocalDateString(currentWeekStart);
     const dataRows = weeklyTasks;
@@ -1266,7 +1521,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
 
       {/* Modais */}
       {finalizeModal?.isOpen && renderFinalizeWeekModal()}
-      {whatsappModal && renderWhatsAppModal()}
+      {whatsappModal.isOpen && renderWhatsAppModal()}
       {isDrawerOpen && renderDrawer()}
 
       {/* Diálogos Globais */}
@@ -1487,7 +1742,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                 </button>
               )}
               {teams.length > 0 && weeklyTasks.length > 0 && (
-                <button onClick={() => setWhatsappModal(true)} className="flex-1 md:flex-none px-4 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-black rounded-xl text-[10px] uppercase tracking-wider border border-indigo-200 cursor-pointer">
+                <button onClick={openWhatsappShareModal} className="flex-1 md:flex-none px-4 py-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-black rounded-xl text-[10px] uppercase tracking-wider border border-indigo-200 cursor-pointer">
                   💬 WhatsApp
                 </button>
               )}
@@ -1499,7 +1754,15 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                 🏁 Finalizar Semana
               </button>
               <button 
-                onClick={() => { setDrawerMacro(allPossibleMacros[0] || ''); setDrawerWarning(''); setIsDrawerOpen(true); }}
+                onClick={() => {
+                  setDrawerSourceMode('medium');
+                  setDrawerMacro(drawerMacroOptions[0] || '');
+                  setDrawerFloors([]);
+                  setDrawerSelectedServices([]);
+                  setDrawerResponsible('');
+                  setDrawerWarning('');
+                  setIsDrawerOpen(true);
+                }}
                 className="flex-1 md:flex-none px-4 py-3 bg-indigo-600 text-white font-black rounded-xl text-[10px] uppercase tracking-wider hover:bg-indigo-700 cursor-pointer"
               >
                 ➕ Programar Tarefas
@@ -2213,26 +2476,48 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
   }
 
   function renderWhatsAppModal() {
+    const availableTeams = getWhatsappAvailableTeams();
+
     return (
       <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-205">
         <div className="bg-white border border-slate-200 p-6 rounded-3xl shadow-xl max-w-md w-full space-y-4">
           <div className="flex justify-between items-center border-b pb-2">
             <h3 className="text-xs font-black text-slate-800 uppercase tracking-tight">Compartilhar WhatsApp</h3>
-            <button onClick={() => setWhatsappModal(false)} className="text-slate-400 hover:text-slate-650 font-bold text-base">&times;</button>
+            <button onClick={() => setWhatsappModal(prev => ({ ...prev, isOpen: false }))} className="text-slate-400 hover:text-slate-650 font-bold text-base">&times;</button>
           </div>
-          <div className="max-h-[220px] overflow-y-auto space-y-2">
-            {teams.map(team => {
-              const phone = teamPhones[team] || '';
-              return (
-                <div key={team} className="flex justify-between items-center p-2.5 bg-slate-50 border border-slate-200 rounded-xl">
-                  <div className="min-w-0 flex-1 pr-2">
-                    <span className="block text-[11px] font-black text-slate-850 uppercase truncate">{team}</span>
-                    <span className="block text-[8px] text-slate-500 font-mono mt-0.5">{phone || 'Sem telefone'}</span>
-                  </div>
-                  <button onClick={() => handleSendWhatsApp(team)} className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[9px] font-black uppercase rounded-lg transition cursor-pointer">Enviar Link</button>
-                </div>
-              );
-            })}
+          <div className="space-y-3">
+            <div>
+              <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">Equipe</label>
+              <select
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold uppercase outline-none"
+                value={whatsappModal.teamName}
+                onChange={(event) => {
+                  const teamName = event.target.value;
+                  setWhatsappModal({ isOpen: true, teamName, text: generateWhatsappMessage(teamName) });
+                }}
+              >
+                {availableTeams.map(team => <option key={team} value={team}>{team}</option>)}
+              </select>
+            </div>
+            <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+              <div className="flex justify-between text-[9px] font-black uppercase text-slate-500">
+                <span>Telefone cadastrado</span>
+                <span className="text-indigo-700 font-mono">{teamPhones[whatsappModal.teamName] || 'Nao cadastrado'}</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">Mensagem</label>
+              <textarea
+                rows={8}
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono text-slate-700 outline-none focus:bg-white focus:border-indigo-500 resize-none"
+                value={whatsappModal.text}
+                onChange={(event) => setWhatsappModal(prev => ({ ...prev, text: event.target.value }))}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+              <button onClick={() => setWhatsappModal(prev => ({ ...prev, isOpen: false }))} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-black uppercase rounded-xl transition">Voltar</button>
+              <button onClick={handleSendWhatsApp} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase rounded-xl transition">Enviar via WhatsApp</button>
+            </div>
           </div>
         </div>
       </div>
@@ -2240,6 +2525,203 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
   }
 
   function renderDrawer() {
+    if (Date.now() >= 0) {
+      const sourceOptions: Array<{ id: typeof drawerSourceMode; label: string; detail: string }> = [
+        { id: 'medium', label: 'Medio prazo publicado', detail: 'Atividades publicadas pelo medio prazo.' },
+        { id: 'previous-successors', label: 'Sucessoras liberadas', detail: `Base: semana ${formatDateBR(previousWeekIdForDrawer)}.` },
+        { id: 'unfinished', label: 'Nao concluidas', detail: 'Atividades do medio prazo com avanco parcial.' }
+      ];
+
+      return (
+        <div className="fixed inset-0 z-50 overflow-hidden">
+          <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-xs" onClick={() => setIsDrawerOpen(false)} />
+          <div className="absolute inset-y-0 right-0 w-full max-w-md bg-white shadow-2xl flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-300">
+            <div className="p-5 bg-indigo-950 text-white flex justify-between items-center">
+              <div>
+                <h3 className="font-black text-sm uppercase tracking-wider">Adicionar Atividades</h3>
+                <p className="text-[10px] text-indigo-300">Origem: medio prazo do Plano Total</p>
+              </div>
+              <button onClick={() => setIsDrawerOpen(false)} className="text-2xl font-bold hover:text-indigo-200">&times;</button>
+            </div>
+
+            <div className="flex-1 p-5 space-y-5 overflow-y-auto">
+              {drawerWarning && <div className="bg-red-50 border border-red-200 text-red-700 text-[10px] font-bold p-3 rounded-lg">{drawerWarning}</div>}
+
+              <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                <label className="block text-[10px] font-black uppercase text-slate-500">Origem das atividades</label>
+                <div className="grid grid-cols-1 gap-2">
+                  {sourceOptions.map(option => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setDrawerSourceMode(option.id)}
+                      className={`w-full text-left p-3 rounded-xl border transition ${
+                        drawerSourceMode === option.id
+                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          : 'bg-white text-slate-650 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50'
+                      }`}
+                    >
+                      <span className="block text-[10px] font-black uppercase tracking-wider">{option.label}</span>
+                      <span className={`block text-[9px] font-bold mt-0.5 ${drawerSourceMode === option.id ? 'text-indigo-100' : 'text-slate-400'}`}>{option.detail}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {drawerSourceMode !== 'unfinished' && (
+                <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+                  <div className="flex justify-between items-center gap-3">
+                    <label className="block text-[10px] font-black uppercase text-indigo-600">1. Macroatividade</label>
+                    {drawerMacro && <span className="text-[9px] font-bold text-slate-500 text-right truncate max-w-[210px]">{getMacroTitle(drawerMacro)}</span>}
+                  </div>
+                  {isDrawerMacroDropdownOpen && <div className="fixed inset-0 z-40" onClick={() => setIsDrawerMacroDropdownOpen(false)} />}
+                  <div className="relative z-50">
+                    <input
+                      type="text"
+                      placeholder="Buscar macroatividade..."
+                      className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-lg font-bold text-xs focus:bg-white outline-none"
+                      value={isDrawerMacroDropdownOpen ? drawerMacroSearch : (drawerMacro ? getMacroTitle(drawerMacro) : '')}
+                      onFocus={() => {
+                        setDrawerMacroSearch('');
+                        setIsDrawerMacroDropdownOpen(true);
+                      }}
+                      onChange={(event) => setDrawerMacroSearch(event.target.value)}
+                    />
+                    {isDrawerMacroDropdownOpen && (
+                      <div className="absolute left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto z-50">
+                        {filteredMacros.map(macro => (
+                          <button
+                            key={macro}
+                            type="button"
+                            onClick={() => {
+                              setDrawerMacro(macro);
+                              setDrawerFloors([]);
+                              setDrawerSelectedServices([]);
+                              setDrawerWarning('');
+                              setIsDrawerMacroDropdownOpen(false);
+                            }}
+                            className="w-full text-left p-2.5 text-xs font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition uppercase border-b border-slate-100 last:border-b-0"
+                          >
+                            {getMacroTitle(macro)}
+                          </button>
+                        ))}
+                        {filteredMacros.length === 0 && (
+                          <p className="p-3 text-xs text-slate-400 italic text-center font-bold">Nenhuma macroatividade encontrada.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {drawerSourceMode !== 'unfinished' && (
+                <div className="space-y-2 rounded-xl border border-indigo-100 bg-white p-3">
+                  <div className="flex justify-between items-center gap-2">
+                    <label className="block text-[10px] font-black uppercase text-indigo-600">2. Pavimentos</label>
+                    {availableFloorsForMacro.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setDrawerFloors(drawerFloors.length === availableFloorsForMacro.length ? [] : [...availableFloorsForMacro])}
+                        className="text-[9px] font-bold text-indigo-700 hover:underline uppercase"
+                      >
+                        Todos
+                      </button>
+                    )}
+                  </div>
+                  <div className={`grid grid-cols-2 gap-2 ${!drawerMacro ? 'pointer-events-none opacity-50' : ''}`}>
+                    {availableFloorsForMacro.map(floor => (
+                      <label key={floor} className="flex items-center gap-2 p-2 bg-slate-50 rounded-lg border hover:border-indigo-300 transition cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 text-indigo-600 rounded"
+                          checked={drawerFloors.includes(floor)}
+                          onChange={(event) => {
+                            if (event.target.checked) setDrawerFloors([...drawerFloors, floor]);
+                            else setDrawerFloors(drawerFloors.filter(item => item !== floor));
+                          }}
+                        />
+                        <span className="text-[10px] font-bold text-slate-700 truncate">{floor}</span>
+                      </label>
+                    ))}
+                    {drawerMacro && availableFloorsForMacro.length === 0 && <p className="text-[10px] text-slate-400 italic col-span-2">Nenhum pavimento para esta macro.</p>}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <label className="block text-[10px] font-black uppercase text-indigo-600">{drawerSourceMode === 'unfinished' ? '1.' : '3.'} Servicos</label>
+                  {availableServicesForMacroAndFloors.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setDrawerSelectedServices(drawerSelectedServices.length === availableServicesForMacroAndFloors.length ? [] : availableServicesForMacroAndFloors.map(item => item.id))}
+                      className="text-[9px] font-bold text-indigo-700 hover:underline uppercase"
+                    >
+                      Todos
+                    </button>
+                  )}
+                </div>
+                <div className="bg-slate-50 border rounded-xl p-3 h-[42vh] min-h-[260px] overflow-y-auto space-y-2">
+                  {availableServicesForMacroAndFloors.map(item => (
+                    <label key={item.id} className="flex items-center gap-3 p-2 bg-white rounded-lg border hover:border-indigo-300 transition cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 text-indigo-600 rounded"
+                        checked={drawerSelectedServices.includes(item.id)}
+                        onChange={(event) => {
+                          if (event.target.checked) setDrawerSelectedServices([...drawerSelectedServices, item.id]);
+                          else setDrawerSelectedServices(drawerSelectedServices.filter(id => id !== item.id));
+                        }}
+                      />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-slate-800 truncate">{item.service}</p>
+                        <p className="text-[9px] text-slate-500 font-bold">{item.floor} | {getMacroTitle(slugify(item.macro))} | {roundPercentValue(item.progress || 0)}%</p>
+                      </div>
+                    </label>
+                  ))}
+                  {availableServicesForMacroAndFloors.length === 0 && (
+                    <p className="p-4 text-[10px] text-slate-400 italic text-center font-bold">
+                      {tasks.length === 0 ? 'Publique uma janela no medio prazo para liberar atividades no curto prazo.' : 'Nenhum servico disponivel para os filtros selecionados.'}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2 border-t pt-3">
+                <label className="block text-[10px] font-black uppercase text-slate-400">{drawerSourceMode === 'unfinished' ? '2.' : '4.'} Atribuir equipe</label>
+                <select className="w-full p-2.5 bg-slate-100 border rounded-lg text-xs font-bold uppercase cursor-pointer" value={drawerResponsible} onChange={event => setDrawerResponsible(event.target.value)}>
+                  <option value="">-- Padrao da atividade --</option>
+                  {teams.map(team => <option key={team} value={team}>{team}</option>)}
+                </select>
+              </div>
+
+              <div className="border-t border-slate-200 pt-4 space-y-3">
+                <h4 className="text-[10px] font-black uppercase text-indigo-950 tracking-wider">Atividade extra nao prevista</h4>
+                <div className="space-y-2.5 font-bold text-slate-700">
+                  <input type="text" placeholder="SERVICO EXTRA..." className="w-full p-2.5 border border-slate-200 rounded-xl text-xs outline-none bg-slate-50 focus:bg-white uppercase font-bold text-slate-800" value={extraActivityName} onChange={e => setExtraActivityName(e.target.value)} />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="text" placeholder="PAVIMENTO..." className="w-full p-2.5 border border-slate-200 rounded-xl text-xs outline-none bg-slate-50 focus:bg-white uppercase font-bold text-slate-800" value={extraActivityFloor} onChange={e => setExtraActivityFloor(e.target.value)} />
+                    <input type="text" placeholder="PACOTE..." className="w-full p-2.5 border border-slate-200 rounded-xl text-xs outline-none bg-slate-50 focus:bg-white uppercase font-bold text-slate-800" value={extraActivityMacro} onChange={e => setExtraActivityMacro(e.target.value)} />
+                  </div>
+                  <select className="w-full p-2.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-xl text-xs font-bold outline-none" value={extraActivityTeam} onChange={e => setExtraActivityTeam(e.target.value)}>
+                    <option value="">-- Escolha a Equipe --</option>
+                    {teams.map(team => <option key={team} value={team}>{team}</option>)}
+                  </select>
+                  <button onClick={handleAddManualTask} className="w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white text-[10px] font-black uppercase tracking-wider rounded-xl transition cursor-pointer">Programar Atividade Extra</button>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 bg-slate-50 border-t sticky bottom-0">
+              <button onClick={handleIncludeDrawerActivities} disabled={drawerSelectedServices.length === 0} className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black uppercase tracking-wider rounded-xl shadow-md transition active:scale-95">
+                Confirmar Atividades ({drawerSelectedServices.length})
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
     const weekId = toLocalDateString(currentWeekStart);
     const plannedActivityIds = planning.filter(p => p.weekId === weekId).map(p => p.activityId);
     let candidates = cronogramaInicial.filter(c => !plannedActivityIds.includes(c.id));

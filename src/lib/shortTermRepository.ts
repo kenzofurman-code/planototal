@@ -12,11 +12,18 @@ export type ShortTermWeeklyItem = {
   plannedThisWeek: number;
   progressThisWeek: number;
   executedBefore: number;
+  executedBeforeRaw?: number;
   dailyWork: number[];
   delayReason: string;
   observations: string;
   finalized: boolean;
   isManual: boolean;
+  isParent?: boolean;
+  finishDate?: string;
+  predecessors?: string[];
+  successors?: string[];
+  originalId?: string;
+  replicationGroup?: string;
   serviceComplement?: string;
   preFilledProgress?: number;
   preFilledDelayReason?: string;
