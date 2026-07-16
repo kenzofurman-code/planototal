@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { loadShortTermState, saveShortTermState, type ShortTermWeeklyItem } from '../lib/shortTermRepository';
+import { getFieldProgressOptions, getSimpleServiceInstruction } from '../lib/shortTermText';
+
+const TEAM_GENERAL_OBSERVATIONS_ID = '__team_general_observations__';
 
 // Utilitário de data idêntico
 const formatDateBR = (dateOrStr: Date | string): string => {
@@ -51,6 +54,8 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
 
   const [listeningTaskId, setListeningTaskId] = useState<string | null>(null);
   const [micConnectingTaskId, setMicConnectingTaskId] = useState<string | null>(null);
+  const [teamGeneralDelayReason, setTeamGeneralDelayReason] = useState<string>('');
+  const [teamGeneralObservations, setTeamGeneralObservations] = useState<string>('');
 
   // --- CARREGAMENTO INICIAL ---
   useEffect(() => {
@@ -131,6 +136,10 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
 
     rec.onresult = (e: any) => {
       const text = e.results[0][0].transcript;
+      if (taskId === TEAM_GENERAL_OBSERVATIONS_ID) {
+        setTeamGeneralObservations(prev => prev ? `${prev} | ${text}` : text);
+        return;
+      }
       const currentInput = teamInputs[taskId] || { progress: 0, delayReason: '', observations: '' };
       setTeamInputs({
         ...teamInputs,
@@ -185,15 +194,21 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
   const handleSubmit = async () => {
     setLoading(true);
     try {
+      const generalDelayReason = teamGeneralDelayReason.trim();
+      const generalObservations = teamGeneralObservations.trim();
       const updatedPlanning = planning.map(t => {
         if (t.weekId === weekStartDate && t.responsible === teamName) {
           const input = teamInputs[t.id] || { progress: 0, delayReason: '', observations: '' };
+          const planned = t.plannedThisWeek ?? 100;
+          const taskObservation = input.observations.trim();
+          const observations = generalObservations || taskObservation;
           return {
             ...t,
             preFilledProgress: input.progress,
-            preFilledDelayReason: input.progress < (t.plannedThisWeek ?? 100) ? input.delayReason : '',
-            preFilledObservations: input.observations,
-            preFilledAt: new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR')
+            preFilledDelayReason: input.progress < planned ? (generalDelayReason || input.delayReason) : '',
+            preFilledObservations: observations,
+            preFilledAt: new Date().toLocaleDateString('pt-BR') + ' ' + new Date().toLocaleTimeString('pt-BR'),
+            lastUpdatedBy: `Equipe: ${teamName}`
           };
         }
         return t;
@@ -254,6 +269,10 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
   }
 
   const teamTasksList = planning.filter(t => t.weekId === weekStartDate && t.responsible === teamName);
+  const hasDelayedTeamTask = teamTasksList.some(t => {
+    const input = teamInputs[t.id] || { progress: 0, delayReason: '', observations: '' };
+    return input.progress < (t.plannedThisWeek ?? 100);
+  });
 
   return (
     <div className="short-team-screen min-h-screen bg-slate-950 font-sans text-slate-100 pb-16">
@@ -275,7 +294,10 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
         {teamTasksList.map((t) => {
           const input = teamInputs[t.id] || { progress: 0, delayReason: '', observations: '' };
           const planned = t.plannedThisWeek ?? 100;
-          const isDelayed = input.progress < planned;
+          const simpleInstruction = getSimpleServiceInstruction(t);
+          const fieldOptions = getFieldProgressOptions(t);
+          const isDone = input.progress >= planned;
+          const isDelayed = false;
 
           return (
             <div key={t.id} className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-lg space-y-4">
@@ -283,7 +305,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
                 <span className="px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-400 text-[8px] font-black rounded uppercase tracking-wider">
                   {t.floor}
                 </span>
-                <h3 className="text-sm font-black text-white uppercase leading-snug">{t.activityName}</h3>
+                <h3 className="text-sm font-black text-white uppercase leading-snug">{simpleInstruction}</h3>
                 {t.serviceComplement && (
                   <span className="text-[9px] font-black text-indigo-400 uppercase tracking-wide block">
                     ↳ {t.serviceComplement}
@@ -296,26 +318,29 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
                 <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wide">
                   Meta Planejada: <span className="text-white">{planned}%</span> | Avanço Realizado:
                 </label>
-                <div className="grid grid-cols-5 gap-1.5 font-bold text-slate-700">
-                  {[0, 25, 50, 75, 100].map(val => {
-                    const isActive = input.progress === val;
-                    const isOk = val >= planned;
-                    const btnColor = isOk ? 'team-progress-ok' : 'team-progress-delay';
-
-                    return (
-                      <button
-                        key={val}
-                        onClick={() => handleProgressChange(t.id, val)}
-                        className={`py-2 rounded-xl text-xs font-black transition active:scale-95 cursor-pointer border ${
-                          isActive 
-                            ? `${btnColor} text-white shadow-md scale-105` 
-                            : 'team-progress-idle'
-                        }`}
-                      >
-                        {val}%
-                      </button>
-                    );
-                  })}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 bg-slate-950/60 border border-slate-800 rounded-2xl p-2">
+                  <button
+                    type="button"
+                    onClick={() => handleProgressChange(t.id, planned)}
+                    className={`min-h-[46px] rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-tight transition border active:scale-95 ${
+                      isDone
+                        ? 'bg-blue-700 text-white border-blue-600 shadow-md ring-2 ring-blue-400/40'
+                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-blue-950 hover:text-white hover:border-blue-700'
+                    }`}
+                  >
+                    {fieldOptions.done}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleProgressChange(t.id, 0)}
+                    className={`min-h-[46px] rounded-xl px-3 py-2 text-[10px] font-black uppercase tracking-tight transition border active:scale-95 ${
+                      !isDone
+                        ? 'bg-red-700 text-white border-red-600 shadow-md ring-2 ring-red-400/40'
+                        : 'bg-slate-900 text-slate-300 border-slate-700 hover:bg-red-950 hover:text-white hover:border-red-700'
+                    }`}
+                  >
+                    {fieldOptions.pending}
+                  </button>
                 </div>
               </div>
 
@@ -342,7 +367,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
               )}
 
               {/* Observações de Campo */}
-              <div className="space-y-1">
+              <div className="hidden">
                 <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wide">
                   Notas de Campo / Observações:
                 </label>
@@ -378,12 +403,69 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
         )}
 
         {teamTasksList.length > 0 && (
-          <button
-            onClick={handleSubmit}
-            className="team-submit w-full py-3.5 text-white font-black uppercase text-xs tracking-wider rounded-xl shadow-lg transition active:scale-95 cursor-pointer"
-          >
-            Enviar Apontamentos
-          </button>
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-lg space-y-4">
+            <div className="border-b border-slate-800 pb-2">
+              <h3 className="text-xs font-black text-white uppercase tracking-wider">Fechamento da semana</h3>
+              <p className="text-[10px] font-bold text-slate-500 mt-1">Essas informacoes valem para todos os servicos apontados.</p>
+            </div>
+
+            {hasDelayedTeamTask && (
+              <div className="space-y-1.5">
+                <label className="block text-[9px] font-black text-amber-400 uppercase tracking-wide">
+                  Motivo de atraso geral
+                </label>
+                <div className="relative inline-block w-full min-h-[40px] bg-slate-950 border border-slate-800 rounded-xl hover:border-amber-500/60 transition">
+                  <span className="block text-xs font-black py-3 px-3 uppercase text-amber-300 truncate">
+                    {teamGeneralDelayReason || 'Selecione o motivo...'}
+                  </span>
+                  <select
+                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                    value={teamGeneralDelayReason}
+                    onChange={e => setTeamGeneralDelayReason(e.target.value)}
+                  >
+                    <option value="">Escolha o motivo</option>
+                    {delayReasons.map(r => <option key={r} value={r}>{r}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="block text-[9px] font-black text-slate-400 uppercase tracking-wide">
+                Observacoes / comentarios gerais
+              </label>
+              <div className="flex gap-2 items-start">
+                <textarea
+                  rows={3}
+                  placeholder="Ex: aguardando material, ajuste de equipe, interferencias..."
+                  className="flex-1 p-3 bg-slate-950 border border-slate-800 text-slate-200 rounded-xl text-xs outline-none focus:border-indigo-500 resize-none font-bold placeholder-slate-600"
+                  value={teamGeneralObservations}
+                  onChange={e => setTeamGeneralObservations(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleVoiceInput(TEAM_GENERAL_OBSERVATIONS_ID)}
+                  className={`p-3.5 rounded-xl transition active:scale-95 text-xs shrink-0 shadow-lg font-black uppercase ${
+                    listeningTaskId === TEAM_GENERAL_OBSERVATIONS_ID
+                      ? 'bg-red-600 text-white animate-pulse'
+                      : micConnectingTaskId === TEAM_GENERAL_OBSERVATIONS_ID
+                      ? 'bg-amber-500 text-white animate-pulse'
+                      : 'bg-indigo-900/50 text-indigo-300 border border-indigo-700'
+                  }`}
+                  title="Gravar observacao por voz"
+                >
+                  Gravar
+                </button>
+              </div>
+            </div>
+
+            <button
+              onClick={handleSubmit}
+              className="team-submit w-full py-3.5 text-white font-black uppercase text-xs tracking-wider rounded-xl shadow-lg transition active:scale-95 cursor-pointer"
+            >
+              Enviar Apontamentos
+            </button>
+          </div>
         )}
       </main>
     </div>

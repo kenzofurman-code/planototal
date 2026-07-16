@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { loadShortTermState, saveShortTermState, type ShortTermWeeklyItem, type ShortTermHistory } from '../lib/shortTermRepository';
+import { getSimpleServiceInstruction } from '../lib/shortTermText';
 import type { Task } from '../types';
 
 // --- Utilitários de Data e Formatação ---
@@ -1322,13 +1323,10 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
     const shareUrl = `${window.location.origin}${window.location.pathname}?mode=team&u=${projectId}&t=${encodeURIComponent(teamName)}&w=${weekId}`;
     const teamTasks = weeklyTasks.filter(t => t.responsible === teamName && !t.finalized);
     const taskLines = teamTasks.length
-      ? teamTasks.map((t, idx) => {
-          const complement = t.serviceComplement ? ` - ${t.serviceComplement}` : '';
-          return `${idx + 1}. ${t.activityName}${complement} (${t.floor}) - Meta: ${t.plannedThisWeek}%`;
-        }).join('\n')
+      ? teamTasks.map(t => `- ${getSimpleServiceInstruction(t)}.`).join('\n')
       : 'Sem servicos planejados para esta semana.';
 
-    return `Ola, equipe ${teamName}!\n\nServicos da semana (${formatDateBR(currentWeekStart)} a ${formatDateBR(weekEndDate)}):\n${taskLines}\n\nApontamento de campo: ${shareUrl}`;
+    return `Oi, equipe ${teamName}!\n\nServicos da semana (${formatDateBR(currentWeekStart)} a ${formatDateBR(weekEndDate)}):\n${taskLines}\n\nApontamento de campo: ${shareUrl}`;
   };
 
   const openWhatsappShareModal = () => {
@@ -1350,6 +1348,89 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
   };
 
   const handlePrintPlanning = () => {
+    const weekEndDate = addDays(currentWeekStart, 4);
+    const dateRange = `${formatDateBR(currentWeekStart)} a ${formatDateBR(weekEndDate)}`;
+    const tasksToPrint = filteredWeeklyTasks.length > 0 ? filteredWeeklyTasks : weeklyTasks;
+    const dayLabels = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex'];
+    const dayDates = [0, 1, 2, 3, 4].map(i => formatDateBR(addDays(currentWeekStart, i)).slice(0, 5));
+    const dayWeathers = [0, 1, 2, 3, 4].map(i => {
+      const dayDate = addDays(currentWeekStart, i);
+      const dayStr = toISODate(dayDate);
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const diffDays = Math.round((dayDate.getTime() - todayStart.getTime()) / 86400000);
+      const weather = diffDays >= -15 && diffDays <= 15 ? weatherCache[`${projectCity.trim().toLowerCase()}_${dayStr}`] : null;
+      return weather ? getWeatherEmoji(weather.icon) : '';
+    });
+    const rows = tasksToPrint.map(t => ({
+      activityName: t.activityName || '',
+      serviceInstruction: getSimpleServiceInstruction(t),
+      serviceComplement: t.serviceComplement || '',
+      floor: t.floor || '',
+      sectionId: t.sectionId || '',
+      responsible: t.responsible || '',
+      efetivo: t.efetivo ?? '',
+      executedBefore: roundPercentValue(t.executedBeforeRaw ?? t.executedBefore ?? 0),
+      plannedThisWeek: t.plannedThisWeek ?? 100,
+      progressThisWeek: t.progressThisWeek ?? 0,
+      dailyWork: Array.isArray(t.dailyWork) ? t.dailyWork : [0, 0, 0, 0, 0],
+      delayReason: t.delayReason || '',
+      observations: t.observations || '',
+      finalized: !!t.finalized,
+      isManual: !!t.isManual
+    }));
+    const safeJson = (value: unknown) => (JSON.stringify(value) || 'null').replace(/</g, '\\u003c');
+    const teamOptions = Array.from(new Set(rows.map(r => r.responsible).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const htmlContent = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Impressao - Planejamento Semanal</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',Arial,sans-serif;font-size:11px;color:#1e293b;background:#f8fafc}
+@media print{body{background:#fff;font-size:9px}.no-print{display:none!important}.print-page{padding:8px 10px}thead th{background:#1e293b!important;color:#fff!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}tr.finalized td{background:#f1f5f9!important;color:#94a3b8!important}tr.delayed td{background:#fff1f2!important}tr.ok td{background:#f0fdf4!important}.badge,.day-chip.worked{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+.print-page{max-width:1400px;margin:0 auto;padding:16px}.toolbar{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 16px;margin-bottom:12px;display:flex;flex-wrap:wrap;align-items:center;gap:10px;box-shadow:0 1px 4px rgba(0,0,0,.07)}.toolbar-title{font-size:12px;font-weight:900;color:#1e293b;flex:1 0 100%;margin-bottom:4px}.col-toggles{display:flex;flex-wrap:wrap;gap:6px;flex:1}.col-toggle{display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:10.5px;font-weight:700;color:#475569;padding:3px 9px;border-radius:6px;border:1.5px solid #e2e8f0;background:#f8fafc}.col-toggle input{accent-color:#4f46e5}.col-toggle:has(input:checked){background:#eef2ff;border-color:#a5b4fc;color:#3730a3}.toolbar-actions{display:flex;gap:8px;margin-left:auto}.btn-print{padding:8px 20px;background:#1e293b;color:#fff;border:none;border-radius:8px;font-size:11px;font-weight:900;cursor:pointer}.btn-print:hover{background:#334155}.print-control{display:flex;align-items:center;gap:6px;background:#f8fafc;padding:3px 9px;border-radius:6px;border:1.5px solid #e2e8f0}.print-control-label{font-size:10px;font-weight:900;color:#475569;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap}.print-input,.print-select{padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;font-size:10.5px;color:#1e293b;font-family:inherit;outline:none;background:#fff}.page-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid #1e293b}.page-header h1{font-size:14px;font-weight:900;color:#1e293b;text-transform:uppercase;letter-spacing:.05em}.page-header p{font-size:10px;color:#64748b;margin-top:2px;font-weight:600}.meta{text-align:right;font-size:9px;color:#64748b;font-weight:700}
+table{width:100%;border-collapse:collapse;border:1px solid #cbd5e1;background:#fff}thead th{background:#1e293b;color:#fff;padding:6px 8px;text-align:left;font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.05em;white-space:normal;vertical-align:bottom;border-right:1px solid #334155;cursor:pointer;user-select:none}thead th:hover,thead th.sorted{background:#312e81}tbody tr{border-bottom:1px solid #e2e8f0}tbody tr:nth-child(even) td{background:#fafafa}tbody tr.finalized td{background:#f8fafc!important;color:#94a3b8}tbody tr.delayed td{background:#fff7f7!important}tbody tr.ok td{background:#f0fdf4!important}td{padding:5px 8px;vertical-align:middle;border-right:1px solid #e2e8f0;font-size:10px}.act-name{font-weight:800;text-transform:uppercase;font-size:10px;line-height:1.3}.act-comp{font-size:8px;color:#64748b;margin-top:1px}.floor-cell{font-size:9px;font-weight:800;color:#4f46e5;text-transform:uppercase;white-space:normal;word-break:break-word}.badge{display:inline-block;padding:2px 6px;border-radius:999px;font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.badge-green{background:#dcfce7;color:#15803d}.badge-red{background:#fee2e2;color:#b91c1c}.badge-blue{background:#dbeafe;color:#1d4ed8}.badge-gray{background:#f1f5f9;color:#475569}.badge-amber{background:#fef3c7;color:#b45309}.days-cell{display:flex;gap:3px;justify-content:center;flex-wrap:nowrap}.day-chip{display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;font-weight:900;padding:3px 4px;border-radius:4px;min-width:36px;height:36px}.day-chip span:last-child{font-size:7px;font-weight:700;margin-top:1px}.day-chip.worked{background:#1e293b;color:#fff}.day-chip.off{background:#f1f5f9;color:#94a3b8}.empty-row td{text-align:center;color:#94a3b8;font-style:italic;padding:20px}.cn,.cb,.cp,.cpr,.cst,.ce{width:1%}tbody td.cn,tbody td.cb,tbody td.cp,tbody td.cpr,tbody td.cst,tbody td.ce{white-space:nowrap}.cs{min-width:200px;white-space:normal!important;word-break:break-word!important}.cf{width:140px}.ct{width:100px}.cd{width:220px}.cdr,.co{width:150px;white-space:normal!important;word-break:break-word!important}
+</style>
+</head>
+<body>
+<div class="print-page">
+  <div class="toolbar no-print">
+    <div class="toolbar-title">Configurar Impressao - selecione colunas, equipe e texto do servico:</div>
+    <div class="col-toggles">
+      <label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('cn',this.checked)"> #</label><label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('cs',this.checked)"> Servico</label><label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('cf',this.checked)"> Pavimento</label><label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('ct',this.checked)"> Equipe</label><label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('ce',this.checked)"> Efetivo</label><label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('cb',this.checked)"> % Anterior</label><label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('cp',this.checked)"> Meta</label><label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('cd',this.checked)"> Dias</label><label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('cpr',this.checked)"> Progresso</label><label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('cdr',this.checked)"> Motivo</label><label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('co',this.checked)"> Observacoes</label><label class="col-toggle"><input type="checkbox" checked onchange="toggleCol('cst',this.checked)"> Status</label>
+    </div>
+    <div class="print-control"><span class="print-control-label">Equipe:</span><select class="print-select" id="teamFilter" onchange="rt()"><option value="">Todas</option>${teamOptions.map(team => `<option value="${String(team).replace(/"/g, '&quot;')}">${team}</option>`).join('')}</select></div>
+    <div class="print-control"><span class="print-control-label">Busca:</span><input class="print-input" type="text" id="searchFilter" placeholder="Buscar..." oninput="rt()" /></div>
+    <div class="print-control"><span class="print-control-label">Texto:</span><select class="print-select" id="serviceTextMode" onchange="rt()"><option value="default">Servico + pavimento + meta</option><option value="whatsapp">Texto do WhatsApp</option></select></div>
+    <div class="toolbar-actions"><button class="btn-print" onclick="window.print()">Imprimir / Salvar PDF</button></div>
+  </div>
+  <div class="page-header"><div><h1>${projectId}</h1><p>Planejamento Semanal &middot; ${dateRange} &middot; <span id="activity-count">${rows.length}</span> atividade(s)</p></div><div class="meta">Gerado em:<br/>${new Date().toLocaleString('pt-BR')}</div></div>
+  <table id="pt"><thead><tr><th class="cn" onclick="st('num')">#</th><th class="cs" onclick="st('activityName')">Servico</th><th class="cf" onclick="st('floor')">Pavimento</th><th class="ct" onclick="st('responsible')">Equipe</th><th class="ce" onclick="st('efetivo')" style="text-align:center">Efetivo</th><th class="cb" onclick="st('executedBefore')" style="text-align:center">% Anterior</th><th class="cp" onclick="st('plannedThisWeek')" style="text-align:center">Meta</th><th class="cd">${[0,1,2,3,4].map(i => `<div style="display:inline-flex;flex-direction:column;align-items:center;min-width:36px;font-size:8px;font-weight:900"><span style="height:10px">${dayWeathers[i] || '&nbsp;'}</span><span>${dayLabels[i].charAt(0)}</span><span style="color:#94a3b8;font-size:6.5px">${dayDates[i]}</span></div>`).join('')}</th><th class="cpr" onclick="st('progressThisWeek')" style="text-align:center">Progresso</th><th class="cdr" onclick="st('delayReason')">Motivo</th><th class="co">Observacoes</th><th class="cst" onclick="st('status')" style="text-align:center">Status</th></tr></thead><tbody id="pb"></tbody></table>
+  <div class="no-print" style="margin-top:8px;color:#94a3b8;font-size:10px;font-style:italic">Clique no cabecalho de qualquer coluna para ordenar.</div>
+</div>
+<script>
+var allRows=${safeJson(rows)};var DL=${safeJson(dayLabels)};var DD=${safeJson(dayDates)};var sk=null,sd='asc',hiddenCols={};
+function esc(s){return String(s||'').replace(/[&<>"']/g,function(m){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];});}
+function gso(t){if(t.finalized)return 3;var p=t.progressThisWeek,pl=t.plannedThisWeek;if(p>=pl&&pl>0)return 0;if(p<pl&&pl>0&&p>0)return 1;return 2;}
+function sv(t,k){if(k==='num')return 0;if(k==='status')return gso(t);var v=t[k];return typeof v==='number'?v:(v||'').toString().toLowerCase();}
+function st(k){if(sk===k){sd=sd==='asc'?'desc':'asc';}else{sk=k;sd='asc';}rt();}
+function rt(){var team=document.getElementById('teamFilter').value;var q=document.getElementById('searchFilter').value.toLowerCase().trim();var mode=document.getElementById('serviceTextMode').value;var rows=allRows.slice();if(team)rows=rows.filter(function(t){return (t.responsible||'')===team;});if(q)rows=rows.filter(function(t){return [t.activityName,t.serviceInstruction,t.floor,t.sectionId,t.responsible,t.observations].join(' ').toLowerCase().indexOf(q)!==-1;});if(sk){rows.sort(function(a,b){var va=sv(a,sk),vb=sv(b,sk);if(va<vb)return sd==='asc'?-1:1;if(va>vb)return sd==='asc'?1:-1;return 0;});}document.getElementById('activity-count').textContent=rows.length;var tb=document.getElementById('pb');if(!rows.length){tb.innerHTML='<tr class="empty-row"><td colspan="12">Nenhuma atividade encontrada com o filtro aplicado.</td></tr>';return;}tb.innerHTML=rows.map(function(t,i){var prog=t.progressThisWeek,planned=t.plannedThisWeek;var isOk=prog>=planned&&planned>0,isDel=prog<planned&&planned>0;var rc=t.finalized?'finalized':isOk?'ok':isDel?'delayed':'';var pb=prog===0?'<span class="badge badge-gray">0%</span>':isOk?'<span class="badge badge-green">'+prog+'%</span>':'<span class="badge badge-red">'+prog+'%</span>';var pl='<span class="badge badge-blue">'+planned+'%</span>';var before=t.executedBefore>0?'<span class="badge badge-gray">'+t.executedBefore+'%</span>':'<span style="color:#94a3b8">-</span>';var dh='<div class="days-cell">'+t.dailyWork.map(function(w,idx){return '<div class="day-chip '+(w?'worked':'off')+'"><span>'+DL[idx].charAt(0)+'</span><span>'+DD[idx]+'</span></div>';}).join('')+'</div>';var stt=t.finalized?'<span class="badge badge-gray">Finalizado</span>':isOk?'<span class="badge badge-green">Conforme</span>':isDel?'<span class="badge badge-red">Atrasado</span>':'<span class="badge badge-gray">Pendente</span>';var comp=t.serviceComplement?'<div class="act-comp">'+esc(t.serviceComplement)+'</div>':'';var extra=t.isManual?' <span class="badge badge-amber">Extra</span>':'';var serviceText=mode==='whatsapp'?t.serviceInstruction:(t.activityName+' - '+(t.floor||'-')+' - meta '+planned+'%');return '<tr class="'+rc+'"><td class="cn" style="color:#94a3b8;font-weight:900;text-align:center">'+(i+1)+'</td><td class="cs"><div class="act-name">'+esc(serviceText)+extra+'</div>'+comp+'</td><td class="cf"><span class="floor-cell">'+esc(t.floor||'-')+'</span></td><td class="ct" style="font-weight:700;white-space:nowrap">'+esc(t.responsible||'-')+'</td><td class="ce" style="text-align:center;font-weight:700">'+esc(t.efetivo!==''?t.efetivo:'-')+'</td><td class="cb" style="text-align:center">'+before+'</td><td class="cp" style="text-align:center">'+pl+'</td><td class="cd">'+dh+'</td><td class="cpr" style="text-align:center">'+pb+'</td><td class="cdr" style="font-size:9px;color:#b91c1c">'+(esc(t.delayReason)||'<span style="color:#94a3b8">-</span>')+'</td><td class="co" style="font-size:9px;color:#475569">'+(esc(t.observations)||'<span style="color:#94a3b8">-</span>')+'</td><td class="cst" style="text-align:center">'+stt+'</td></tr>';}).join('');Object.keys(hiddenCols).forEach(function(c){if(hiddenCols[c])document.querySelectorAll('tbody .'+c).forEach(function(e){e.style.display='none';});});}
+function toggleCol(c,v){hiddenCols[c]=!v;document.querySelectorAll('.'+c).forEach(function(e){e.style.display=v?'':'none';});}
+rt();
+</script>
+</body>
+</html>`;
+
+    const newWindow = window.open('', '_blank');
+    if (!newWindow) return;
+    newWindow.document.write(htmlContent);
+    newWindow.document.close();
+  };
+
+  const handlePrintPlanningLegacy = () => {
     const weekId = toLocalDateString(currentWeekStart);
     const dataRows = weeklyTasks;
     const teamOptions = Array.from(new Set(dataRows.map(t => t.responsible || 'Sem alocação'))).sort();
