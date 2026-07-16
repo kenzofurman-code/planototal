@@ -220,6 +220,21 @@ th { background: #f8fafc; color: #475569; }
 .short-planning-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .short-planning-actions button { border-radius: 14px; font-weight: 800; }
 .short-planning-actions .ghost { background: #e2e8f0; border-color: #cbd5e1; color: #334155; }
+.short-action-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 12px 16px; border-radius: 14px; border: 1px solid transparent; font-size: 10px; font-weight: 900; line-height: 1; letter-spacing: .06em; text-transform: uppercase; box-shadow: 0 4px 10px rgba(15,23,42,.12); transition: transform .16s, background .16s, border-color .16s, color .16s; }
+.short-action-button:active { transform: scale(.98); }
+.short-action-print { color: #fff !important; background: #334155 !important; border-color: #475569 !important; }
+.short-action-print:hover { background: #1e293b !important; border-color: #334155 !important; }
+.short-action-whatsapp { color: #4338ca !important; background: #eef2ff !important; border-color: #c7d2fe !important; }
+.short-action-whatsapp:hover { color: #3730a3 !important; background: #e0e7ff !important; border-color: #a5b4fc !important; }
+.short-action-finalize { color: #fff !important; background: #059669 !important; border-color: #059669 !important; cursor: pointer; }
+.short-action-finalize:hover { background: #047857 !important; border-color: #047857 !important; }
+.short-action-add { color: #fff !important; background: #4f46e5 !important; border-color: #4f46e5 !important; cursor: pointer; }
+.short-action-add:hover { background: #4338ca !important; border-color: #4338ca !important; }
+.short-action-disabled { color: #64748b !important; background: #e2e8f0 !important; border-color: #cbd5e1 !important; box-shadow: none; cursor: not-allowed; }
+.short-term .short-selected { color: #fff !important; background: #4f46e5 !important; border-color: #4f46e5 !important; box-shadow: 0 5px 12px rgba(79,70,229,.24); }
+.short-term .short-selected span,
+.short-term .short-selected p,
+.short-term .short-selected small { color: inherit !important; }
 .short-filter-bar { display: grid; grid-template-columns: 1.3fr 1fr 1fr; gap: 12px; margin-bottom: 14px; }
 .short-filter-bar label { display: grid; gap: 5px; font-size: 11px; color: #64748b; }
 .short-filter-bar input, .short-filter-bar select, .weekly-list input, .weekly-list select { padding: 9px 10px; border: 1px solid #d1d5db; border-radius: 9px; background: #fff; }
@@ -258,6 +273,12 @@ th { background: #f8fafc; color: #475569; }
 .config-chip { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px; padding: 8px; border-radius: 8px; background: #f1f5f9; }.config-chip button { border: 0; padding: 2px 6px; background: transparent; }
 .sync-pill { align-self: center; padding: 5px 9px; border-radius: 999px; background: #f1f5f9; color: #64748b; font-size: 10px; font-weight: 700; }
 .sync-pill.saved { color: #166534; background: #dcfce7; }.sync-pill.saving { color: #3730a3; background: #eef2ff; }.sync-pill.error { color: #991b1b; background: #fee2e2; }
+.short-team-screen .team-progress-ok { color: #fff !important; background: #2563eb !important; border-color: #3b82f6 !important; }
+.short-team-screen .team-progress-delay { color: #fff !important; background: #dc2626 !important; border-color: #ef4444 !important; }
+.short-team-screen .team-progress-idle { color: #94a3b8 !important; background: #020617 !important; border-color: #1e293b !important; }
+.short-team-screen .team-progress-idle:hover { border-color: #334155 !important; }
+.short-team-screen .team-submit { color: #fff !important; background: #059669 !important; border-color: #059669 !important; }
+.short-team-screen .team-submit:hover { background: #047857 !important; border-color: #047857 !important; }
 .medium-filter { display: flex; align-items: end; gap: 14px; margin-bottom: 14px; }.medium-filter label,.medium-filter div { display: grid; gap: 4px; }.medium-filter label,.medium-filter small { color: #64748b; font-size: 11px; }.medium-filter input { padding: 8px; border: 1px solid #d1d5db; border-radius: 8px; }.medium-filter button:last-child { margin-left: auto; }.medium-filter .medium-check { display: flex; align-items: center; gap: 5px; padding-bottom: 8px; }.medium-filter .medium-check input { width: auto; }
 .medium-empty { display: grid; justify-items: center; padding: 60px; color: #64748b; text-align: center; }.medium-empty h3 { color: #172033; margin-bottom: 0; }
 .medium-window-info { display: flex; align-items: center; gap: 12px; margin: 10px 0; }.medium-window-info small { color: #64748b; }

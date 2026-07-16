@@ -1495,15 +1495,11 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
       </div>
 
       {/* Tabs */}
-      <nav className="flex flex-wrap border-b border-slate-200 mb-6 gap-1 no-print">
+      <nav className="short-tabs short-tabs-compact no-print">
         {tabLabels.map(([value, label]) => (
           <button 
             key={value}
-            className={`px-4 py-3 text-xs font-black uppercase tracking-wider rounded-t-xl transition-all duration-300 whitespace-nowrap ${
-              activeTab === value 
-                ? 'bg-indigo-600 text-white shadow-lg -translate-y-1'
-                : 'bg-slate-200 text-slate-500 hover:bg-slate-300'
-            }`}
+            className={activeTab === value ? 'active' : ''}
             onClick={() => setActiveTab(value)}
           >
             {label}
@@ -1737,22 +1733,22 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
 
             <div className="flex gap-2 w-full md:w-auto flex-wrap">
               {weeklyTasks.length > 0 && (
-                <button onClick={handlePrintPlanning} className="flex-1 md:flex-none px-4 py-3 bg-slate-700 hover:bg-slate-800 border border-slate-600 text-white font-black rounded-xl shadow-sm transition active:scale-95 text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer">
+                <button onClick={handlePrintPlanning} className="short-action-button short-action-print flex-1 md:flex-none">
                   <span>🖨️</span> Impressão
                 </button>
               )}
               {teams.length > 0 && weeklyTasks.length > 0 && (
-                <button onClick={openWhatsappShareModal} className="flex-1 md:flex-none px-4 py-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 hover:border-indigo-300 text-indigo-700 font-black rounded-xl shadow-sm transition active:scale-95 text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer">
+                <button onClick={openWhatsappShareModal} className="short-action-button short-action-whatsapp flex-1 md:flex-none">
                   <span>💬</span> WhatsApp
                 </button>
               )}
               <button 
                 onClick={() => setFinalizeModal({ isOpen: true, carryOverUnfinished: true })}
                 disabled={weeklyTasks.length === 0}
-                className={`flex-1 md:flex-none px-4 py-3 font-black rounded-xl shadow transition active:scale-95 text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 ${
+                className={`short-action-button flex-1 md:flex-none ${
                   weeklyTasks.length === 0
-                    ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
-                    : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                    ? 'short-action-disabled'
+                    : 'short-action-finalize'
                 }`}
               >
                 <span>🏁</span> Finalizar Semana
@@ -1767,7 +1763,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                   setDrawerWarning('');
                   setIsDrawerOpen(true);
                 }}
-                className="flex-1 md:flex-none px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl shadow transition active:scale-95 text-[10px] uppercase tracking-wider flex items-center justify-center gap-2 cursor-pointer"
+                className="short-action-button short-action-add flex-1 md:flex-none"
               >
                 <span>➕</span> Adicionar Atividades
               </button>
@@ -2127,7 +2123,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                         setMatrixSelection(null);
                       }}
                       className={`w-full p-2.5 rounded-xl border text-left text-[10px] font-black uppercase transition flex justify-between items-center ${
-                        isAlreadyIn ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm cursor-not-allowed' : 'bg-white border-slate-200 text-slate-700 hover:bg-indigo-50 hover:border-indigo-300'
+                        isAlreadyIn ? 'short-selected cursor-not-allowed' : 'bg-white border-slate-200 text-slate-700 hover:bg-indigo-50 hover:border-indigo-300'
                       }`}
                     >
                       <span>{item}</span>
@@ -2564,7 +2560,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                       onClick={() => setDrawerSourceMode(option.id)}
                       className={`w-full text-left p-3 rounded-xl border transition ${
                         drawerSourceMode === option.id
-                          ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                          ? 'short-selected'
                           : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50'
                       }`}
                     >
@@ -2643,7 +2639,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                         key={floor}
                         className={`flex items-center gap-2 p-2 rounded-lg border transition cursor-pointer ${
                           isSelected
-                            ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                            ? 'short-selected'
                             : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-indigo-300 hover:bg-indigo-50'
                         }`}
                       >
@@ -2686,7 +2682,7 @@ Identificamos um volume total de **${totalPlanned} serviços planejados** para e
                       key={item.id}
                       className={`flex items-center gap-3 p-2 rounded-lg border transition cursor-pointer ${
                         isSelected
-                          ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm'
+                          ? 'short-selected'
                           : 'bg-white border-slate-200 text-slate-800 hover:border-indigo-300 hover:bg-indigo-50'
                       }`}
                     >

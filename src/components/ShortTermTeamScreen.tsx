@@ -256,7 +256,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
   const teamTasksList = planning.filter(t => t.weekId === weekStartDate && t.responsible === teamName);
 
   return (
-    <div className="min-h-screen bg-slate-950 font-sans text-slate-100 pb-16">
+    <div className="short-team-screen min-h-screen bg-slate-950 font-sans text-slate-100 pb-16">
       {/* Header */}
       <header className="bg-slate-900 border-b border-slate-800 p-4 sticky top-0 z-20 flex flex-col justify-between gap-1.5 shadow-md">
         <div>
@@ -300,7 +300,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
                   {[0, 25, 50, 75, 100].map(val => {
                     const isActive = input.progress === val;
                     const isOk = val >= planned;
-                    const btnColor = isOk ? 'bg-blue-600 border-blue-500' : 'bg-red-600 border-red-500';
+                    const btnColor = isOk ? 'team-progress-ok' : 'team-progress-delay';
 
                     return (
                       <button
@@ -309,7 +309,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
                         className={`py-2 rounded-xl text-xs font-black transition active:scale-95 cursor-pointer border ${
                           isActive 
                             ? `${btnColor} text-white shadow-md scale-105` 
-                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                            : 'team-progress-idle'
                         }`}
                       >
                         {val}%
@@ -380,7 +380,7 @@ export function ShortTermTeamScreen({ projectId, teamName, weekStartDate }: Shor
         {teamTasksList.length > 0 && (
           <button
             onClick={handleSubmit}
-            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black uppercase text-xs tracking-wider rounded-xl shadow-lg transition active:scale-95 cursor-pointer"
+            className="team-submit w-full py-3.5 text-white font-black uppercase text-xs tracking-wider rounded-xl shadow-lg transition active:scale-95 cursor-pointer"
           >
             Enviar Apontamentos
           </button>
