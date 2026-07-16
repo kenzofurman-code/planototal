@@ -83,14 +83,64 @@ function StatCard({ title, value, color }: { title: string; value: string; color
 }
 
 function DaysSelector({ dailyWork, disabled, onChange, currentWeekStart, weatherCache, projectCity }: { dailyWork: number[]; disabled?: boolean; onChange: (dw: number[]) => void; currentWeekStart: Date; weatherCache: any; projectCity: string }) {
-  const toggleDay = (idx: number) => {
-    if (disabled) return;
-    const next = [...dailyWork];
-    next[idx] = next[idx] === 1 ? 0 : 1;
-    onChange(next);
+  const normalizeDailyWork = (value?: number[]) => Array.from({ length: 5 }, (_, idx) => value?.[idx] === 1 ? 1 : 0);
+  const [localDW, setLocalDW] = useState<number[]>(() => normalizeDailyWork(dailyWork));
+  const localDWRef = useRef<number[]>(normalizeDailyWork(dailyWork));
+  const isDragging = useRef(false);
+  const dragValue = useRef(1);
+
+  useEffect(() => {
+    const normalized = normalizeDailyWork(dailyWork);
+    localDWRef.current = normalized;
+    setLocalDW(normalized);
+  }, [dailyWork]);
+
+  const stopDrag = () => {
+    if (isDragging.current) {
+      isDragging.current = false;
+      onChange(localDWRef.current);
+    }
+    window.removeEventListener('pointerup', stopDrag);
+    window.removeEventListener('pointercancel', stopDrag);
+    window.removeEventListener('touchend', stopDrag);
   };
+
+  const startDrag = (idx: number) => {
+    if (disabled) return;
+    isDragging.current = true;
+    const nextValue = localDWRef.current[idx] === 1 ? 0 : 1;
+    dragValue.current = nextValue;
+    const next = [...localDWRef.current];
+    next[idx] = nextValue;
+    localDWRef.current = next;
+    setLocalDW(next);
+
+    window.addEventListener('pointerup', stopDrag);
+    window.addEventListener('pointercancel', stopDrag);
+    window.addEventListener('touchend', stopDrag);
+  };
+
+  const enterDrag = (idx: number) => {
+    if (!isDragging.current || disabled) return;
+    if (localDWRef.current[idx] === dragValue.current) return;
+    const next = [...localDWRef.current];
+    next[idx] = dragValue.current;
+    localDWRef.current = next;
+    setLocalDW(next);
+  };
+
+  const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (!isDragging.current || disabled) return;
+    if (event.cancelable) event.preventDefault();
+    const touch = event.touches[0];
+    const element = document.elementFromPoint(touch.clientX, touch.clientY);
+    const dayButton = element?.closest('[data-day-index]') as HTMLElement | null;
+    const idx = Number(dayButton?.dataset.dayIndex);
+    if (Number.isInteger(idx)) enterDrag(idx);
+  };
+
   return (
-    <div className="flex gap-[3.5px] justify-center items-center">
+    <div className="short-days-selector" onTouchMove={handleTouchMove}>
       {['S', 'T', 'Q', 'Q', 'S'].map((day, idx) => {
         const dayDate = addDays(currentWeekStart, idx);
         const dayStr = toISODate(dayDate);
@@ -99,17 +149,19 @@ function DaysSelector({ dailyWork, disabled, onChange, currentWeekStart, weather
         const tooltip = weather ? `${weather.conditions} (${weather.tempMin.toFixed(0)}°C - ${weather.tempMax.toFixed(0)}°C)` : 'Sem clima';
 
         return (
-          <div key={idx} className="flex flex-col items-center gap-[1px]" title={tooltip}>
-            {emoji && <span className="text-[9px] leading-none mb-0.5 select-none">{emoji}</span>}
+          <div key={idx} className="short-day-wrap" title={tooltip}>
+            <span className="short-day-weather">{emoji || '\u00a0'}</span>
             <button
               type="button"
               disabled={disabled}
-              onClick={() => toggleDay(idx)}
-              className={`w-6 h-6 rounded-full text-[9px] font-black flex items-center justify-center transition active:scale-95 cursor-pointer border ${
-                dailyWork[idx] === 1
-                  ? 'bg-slate-800 text-white border-slate-800 shadow-sm'
-                  : 'bg-slate-50 text-slate-500 border-slate-200 hover:border-slate-400'
-              } disabled:opacity-50 disabled:cursor-default`}
+              data-day-index={idx}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.currentTarget.setPointerCapture?.(event.pointerId);
+                startDrag(idx);
+              }}
+              onPointerEnter={() => enterDrag(idx)}
+              className={`short-day-button ${localDW[idx] === 1 ? 'short-day-active' : 'short-day-idle'}`}
             >
               {day}
             </button>
@@ -1880,9 +1932,9 @@ rt();
                   <th className="p-3 w-72">Serviço / Pavimento</th>
                   <th className="p-3 w-28 text-center">Equipe</th>
                   <th className="p-3 w-16 text-center">Efetivo</th>
-                  <th className="p-3 text-center w-28 bg-slate-900">Meta Semanal</th>
-                  <th className="p-3 text-center w-28">Dias Ativos</th>
-                  <th className="p-3 text-center w-28">Avanço Físico</th>
+                  <th className="p-3 text-center w-32 bg-slate-900">Meta Semanal</th>
+                  <th className="p-3 text-center w-52 min-w-[210px]">Dias Ativos</th>
+                  <th className="p-3 text-center w-32">Avanço Físico</th>
                   <th className="p-3 text-center w-28">Desvio / Atraso</th>
                   <th className="p-3 w-40">Observações</th>
                   <th className="p-2 text-center w-16 bg-slate-800">
@@ -1968,12 +2020,12 @@ rt();
                             const isPlanned = currentPlan === val;
                             const isExecuted = execBeforeStep > 0 && val === execBeforeStep;
 
-                            let btnClass = 'bg-slate-100 text-slate-500 hover:bg-emerald-100 hover:text-emerald-700';
-                            if (isPlanned) btnClass = 'bg-emerald-600 text-white font-black scale-110 shadow-md ring-2 ring-emerald-300 border-emerald-600';
-                            else if (isExecuted) btnClass = 'bg-slate-500 text-white shadow-sm ring-2 ring-slate-400 border-slate-500';
+                            let btnClass = 'short-percent-button short-percent-planned-default';
+                            if (isPlanned) btnClass = 'short-percent-button short-percent-planned-active';
+                            else if (isExecuted) btnClass = 'short-percent-button short-percent-executed';
 
                             return (
-                              <button key={val} disabled={t.finalized} onClick={() => handlePlannedChange(t.id, val)} className={`w-7 h-7 rounded-full text-[9px] font-black flex items-center justify-center border border-transparent transition active:scale-90 cursor-pointer ${btnClass}`}>
+                              <button key={val} disabled={t.finalized} onClick={() => handlePlannedChange(t.id, val)} className={btnClass}>
                                 {val}%
                               </button>
                             );
@@ -1981,7 +2033,7 @@ rt();
                         </div>
                       </td>
 
-                      <td className="p-3 border-r align-middle text-center bg-slate-50/10">
+                      <td className="p-3 border-r align-middle text-center bg-slate-50/50 min-w-[210px]">
                         <DaysSelector dailyWork={t.dailyWork} disabled={t.finalized} onChange={(newDW) => handleDailyWorkChange(t.id, newDW)} currentWeekStart={currentWeekStart} weatherCache={weatherCache} projectCity={projectCity} />
                       </td>
 
@@ -1994,12 +2046,12 @@ rt();
                               const isActive = progressStep > 0 && progressStep === val;
                               const isPrefilled = prefilledStep > 0 && prefilledStep === val;
                               const isOk = val >= currentPlan;
-                              const btnColor = isOk ? 'bg-blue-600 border-blue-600 ring-blue-300' : 'bg-red-600 border-red-600 ring-red-300';
-                              const prefillClass = (isPrefilled && !isActive) ? 'ring-2 ring-dashed ring-purple-500 text-purple-700 bg-purple-50' : '';
+                              const activeClass = isOk ? 'short-percent-progress-ok' : 'short-percent-progress-delay';
+                              const prefillClass = (isPrefilled && !isActive) ? 'short-percent-prefilled' : '';
 
                               return (
-                                <button key={val} disabled={t.finalized} onClick={() => handleWeeklyProgressChange(t.id, val)} className={`w-7 h-7 rounded-full text-[9px] font-black flex items-center justify-center border border-transparent transition active:scale-90 cursor-pointer ${
-                                  isActive ? `${btnColor} text-white scale-110 shadow-md ring-2` : prefillClass ? prefillClass : 'bg-slate-100 text-slate-500 hover:bg-slate-200 hover:text-slate-800'
+                                <button key={val} disabled={t.finalized} onClick={() => handleWeeklyProgressChange(t.id, val)} className={`short-percent-button ${
+                                  isActive ? activeClass : prefillClass || 'short-percent-progress-default'
                                 }`}>
                                   {val}%
                                 </button>
