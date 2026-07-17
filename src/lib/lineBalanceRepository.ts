@@ -1,5 +1,6 @@
 import { supabase } from './supabase';
 import type { ScheduleDependency, Task } from '../types';
+import { normalizeDependency } from './dependencySchedule';
 
 export type LineBalanceVersion = {
   id: string;
@@ -38,10 +39,11 @@ export async function loadLineBalanceData(projectKey: string) {
   if (settingsRes.error) throw settingsRes.error;
   return {
     versions: (versionsRes.data?.payload as LineBalanceVersion[] | undefined) ?? null,
-    dependencies: (depsRes.data ?? []).map((row) => ({
+    dependencies: (depsRes.data ?? []).map((row) => normalizeDependency({
       from: row.from_task_id,
       to: row.to_task_id,
-      type: row.type as ScheduleDependency['type']
+      type: row.type as ScheduleDependency['type'],
+      lagDays: row.lag_days
     })),
     settings: (settingsRes.data?.payload as Partial<LineBalanceSettings> | undefined) ?? null
   };
@@ -78,7 +80,7 @@ export async function saveLineBalanceData(
         from_task_id: dependency.from,
         to_task_id: dependency.to,
         type: dependency.type,
-        lag_days: 0
+        lag_days: dependency.lagDays
       }))
     );
     if (insertRes.error) throw insertRes.error;

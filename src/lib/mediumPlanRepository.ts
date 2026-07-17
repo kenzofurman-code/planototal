@@ -1,5 +1,7 @@
 import { supabase } from './supabase';
 import type { Task } from '../types';
+import type { ScheduleDependency } from '../types';
+import { normalizeOwnedDependencies } from './dependencySchedule';
 
 export type MediumWindowUnit = {
   id: string;
@@ -11,7 +13,12 @@ export type MediumWindowUnit = {
   endDate: string;
   responsible: string;
   predecessors?: string[];
+  dependencies?: ScheduleDependency[];
 };
+
+export function normalizeMediumUnitDependencies(unit: Pick<MediumWindowUnit, 'id' | 'predecessors' | 'dependencies'>) {
+  return normalizeOwnedDependencies(unit);
+}
 
 export type MediumWindowState = {
   analysisStart: string;

@@ -45,6 +45,11 @@ export function normalizeDependency(value: Partial<ScheduleDependency> & Pick<Sc
   };
 }
 
+export function normalizeOwnedDependencies(unit: { id: string; predecessors?: string[]; dependencies?: ScheduleDependency[] }) {
+  if (unit.dependencies?.length) return unit.dependencies.map(normalizeDependency);
+  return (unit.predecessors ?? []).map(from => normalizeDependency({ from, to: unit.id }));
+}
+
 export function createsDependencyCycle(dependencies: ScheduleDependency[], candidate: ScheduleDependency) {
   if (candidate.from === candidate.to) return true;
   const edges = [...dependencies.filter(item => !(item.from === candidate.from && item.to === candidate.to)), candidate];
