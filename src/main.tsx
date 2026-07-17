@@ -14,6 +14,8 @@ import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
 import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
 import { AuthGate } from './components/AuthGate';
+import { DependencyEditor } from './components/DependencyEditor';
+import { createsDependencyCycle, normalizeDependency, rescheduleTasks } from './lib/dependencySchedule';
 import { setProjectAccess } from './lib/accessRepository';
 import { loadMediumWindowState, loadPublishedMediumPlan, saveMediumWindowState, savePublishedMediumPlan } from './lib/mediumPlanRepository';
 import { loadShortTermState } from './lib/shortTermRepository';
@@ -1332,7 +1334,8 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
       (task.predecessors ?? []).map((from) => ({
         from,
         to: task.id,
-        type: 'FS' as const
+        type: 'FS' as const,
+        lagDays: 0
       }))
     )
   );
@@ -1431,14 +1434,14 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
         const importedDependencies: ScheduleDependency[] = tasks.flatMap((task) =>
           (task.predecessors ?? [])
             .filter((from) => taskIds.has(from) && from !== task.id)
-            .map((from) => ({ from, to: task.id, type: 'FS' as const }))
+            .map((from) => ({ from, to: task.id, type: 'FS' as const, lagDays: 0 }))
         );
         const storedDependencies = (data.dependencies ?? []).filter(
           (dependency) => taskIds.has(dependency.from) && taskIds.has(dependency.to) && dependency.from !== dependency.to
         );
         const mergedDependencies = new Map<string, ScheduleDependency>();
         [...storedDependencies, ...importedDependencies].forEach((dependency) => {
-          mergedDependencies.set(`${dependency.from}→${dependency.to}`, dependency);
+          mergedDependencies.set(`${dependency.from}→${dependency.to}`, normalizeDependency(dependency));
         });
         setDependencies(Array.from(mergedDependencies.values()));
         lineBalanceReady.current = true;
@@ -1568,42 +1571,21 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
     return event.clientY - (svgRef.current?.getBoundingClientRect().top ?? 0);
   }
   function updateTask(id: string, patch: Partial<Task>) {
-    const next = tasks.map((task) => (task.id === id ? { ...task, ...patch } : { ...task }));
-    const requiredStartFor = (taskId: string) => {
-      const predecessorEnds = dependencies
-        .filter((dependency) => dependency.to === taskId)
-        .map((dependency) => next.find((task) => task.id === dependency.from))
-        .filter((task): task is Task => Boolean(task))
-        .map((task) => parseDate(task.endDate));
-      if (!predecessorEnds.length) return null;
-      return addDays(new Date(Math.max(...predecessorEnds.map((date) => date.getTime()))), 1);
-    };
-    const enforceTaskStart = (task: Task, useEarliestStart = false) => {
-      const requiredStart = requiredStartFor(task.id);
-      if (!requiredStart) return false;
-      const currentStart = parseDate(task.startDate);
-      if (currentStart >= requiredStart && (!useEarliestStart || currentStart.getTime() === requiredStart.getTime())) return false;
-      const duration = diffDays(parseDate(task.startDate), parseDate(task.endDate));
-      task.startDate = toIsoDate(requiredStart);
-      task.endDate = toIsoDate(addDays(requiredStart, duration));
-      return true;
-    };
-    const editedTask = next.find((task) => task.id === id);
-    if (editedTask) enforceTaskStart(editedTask);
-    const propagate = (fromId: string, visited = new Set<string>()) => {
-      if (visited.has(fromId)) return;
-      visited.add(fromId);
-      dependencies
-        .filter((dependency) => dependency.from === fromId)
-        .forEach((dependency) => {
-          const successor = next.find((task) => task.id === dependency.to);
-          if (!successor) return;
-          enforceTaskStart(successor, !allowDependencyGaps);
-          propagate(successor.id, visited);
-        });
-    };
-    propagate(id);
-    setTasks(next);
+    const changed = tasks.map((task) => (task.id === id ? { ...task, ...patch } : { ...task }));
+    setTasks(rescheduleTasks(changed, dependencies, holidays.map(item => item.date)));
+  }
+  function applyDependencies(next: ScheduleDependency[]) {
+    const unique = new Set<string>();
+    for (const dependency of next) {
+      if (dependency.from === dependency.to) return 'Uma atividade não pode depender dela mesma.';
+      const key = `${dependency.from}→${dependency.to}`;
+      if (unique.has(key)) return 'Este vínculo já existe.';
+      unique.add(key);
+      if (createsDependencyCycle(next.filter(item => item !== dependency), dependency)) return 'Este vínculo criaria um ciclo.';
+    }
+    const normalized = next.map(normalizeDependency);
+    setDependencies(normalized);
+    setTasks(rescheduleTasks(tasks, normalized, holidays.map(item => item.date)));
   }
   function snapDate(date: Date) {
     return snapWeek ? addDays(projectStart, Math.round(diffDays(projectStart, date) / 7) * 7) : date;
@@ -1679,30 +1661,7 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
         return dependencies.filter((dependency) => dependency.from === from).some((dependency) => reaches(dependency.to, target, visited));
       };
       if (!exists && !reaches(drag.target, drag.id)) {
-        const nextDependencies: ScheduleDependency[] = [...dependencies, { from: drag.id, to: drag.target, type: 'FS' }];
-        setDependencies(nextDependencies);
-        const predecessor = tasks.find((task) => task.id === drag.id);
-        const successor = tasks.find((task) => task.id === drag.target);
-        if (predecessor && successor) {
-          const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
-          const predecessorEnds = nextDependencies
-            .filter((dependency) => dependency.to === successor.id)
-            .map((dependency) => tasks.find((task) => task.id === dependency.from))
-            .filter((task): task is Task => Boolean(task))
-            .map((task) => parseDate(task.endDate).getTime());
-          const start = addDays(new Date(Math.max(...predecessorEnds)), 1);
-          setTasks(
-            tasks.map((task) =>
-              task.id === successor.id
-                ? {
-                    ...task,
-                    startDate: toIsoDate(start),
-                    endDate: toIsoDate(addDays(start, duration))
-                  }
-                : task
-            )
-          );
-        }
+        applyDependencies([...dependencies, { from: drag.id, to: drag.target, type: 'FS', lagDays: 0 }]);
       }
     }
     setDrag(null);
@@ -2308,22 +2267,8 @@ function LineBalance({ projectKey, projectStartDate, plannedEndDate, tasks, setT
                   )}
                 </div>
                 <div className="drawer-section">
-                  <h4>Dependências FS</h4>
-                  <div className="dep-list">
-                    {dependencies
-                      .filter((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id)
-                      .map((dependency) => (
-                        <div key={`${dependency.from}-${dependency.to}`}>
-                          <span>
-                            {tasks.find((task) => task.id === dependency.from)?.packageName} → {tasks.find((task) => task.id === dependency.to)?.packageName}
-                          </span>
-                          <button className="dep-remove" onClick={() => setDependencies(dependencies.filter((item) => item !== dependency))}>
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                    {!dependencies.some((dependency) => dependency.from === selectedTask.id || dependency.to === selectedTask.id) && 'Nenhuma dependência.'}
-                  </div>
+                  <h4>Dependências</h4>
+                  <DependencyEditor ownerId={selectedTask.id} items={tasks.map(task => ({ id: task.id, label: `${task.packageName} · ${task.lot}` }))} dependencies={dependencies} onChange={applyDependencies} />
                 </div>
               </div>
             </>
