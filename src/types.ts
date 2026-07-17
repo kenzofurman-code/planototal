@@ -48,10 +48,13 @@ export type Task = {
   lane?: number;
 };
 
+export type DependencyType = 'FS' | 'SS' | 'FF' | 'SF';
+
 export type ScheduleDependency = {
   from: string;
   to: string;
-  type: 'FS';
+  type: DependencyType;
+  lagDays: number;
 };
 
 export type CalendarEvent = {
