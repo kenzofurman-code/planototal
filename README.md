@@ -9,8 +9,10 @@ Base inicial pronta para GitHub/Vercel em **React + TypeScript + Vite + Supabase
 - Dashboard
 - Cronograma / importação / versões
 - Linha de balanço visual com dados demo
+- Dependências TI, II, TT e IT com LAG positivo ou negativo em dias úteis, editáveis nos drawers
 - Compras em Kanban com cobertura por quantidade
 - Médio prazo em matriz semanal
+- Dependências editáveis por sublote/unidade no Médio Prazo
 - Curto prazo com microserviços ponderados
 - Físico-financeiro demo
 - Schema inicial Supabase/Postgres
