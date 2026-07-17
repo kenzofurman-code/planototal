@@ -11,3 +11,9 @@ test('linha de balanço renderiza editor completo', async () => {
   const source = await readFile('src/main.tsx', 'utf8');
   assert.match(source, /<DependencyEditor/);
 });
+
+test('médio prazo recebe feriados e edita dependências por unidade', async () => {
+  const source = await readFile('src/main.tsx', 'utf8');
+  assert.match(source, /<MediumPlan[^>]+holidays=/s);
+  assert.match(source, /ownerId=\{unit\.id\}/);
+});

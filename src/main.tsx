@@ -15,7 +15,7 @@ import { ShortTerm } from './components/ShortTerm';
 import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
 import { AuthGate } from './components/AuthGate';
 import { DependencyEditor } from './components/DependencyEditor';
-import { createsDependencyCycle, normalizeDependency, rescheduleTasks } from './lib/dependencySchedule';
+import { createsDependencyCycle, normalizeDependency, normalizeOwnedDependencies, rescheduleTasks } from './lib/dependencySchedule';
 import { setProjectAccess } from './lib/accessRepository';
 import { loadMediumWindowState, loadPublishedMediumPlan, saveMediumWindowState, savePublishedMediumPlan } from './lib/mediumPlanRepository';
 import { loadShortTermState } from './lib/shortTermRepository';
@@ -240,7 +240,7 @@ function App({ userId }: { userId: string }) {
         {page === 'schedule' && <Schedule projectKey={project.id} tasks={tasks} setTasks={setTasks} />}
         {page === 'line' && <LineBalance projectKey={project.id} projectStartDate={project.startDate} plannedEndDate={project.plannedEndDate} tasks={tasks} setTasks={setTasks} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'procurement' && <Procurement />}
-        {page === 'medium' && <MediumPlan tasks={tasks} projectId={project.id} onPublish={handleMediumPublish} />}
+        {page === 'medium' && <MediumPlan tasks={tasks} projectId={project.id} onPublish={handleMediumPublish} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'short' && <ShortTerm tasks={latestMediumTasks} projectId={project.id} />}
         {page === 'financial' && <Financial projectKey={project.id} tasks={tasks} setTasks={setTasks} />}
         {page === 'settings' && <SettingsPage />}
@@ -2312,7 +2312,7 @@ function Procurement() {
   );
 }
 
-function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId: string; onPublish: (tasks: Task[]) => void }) {
+function MediumPlan({ tasks, projectId, onPublish, holidays }: { tasks: Task[]; projectId: string; onPublish: (tasks: Task[]) => void; holidays: CalendarEvent[] }) {
   type Unit = {
     id: string;
     parentId?: string;
@@ -2323,6 +2323,7 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     endDate: string;
     responsible: string;
     predecessors?: string[];
+    dependencies?: ScheduleDependency[];
   };
   type Window = {
     id: string;
@@ -2734,31 +2735,14 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     const source = next[taskId]?.find((unit) => unit.id === unitId);
     if (!source) return;
     Object.assign(source, patch);
-    const sourceMinimumStart = minimumFsStart(source, Object.values(next).flat());
-    if (sourceMinimumStart && parseDate(source.startDate) < sourceMinimumStart) {
-      const duration = diffDays(parseDate(source.startDate), parseDate(source.endDate));
-      source.startDate = toIsoDate(sourceMinimumStart);
-      source.endDate = toIsoDate(addDays(sourceMinimumStart, duration));
-    }
-    const propagate = (sourceUnit: Unit, visited = new Set<string>()) => {
-      if (visited.has(sourceUnit.id)) return;
-      visited.add(sourceUnit.id);
-      const allUnits = Object.values(next).flat();
-      Object.values(next)
-        .flat()
-        .filter((unit) => (unit.predecessors ?? []).includes(sourceUnit.id))
-        .forEach((successor) => {
-          const duration = diffDays(parseDate(successor.startDate), parseDate(successor.endDate));
-          const minimumStart = minimumFsStart(successor, allUnits);
-          if (minimumStart && parseDate(successor.startDate) < minimumStart) {
-            successor.startDate = toIsoDate(minimumStart);
-            successor.endDate = toIsoDate(addDays(minimumStart, duration));
-          }
-          propagate(successor, visited);
-        });
-    };
-    propagate(source);
-    setUnits(next);
+    const dependencies = Object.values(next).flat().flatMap(unit => normalizeOwnedDependencies(unit));
+    const scheduled = rescheduleTasks(Object.values(next).flat(), dependencies, holidays.map(item => item.date));
+    const byId = new Map(scheduled.map(unit => [unit.id, unit]));
+    setUnits(Object.fromEntries(Object.entries(next).map(([owner, list]) => [owner, list.map(unit => ({
+      ...unit,
+      startDate: byId.get(unit.id)?.startDate ?? unit.startDate,
+      endDate: byId.get(unit.id)?.endDate ?? unit.endDate
+    }))])));
   }
   function removeUnit(taskId: string, unitId: string) {
     const source = units[taskId] ?? [];
@@ -2922,20 +2906,8 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
       const allUnits = Object.values(units).flat();
       const source = allUnits.find((unit) => unit.id === mediumDrag.unitId);
       const target = allUnits.find((unit) => unit.id === mediumDrag.target);
-      const targetOwner = Object.entries(units).find(([, list]) => list.some((unit) => unit.id === target?.id))?.[0];
-      if (source && target && targetOwner && !unitDependsOn(source.id, target.id)) {
-        const withDependency = {
-          ...units,
-          [targetOwner]: units[targetOwner].map((unit) =>
-            unit.id === target.id
-              ? {
-                  ...unit,
-                  predecessors: Array.from(new Set([...(unit.predecessors ?? []), source.id]))
-                }
-              : unit
-            )
-        };
-        setUnits(propagateMediumUnits(withDependency, new Set([source.id])));
+      if (source && target && !unitDependsOn(source.id, target.id)) {
+        applyUnitDependencies([...allUnitDependencies, { from: source.id, to: target.id, type: 'FS', lagDays: 0 }]);
       }
     }
     setMediumDrag(null);
@@ -3001,6 +2973,31 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
     setWindowsByMonth(nextWindowsByMonth);
     setSelectedTaskId(taskId);
     setSelectedMediumTaskIds([taskId]);
+  }
+  const allUnitDependencies = Object.values(units).flat().flatMap(unit => normalizeOwnedDependencies(unit));
+  const unitOptions = Object.entries(units).flatMap(([taskId, list]) => list.map(unit => {
+    const task = windowData?.tasks.find(item => item.id === taskId);
+    return { id: unit.id, label: `${task?.packageName ?? 'Atividade'} · ${unit.name}` };
+  }));
+  function applyUnitDependencies(nextDependencies: ScheduleDependency[]) {
+    const unique = new Set<string>();
+    for (const dependency of nextDependencies) {
+      if (dependency.from === dependency.to) return 'Uma unidade não pode depender dela mesma.';
+      const key = `${dependency.from}→${dependency.to}`;
+      if (unique.has(key)) return 'Este vínculo já existe.';
+      unique.add(key);
+      if (createsDependencyCycle(nextDependencies.filter(item => item !== dependency), dependency)) return 'Este vínculo criaria um ciclo.';
+    }
+    const normalized = nextDependencies.map(normalizeDependency);
+    const scheduled = rescheduleTasks(Object.values(units).flat(), normalized, holidays.map(item => item.date));
+    const byId = new Map(scheduled.map(unit => [unit.id, unit]));
+    setUnits(Object.fromEntries(Object.entries(units).map(([owner, list]) => [owner, list.map(unit => ({
+      ...unit,
+      startDate: byId.get(unit.id)?.startDate ?? unit.startDate,
+      endDate: byId.get(unit.id)?.endDate ?? unit.endDate,
+      dependencies: normalized.filter(dependency => dependency.to === unit.id),
+      predecessors: normalized.filter(dependency => dependency.to === unit.id).map(dependency => dependency.from)
+    }))])));
   }
   const selectedTask = windowData?.tasks.find((task) => task.id === selectedTaskId);
   const activeUnitParentId = selectedTask ? ((units[selectedTask.id] ?? []).some((unit) => unit.id === unitParentId) ? unitParentId! : units[selectedTask.id]?.[0]?.id) : undefined;
@@ -3646,6 +3643,9 @@ function MediumPlan({ tasks, projectId, onPublish }: { tasks: Task[]; projectId:
                         }
                       />
                     </label>
+                  </div>
+                  <div className="medium-unit-dependencies">
+                    <DependencyEditor ownerId={unit.id} items={unitOptions} dependencies={allUnitDependencies} onChange={applyUnitDependencies} />
                   </div>
                 </article>
               ))}
