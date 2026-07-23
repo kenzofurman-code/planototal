@@ -4,16 +4,12 @@ import {
   BarChart3, 
   Building2, 
   Calendar, 
-  CheckSquare, 
   Download, 
-  Filter, 
-  Layers, 
-  PieChart, 
   RefreshCw, 
   SlidersHorizontal 
 } from 'lucide-react';
 import type { Task } from '../types';
-import { loadBudgets, type BudgetRevision, type BudgetItem, type BudgetAllocation } from '../lib/budgetRepository';
+import { loadBudgets, type BudgetRevision, type BudgetItem } from '../lib/budgetRepository';
 import { loadShortTermState, type ShortTermWeeklyItem } from '../lib/shortTermRepository';
 
 interface ChronoFinancialProps {
@@ -76,16 +72,16 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
   const [budgets, setBudgets] = useState<BudgetRevision[]>([]);
   const [shortTermWeekly, setShortTermWeekly] = useState<ShortTermWeeklyItem[]>([]);
 
-  // --- CONTROLES DA TELA ---
+  // --- CONTROLES DA TELA (COM VALORES PADRÃO REQUISITADOS) ---
   const [eapSource, setEapSource] = useState<EapSource>('budget');
-  const [selectedLevel, setSelectedLevel] = useState<string>('all'); // 'all', '1', '2', '3', '4'
-  const [viewUnit, setViewUnit] = useState<ViewUnit>('currency');
-  const [accumulationMode, setAccumulationMode] = useState<AccumulationMode>('monthly');
+  const [selectedLevel, setSelectedLevel] = useState<string>('3'); // PADRÃO: Nível 3
+  const [viewUnit, setViewUnit] = useState<ViewUnit>('percent');   // PADRÃO: %
+  const [accumulationMode, setAccumulationMode] = useState<AccumulationMode>('monthly'); // PADRÃO: Mensal
 
-  // Checkboxes de camadas
-  const [showBase, setShowBase] = useState<boolean>(true);
+  // CAMADAS PADRÃO: Apenas Previsto marcado por padrão
+  const [showBase, setShowBase] = useState<boolean>(false);
   const [showPlanned, setShowPlanned] = useState<boolean>(true);
-  const [showActual, setShowActual] = useState<boolean>(true);
+  const [showActual, setShowActual] = useState<boolean>(false);
 
   // Busca textual na EAP
   const [searchFilter, setSearchFilter] = useState<string>('');
@@ -124,8 +120,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       const rootId = item.activityId.split('_')[0];
       const prog = (item.executedBefore ?? 0) + (item.progressThisWeek ?? 0);
       const prev = map.get(rootId) || 0;
-      if (prog > prev) map.get(rootId);
-      map.set(rootId, Math.max(prev, Math.min(100, prog)));
+      if (prog > prev) map.set(rootId, Math.max(prev, Math.min(100, prog)));
     });
     return map;
   }, [shortTermWeekly]);
@@ -142,7 +137,6 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       if (endDates.length) maxD = new Date(Math.max(...endDates));
     }
 
-    // Normaliza para o dia 1 do mês inicial e último dia do mês final
     const startYear = minD.getFullYear();
     const startMonth = minD.getMonth();
     const endYear = maxD.getFullYear();
@@ -182,18 +176,18 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     if (monthCols.length === 0) return [];
 
     if (eapSource === 'budget' && activeBudget && activeBudget.items.length > 0) {
-      // --- MODO EAP DE ORÇAMENTO ---
+      // --- MODO EAP DE ORÇAMENTO COMPLETO (EXIBE 100% DOS ITENS) ---
       const items = activeBudget.items;
       const allocations = activeBudget.allocations;
       const tasksMap = new Map(tasks.map(t => [t.id, t]));
 
-      return items.map(item => {
-        // Encontra alocações deste item do orçamento
+      // 1. Processa itens folha (com ou sem vínculos)
+      const leafRows = items.map(item => {
         const itemAllocations = allocations.filter(a => a.budgetId === item.id);
         
         let startMs = Infinity;
         let endMs = -Infinity;
-        
+
         const baseMonthly: Record<string, number> = {};
         const plannedMonthly: Record<string, number> = {};
         const actualMonthly: Record<string, number> = {};
@@ -207,7 +201,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
         const totalValue = item.total || 0;
 
         if (itemAllocations.length > 0) {
-          // Item possui vínculos com tarefas do cronograma
+          // Item possui vínculos com tarefas
           itemAllocations.forEach(alloc => {
             const task = tasksMap.get(alloc.taskId);
             const taskVal = alloc.value || 0;
@@ -219,15 +213,12 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
             if (tStart.getTime() < startMs) startMs = tStart.getTime();
             if (tEnd.getTime() > endMs) endMs = tEnd.getTime();
 
-            // Progresso real da tarefa (Mestre ou Curto Prazo)
             const stProgress = shortTermProgressMap.get(task.id);
             const realProgress = stProgress !== undefined ? stProgress : (task.progress || 0);
 
-            // Distribuição temporal da tarefa nos meses
             const totalTaskDays = Math.max(1, Math.ceil((tEnd.getTime() - tStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
 
             monthCols.forEach(col => {
-              // Calcula sobreposição de dias da tarefa neste mês
               const overlapStart = Math.max(tStart.getTime(), col.startDate.getTime());
               const overlapEnd = Math.min(tEnd.getTime(), col.endDate.getTime());
 
@@ -237,31 +228,28 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
 
                 baseMonthly[col.key] += taskVal * ratio;
                 plannedMonthly[col.key] += taskVal * ratio;
-
-                // Realizado proporcional ao progresso da tarefa
                 actualMonthly[col.key] += (taskVal * ratio) * (realProgress / 100);
               }
             });
           });
         } else {
-          // Item livre do orçamento (sem vínculos diretos) -> distribui uniformemente do início ao fim da obra
+          // Item sem vínculo direto: distribui uniformemente do início ao fim da obra
           const firstCol = monthCols[0];
           const lastCol = monthCols[monthCols.length - 1];
           startMs = firstCol.startDate.getTime();
           endMs = lastCol.endDate.getTime();
 
-          const monthlyShare = totalValue / monthCols.length;
+          const monthlyShare = totalValue / Math.max(1, monthCols.length);
           monthCols.forEach(col => {
             baseMonthly[col.key] = monthlyShare;
             plannedMonthly[col.key] = monthlyShare;
-            actualMonthly[col.key] = 0; // Sem progresso realizado medido
+            actualMonthly[col.key] = 0;
           });
         }
 
         const sDateStr = startMs !== Infinity ? new Date(startMs).toISOString().slice(0, 10) : monthCols[0].startDate.toISOString().slice(0, 10);
         const eDateStr = endMs !== -Infinity ? new Date(endMs).toISOString().slice(0, 10) : monthCols[monthCols.length - 1].endDate.toISOString().slice(0, 10);
 
-        // Nível EAP (ex: "01" -> 1, "01.01" -> 2, "01.01.01" -> 3)
         const codeParts = item.code ? item.code.split('.').filter(Boolean) : [];
         const levelNum = item.level ? Number(item.level) : Math.max(1, codeParts.length);
 
@@ -279,57 +267,162 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
         };
       });
 
+      return leafRows;
+
     } else {
-      // --- MODO EAP DE PLANEJAMENTO (CRONOGRAMA) ---
-      return tasks.map(task => {
-        const tStart = parseDateLocal(task.startDate);
-        const tEnd = parseDateLocal(task.endDate);
+      // --- MODO EAP DE PLANEJAMENTO (LOTE MÃE -> MACROSERVIÇO -> LOTE -> SERVIÇO) ---
+      const rows: EapRowData[] = [];
 
-        const totalValue = task.cost || 0;
-        const stProgress = shortTermProgressMap.get(task.id);
-        const realProgress = stProgress !== undefined ? stProgress : (task.progress || 0);
+      // Agrupamento hierárquico
+      // Nível 1: Lote Mãe (lotMother)
+      // Nível 2: Macroserviço (packageName) dentro do Lote Mãe
+      // Nível 3: Lote / Pavimento (lot)
+      // Nível 4: Serviço (service)
 
-        const baseMonthly: Record<string, number> = {};
-        const plannedMonthly: Record<string, number> = {};
-        const actualMonthly: Record<string, number> = {};
+      // Identifica Lotes Mãe únicos
+      const lotMothers = Array.from(new Set(tasks.map(t => t.lotMother || 'SEM GRUPO'))).sort();
 
-        monthCols.forEach(col => {
-          baseMonthly[col.key] = 0;
-          plannedMonthly[col.key] = 0;
-          actualMonthly[col.key] = 0;
+      lotMothers.forEach((lmName, lmIdx) => {
+        const lmTasks = tasks.filter(t => (t.lotMother || 'SEM GRUPO') === lmName);
+        const lmCode = String(lmIdx + 1).padStart(2, '0');
+
+        // Nível 1: Lote MÃE
+        const lmBase: Record<string, number> = {};
+        const lmPlanned: Record<string, number> = {};
+        const lmActual: Record<string, number> = {};
+        monthCols.forEach(col => { lmBase[col.key] = 0; lmPlanned[col.key] = 0; lmActual[col.key] = 0; });
+        let lmStartMs = Infinity;
+        let lmEndMs = -Infinity;
+        let lmTotalVal = 0;
+
+        // Encontra Macroserviços dentro deste Lote Mãe
+        const packageNames = Array.from(new Set(lmTasks.map(t => t.packageName || 'OUTROS'))).sort();
+
+        packageNames.forEach((pkgName, pkgIdx) => {
+          const pkgTasks = lmTasks.filter(t => (t.packageName || 'OUTROS') === pkgName);
+          const pkgCode = `${lmCode}.${String(pkgIdx + 1).padStart(2, '0')}`;
+
+          // Nível 2: Macroserviço
+          const pkgBase: Record<string, number> = {};
+          const pkgPlanned: Record<string, number> = {};
+          const pkgActual: Record<string, number> = {};
+          monthCols.forEach(col => { pkgBase[col.key] = 0; pkgPlanned[col.key] = 0; pkgActual[col.key] = 0; });
+          let pkgStartMs = Infinity;
+          let pkgEndMs = -Infinity;
+          let pkgTotalVal = 0;
+
+          // Encontra Lotes/Pavimentos dentro deste Macroserviço
+          const lots = Array.from(new Set(pkgTasks.map(t => t.lot || 'SEM LOTE'))).sort();
+
+          lots.forEach((lotName, lotIdx) => {
+            const lotTasks = pkgTasks.filter(t => (t.lot || 'SEM LOTE') === lotName);
+            const lotCode = `${pkgCode}.${String(lotIdx + 1).padStart(2, '0')}`;
+
+            // Nível 3: Lote / Pavimento
+            const lotBase: Record<string, number> = {};
+            const lotPlanned: Record<string, number> = {};
+            const lotActual: Record<string, number> = {};
+            monthCols.forEach(col => { lotBase[col.key] = 0; lotPlanned[col.key] = 0; lotActual[col.key] = 0; });
+            let lotStartMs = Infinity;
+            let lotEndMs = -Infinity;
+            let lotTotalVal = 0;
+
+            lotTasks.forEach(task => {
+              const tStart = parseDateLocal(task.startDate);
+              const tEnd = parseDateLocal(task.endDate);
+
+              if (tStart.getTime() < lotStartMs) lotStartMs = tStart.getTime();
+              if (tEnd.getTime() > lotEndMs) lotEndMs = tEnd.getTime();
+
+              const taskVal = task.cost || 0;
+              lotTotalVal += taskVal;
+
+              const stProgress = shortTermProgressMap.get(task.id);
+              const realProgress = stProgress !== undefined ? stProgress : (task.progress || 0);
+
+              const totalTaskDays = Math.max(1, Math.ceil((tEnd.getTime() - tStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+
+              monthCols.forEach(col => {
+                const overlapStart = Math.max(tStart.getTime(), col.startDate.getTime());
+                const overlapEnd = Math.min(tEnd.getTime(), col.endDate.getTime());
+
+                if (overlapStart <= overlapEnd) {
+                  const daysInMonth = Math.ceil((overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1;
+                  const ratio = Math.min(1, daysInMonth / totalTaskDays);
+
+                  const bVal = taskVal * ratio;
+                  const pVal = taskVal * ratio;
+                  const aVal = (taskVal * ratio) * (realProgress / 100);
+
+                  lotBase[col.key] += bVal;
+                  lotPlanned[col.key] += pVal;
+                  lotActual[col.key] += aVal;
+
+                  pkgBase[col.key] += bVal;
+                  pkgPlanned[col.key] += pVal;
+                  pkgActual[col.key] += aVal;
+
+                  lmBase[col.key] += bVal;
+                  lmPlanned[col.key] += pVal;
+                  lmActual[col.key] += aVal;
+                }
+              });
+            });
+
+            if (lotStartMs < pkgStartMs) pkgStartMs = lotStartMs;
+            if (lotEndMs > pkgEndMs) pkgEndMs = lotEndMs;
+            pkgTotalVal += lotTotalVal;
+
+            // Adiciona Nível 3 (Lote / Pavimento)
+            rows.push({
+              id: `n3_${lotCode}`,
+              code: lotCode,
+              description: `${lotName} (${pkgName})`,
+              level: 3,
+              startDate: lotStartMs !== Infinity ? new Date(lotStartMs).toISOString().slice(0, 10) : monthCols[0].startDate.toISOString().slice(0, 10),
+              endDate: lotEndMs !== -Infinity ? new Date(lotEndMs).toISOString().slice(0, 10) : monthCols[monthCols.length - 1].endDate.toISOString().slice(0, 10),
+              totalValue: lotTotalVal,
+              baseMonthly: lotBase,
+              plannedMonthly: lotPlanned,
+              actualMonthly: lotActual
+            });
+          });
+
+          if (pkgStartMs < lmStartMs) lmStartMs = pkgStartMs;
+          if (pkgEndMs > lmEndMs) lmEndMs = pkgEndMs;
+          lmTotalVal += pkgTotalVal;
+
+          // Adiciona Nível 2 (Macroserviço)
+          rows.push({
+            id: `n2_${pkgCode}`,
+            code: pkgCode,
+            description: `${pkgName} [${lmName}]`,
+            level: 2,
+            startDate: pkgStartMs !== Infinity ? new Date(pkgStartMs).toISOString().slice(0, 10) : monthCols[0].startDate.toISOString().slice(0, 10),
+            endDate: pkgEndMs !== -Infinity ? new Date(pkgEndMs).toISOString().slice(0, 10) : monthCols[monthCols.length - 1].endDate.toISOString().slice(0, 10),
+            totalValue: pkgTotalVal,
+            baseMonthly: pkgBase,
+            plannedMonthly: pkgPlanned,
+            actualMonthly: pkgActual
+          });
         });
 
-        const totalTaskDays = Math.max(1, Math.ceil((tEnd.getTime() - tStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
-
-        monthCols.forEach(col => {
-          const overlapStart = Math.max(tStart.getTime(), col.startDate.getTime());
-          const overlapEnd = Math.min(tEnd.getTime(), col.endDate.getTime());
-
-          if (overlapStart <= overlapEnd) {
-            const daysInMonth = Math.ceil((overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1;
-            const ratio = Math.min(1, daysInMonth / totalTaskDays);
-
-            baseMonthly[col.key] = totalValue * ratio;
-            plannedMonthly[col.key] = totalValue * ratio;
-            actualMonthly[col.key] = (totalValue * ratio) * (realProgress / 100);
-          }
+        // Adiciona Nível 1 (Lote Mãe)
+        rows.push({
+          id: `n1_${lmCode}`,
+          code: lmCode,
+          description: lmName,
+          level: 1,
+          startDate: lmStartMs !== Infinity ? new Date(lmStartMs).toISOString().slice(0, 10) : monthCols[0].startDate.toISOString().slice(0, 10),
+          endDate: lmEndMs !== -Infinity ? new Date(lmEndMs).toISOString().slice(0, 10) : monthCols[monthCols.length - 1].endDate.toISOString().slice(0, 10),
+          totalValue: lmTotalVal,
+          baseMonthly: lmBase,
+          plannedMonthly: lmPlanned,
+          actualMonthly: lmActual
         });
-
-        const codeStr = `${task.lotMother} › ${task.lot}`;
-
-        return {
-          id: task.id,
-          code: codeStr,
-          description: `${task.packageName} - ${task.service || task.packageName}`,
-          level: 3,
-          startDate: task.startDate,
-          endDate: task.endDate,
-          totalValue,
-          baseMonthly,
-          plannedMonthly,
-          actualMonthly
-        };
       });
+
+      return rows.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
     }
   }, [eapSource, activeBudget, tasks, monthCols, shortTermProgressMap]);
 
@@ -361,7 +454,6 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
   }, [filteredEapRows]);
 
   // --- CÁLCULO DE VALORES MENSIAIS & ACUMULADOS CONSOLIDADOS ---
-  // Transforma cada linha de EAP para os valores acumulados ou mensais conforme filtro
   const displayEapRows = useMemo(() => {
     return filteredEapRows.map(row => {
       const baseDisp: Record<string, number> = {};
@@ -449,15 +541,15 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       monthCols.forEach(col => {
         if (showBase) {
           const val = row.baseDisp[col.key] || 0;
-          line.push(viewUnit === 'percent' ? (grandTotalValue > 0 ? (val / grandTotalValue) * 100 : 0) : val);
+          line.push(viewUnit === 'percent' ? (row.totalValue > 0 ? (val / row.totalValue) * 100 : 0) : val);
         }
         if (showPlanned) {
           const val = row.plannedDisp[col.key] || 0;
-          line.push(viewUnit === 'percent' ? (grandTotalValue > 0 ? (val / grandTotalValue) * 100 : 0) : val);
+          line.push(viewUnit === 'percent' ? (row.totalValue > 0 ? (val / row.totalValue) * 100 : 0) : val);
         }
         if (showActual) {
           const val = row.actualDisp[col.key] || 0;
-          line.push(viewUnit === 'percent' ? (grandTotalValue > 0 ? (val / grandTotalValue) * 100 : 0) : val);
+          line.push(viewUnit === 'percent' ? (row.totalValue > 0 ? (val / row.totalValue) * 100 : 0) : val);
         }
       });
 
@@ -470,8 +562,17 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     XLSX.writeFile(wb, `Cronograma_Fisico_Financeiro_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  // Helper de renderização do valor de cada célula (R$ ou %)
-  const renderCellValue = (val: number) => {
+  // Helper de renderização de célula para cada LINHA DA TABELA (Calcula % em relação à linha -> soma = 100%)
+  const renderRowCellValue = (val: number, rowTotal: number) => {
+    if (viewUnit === 'percent') {
+      const pct = rowTotal > 0 ? (val / rowTotal) * 100 : 0;
+      return formatPercent(pct);
+    }
+    return formatCurrency(val);
+  };
+
+  // Helper de renderização para o RODAPÉ DO PROJETO (Calcula % em relação ao total do projeto -> soma = 100%)
+  const renderFooterCellValue = (val: number) => {
     if (viewUnit === 'percent') {
       const pct = grandTotalValue > 0 ? (val / grandTotalValue) * 100 : 0;
       return formatPercent(pct);
@@ -494,7 +595,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
             Cronograma Físico-Financeiro
           </h1>
           <p className="text-xs text-slate-500 font-medium">
-            Análise temporal da evolução física e financeira por EAP com integração em tempo real.
+            Análise temporal da evolução física e financeira por EAP com colunas congeladas e filtros dinâmicos.
           </p>
         </div>
 
@@ -549,7 +650,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
             </div>
           </div>
 
-          {/* 2. Nível da EAP */}
+          {/* 2. Nível da EAP (PADRÃO: Nível 3) */}
           <div>
             <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">2. Nível da EAP</label>
             <select
@@ -558,25 +659,17 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
               className="w-full p-2 border border-slate-200 bg-slate-50 focus:bg-white rounded-xl text-xs font-bold text-slate-800 outline-none"
             >
               <option value="all">Todos os Níveis</option>
-              <option value="1">Nível 1 (Macro / Totalizadores)</option>
-              <option value="2">Nível 2 (Grupos / Subgrupos)</option>
-              <option value="3">Nível 3 (Pacotes / Etapas)</option>
+              <option value="1">Nível 1 (Lote Mãe / Totalizador)</option>
+              <option value="2">Nível 2 (Macroserviço / Subgrupo)</option>
+              <option value="3">Nível 3 (Lote / Pavimento)</option>
               <option value="4">Nível 4 (Serviços Detalhados)</option>
             </select>
           </div>
 
-          {/* 3. Unidade (% ou R$) */}
+          {/* 3. Unidade (PADRÃO: %) */}
           <div>
             <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">3. Exibir em</label>
             <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
-              <button
-                onClick={() => setViewUnit('currency')}
-                className={`flex-1 py-1.5 rounded-lg transition ${
-                  viewUnit === 'currency' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                R$ (Valores)
-              </button>
               <button
                 onClick={() => setViewUnit('percent')}
                 className={`flex-1 py-1.5 rounded-lg transition ${
@@ -585,10 +678,18 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
               >
                 % (Porcentagem)
               </button>
+              <button
+                onClick={() => setViewUnit('currency')}
+                className={`flex-1 py-1.5 rounded-lg transition ${
+                  viewUnit === 'currency' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                R$ (Valores)
+              </button>
             </div>
           </div>
 
-          {/* 4. Modo de Acúmulo */}
+          {/* 4. Modo de Acúmulo (PADRÃO: Mensal) */}
           <div>
             <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">4. Visão Temporal</label>
             <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
@@ -624,7 +725,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
           </div>
         </div>
 
-        {/* CHECKBOXES DE CAMADAS VISUAIS (Base, Previsto, Realizado) */}
+        {/* CHECKBOXES DE CAMADAS VISUAIS (PADRÃO: Apenas Previsto marcado) */}
         <div className="flex flex-wrap items-center gap-6 pt-2 border-t border-slate-100 text-xs font-black uppercase">
           <span className="text-[10px] text-slate-400 tracking-wider">Camadas Visíveis:</span>
 
@@ -669,7 +770,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
         </div>
       </div>
 
-      {/* GRADE DA TABELA DE CRONOGRAMA FÍSICO-FINANCEIRO */}
+      {/* GRADE DA TABELA DE CRONOGRAMA FÍSICO-FINANCEIRO COM COLUNAS CONGELADAS (STICKY LEFT) */}
       <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="p-4 bg-slate-900 text-white flex justify-between items-center text-xs font-black uppercase tracking-wider">
           <div className="flex items-center gap-2">
@@ -683,19 +784,30 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs text-left border-collapse">
-            <thead className="bg-slate-800 text-white uppercase text-[9px] tracking-wider sticky top-0 z-10">
+        <div className="overflow-x-auto relative max-w-full">
+          <table className="w-full text-xs text-left border-collapse min-w-max">
+            <thead className="bg-slate-800 text-white uppercase text-[9px] tracking-wider sticky top-0 z-30">
               <tr>
-                <th className="p-3 w-32 border-r border-slate-700 font-black">Código EAP</th>
-                <th className="p-3 min-w-[220px] border-r border-slate-700 font-black">Atividade / Descrição</th>
-                <th className="p-3 w-24 text-center border-r border-slate-700 font-black">Início</th>
-                <th className="p-3 w-24 text-center border-r border-slate-700 font-black">Término</th>
-                <th className="p-3 w-32 text-right border-r border-slate-700 font-black bg-slate-850">Valor Total</th>
+                {/* COLUNAS INICIAIS CONGELADAS DA ESQUERDA (STICKY) */}
+                <th className="p-3 w-24 sticky left-0 bg-slate-800 z-30 border-r border-slate-700 font-black">
+                  Código EAP
+                </th>
+                <th className="p-3 w-60 sticky left-[96px] bg-slate-800 z-30 border-r border-slate-700 font-black">
+                  Atividade / Descrição
+                </th>
+                <th className="p-3 w-24 text-center sticky left-[336px] bg-slate-800 z-30 border-r border-slate-700 font-black">
+                  Início
+                </th>
+                <th className="p-3 w-24 text-center sticky left-[432px] bg-slate-800 z-30 border-r border-slate-700 font-black">
+                  Término
+                </th>
+                <th className="p-3 w-32 text-right sticky left-[528px] bg-slate-850 z-30 border-r-2 border-slate-600 shadow-md font-black">
+                  Valor Total
+                </th>
 
-                {/* Colunas mensais dinâmicas */}
+                {/* COLUNAS DOS MESES DA OBRA (RÉGUA DE MESES COM SCROLL) */}
                 {monthCols.map(col => (
-                  <th key={col.key} className="p-3 text-center border-r border-slate-700 min-w-[130px] font-black">
+                  <th key={col.key} className="p-3 text-center border-r border-slate-700 min-w-[135px] font-black">
                     {col.label}
                   </th>
                 ))}
@@ -704,24 +816,25 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
 
             <tbody className="divide-y divide-slate-200 font-medium text-slate-800">
               {displayEapRows.map((row, idx) => (
-                <tr key={row.id || idx} className="hover:bg-slate-50 transition">
-                  <td className="p-3 border-r border-slate-200 font-mono font-bold text-slate-700">
+                <tr key={row.id || idx} className="hover:bg-slate-50 transition group">
+                  {/* COLUNAS CONGELADAS NAS LINHAS */}
+                  <td className="p-3 sticky left-0 bg-white group-hover:bg-slate-50 z-20 border-r border-slate-200 font-mono font-bold text-slate-700">
                     {row.code}
                   </td>
-                  <td className="p-3 border-r border-slate-200 font-bold uppercase text-[11px] leading-tight">
+                  <td className="p-3 sticky left-[96px] bg-white group-hover:bg-slate-50 z-20 border-r border-slate-200 font-bold uppercase text-[11px] leading-tight truncate max-w-[240px]" title={row.description}>
                     {row.description}
                   </td>
-                  <td className="p-3 border-r border-slate-200 text-center font-mono text-[10px]">
+                  <td className="p-3 sticky left-[336px] bg-white group-hover:bg-slate-50 z-20 border-r border-slate-200 text-center font-mono text-[10px]">
                     {formatDateBR(row.startDate)}
                   </td>
-                  <td className="p-3 border-r border-slate-200 text-center font-mono text-[10px]">
+                  <td className="p-3 sticky left-[432px] bg-white group-hover:bg-slate-50 z-20 border-r border-slate-200 text-center font-mono text-[10px]">
                     {formatDateBR(row.endDate)}
                   </td>
-                  <td className="p-3 border-r border-slate-200 text-right font-black text-slate-900 bg-slate-50/50">
+                  <td className="p-3 sticky left-[528px] bg-slate-50 group-hover:bg-slate-100 z-20 border-r-2 border-slate-300 shadow-md text-right font-black text-slate-900">
                     {formatCurrency(row.totalValue)}
                   </td>
 
-                  {/* Colunas por mês */}
+                  {/* COLUNAS MENSAIS DA LINHA */}
                   {monthCols.map(col => {
                     const bVal = row.baseDisp[col.key] || 0;
                     const pVal = row.plannedDisp[col.key] || 0;
@@ -732,19 +845,19 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
                         {showBase && (
                           <div className="flex justify-between items-center text-slate-500 font-semibold border-b border-slate-100 pb-0.5" title="Base">
                             <span className="text-[8px] font-black text-slate-400 uppercase">B:</span>
-                            <span>{renderCellValue(bVal)}</span>
+                            <span>{renderRowCellValue(bVal, row.totalValue)}</span>
                           </div>
                         )}
                         {showPlanned && (
                           <div className="flex justify-between items-center text-indigo-700 font-bold border-b border-indigo-50 pb-0.5" title="Previsto">
                             <span className="text-[8px] font-black text-indigo-500 uppercase">P:</span>
-                            <span>{renderCellValue(pVal)}</span>
+                            <span>{renderRowCellValue(pVal, row.totalValue)}</span>
                           </div>
                         )}
                         {showActual && (
                           <div className="flex justify-between items-center text-emerald-700 font-black" title="Realizado">
                             <span className="text-[8px] font-black text-emerald-600 uppercase">R:</span>
-                            <span>{renderCellValue(aVal)}</span>
+                            <span>{renderRowCellValue(aVal, row.totalValue)}</span>
                           </div>
                         )}
                       </td>
@@ -762,13 +875,13 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
               )}
             </tbody>
 
-            {/* RODAPÉ DE TOTALIZAÇÃO GERAL */}
-            <tfoot className="bg-slate-900 text-white uppercase font-black text-[10px] border-t-2 border-slate-700">
+            {/* RODAPÉ DE TOTALIZAÇÃO GERAL DO PROJETO */}
+            <tfoot className="bg-slate-900 text-white uppercase font-black text-[10px] border-t-2 border-slate-700 sticky bottom-0 z-30">
               <tr>
-                <td colSpan={4} className="p-3 text-right tracking-wider">
+                <td colSpan={4} className="p-3 sticky left-0 bg-slate-900 z-30 text-right tracking-wider border-r border-slate-700">
                   TOTALIZADOR DO PROJETO ({accumulationMode === 'accumulated' ? 'ACUMULADO' : 'MENSAL'}):
                 </td>
-                <td className="p-3 text-right bg-slate-950 text-emerald-400 font-black text-xs font-mono">
+                <td className="p-3 sticky left-[528px] bg-slate-950 z-30 text-right border-r-2 border-slate-600 shadow-md text-emerald-400 font-black text-xs font-mono">
                   {formatCurrency(grandTotalValue)}
                 </td>
 
@@ -782,19 +895,19 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
                       {showBase && (
                         <div className="flex justify-between items-center text-slate-300">
                           <span className="text-[7px] text-slate-400">BASE:</span>
-                          <span>{renderCellValue(bTot)}</span>
+                          <span>{renderFooterCellValue(bTot)}</span>
                         </div>
                       )}
                       {showPlanned && (
                         <div className="flex justify-between items-center text-indigo-300">
                           <span className="text-[7px] text-indigo-400">PREV:</span>
-                          <span>{renderCellValue(pTot)}</span>
+                          <span>{renderFooterCellValue(pTot)}</span>
                         </div>
                       )}
                       {showActual && (
                         <div className="flex justify-between items-center text-emerald-400">
                           <span className="text-[7px] text-emerald-500">REAL:</span>
-                          <span>{renderCellValue(aTot)}</span>
+                          <span>{renderFooterCellValue(aTot)}</span>
                         </div>
                       )}
                     </td>
