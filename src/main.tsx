@@ -4613,95 +4613,91 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <div className="mapping-grid">{displayedImportFields.map((field) => <label key={field.key}>{field.label}{importFieldRequired(field, importData.mode) ? ' *' : ''}<select value={mapping[field.key] ?? ''} onChange={(e) => setMapping({ ...mapping, [field.key]: e.target.value === '' ? undefined : Number(e.target.value) })}><option value="">Não importar</option>{(importData.rows[importData.headerRow - 1] ?? []).map((header, index) => <option key={index} value={index}>{String(header) || `Coluna ${index + 1}`}</option>)}</select></label>)}</div>
         <div className="import-summary"><strong>{Math.max(0, importData.rows.length - importData.headerRow)} linhas encontradas</strong><span>{displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined) ? 'Complete os campos obrigatórios.' : 'Mapeamento pronto para revisar.'}</span></div><button className="primary import-confirm" disabled={displayedImportFields.some((field) => importFieldRequired(field, importData.mode) && mapping[field.key] === undefined)} onClick={() => importData.mode === 'links' ? void openImportReview() : void confirmImport()}>{importData.mode === 'links' ? 'Revisar vínculos' : 'Confirmar importação'}</button>
       </div></>}</aside>
-      {settingsDrawerOpen && (
-        <div className="mapping-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && setSettingsDrawerOpen(false)}>
-          <div className="mapping-modal settings-drawer max-w-md w-full">
-            <div className="chart-drawer-head">
-              <div>
-                <small>CONFIGURAÇÕES DO ORÇAMENTO</small>
-                <h3>Parâmetros e Ações</h3>
-                <span>Ajuste o tipo, importação, exportação e vínculos.</span>
+      <div className={`settings-drawer-backdrop ${settingsDrawerOpen ? 'open' : ''}`} onClick={() => setSettingsDrawerOpen(false)} />
+      <div className={`settings-drawer-panel ${settingsDrawerOpen ? 'open' : ''}`}>
+        <div className="flex justify-between items-start pb-3 border-b border-slate-100">
+          <div>
+            <small className="text-indigo-600 font-black uppercase text-[10px] tracking-wider">CONFIGURAÇÕES DO ORÇAMENTO</small>
+            <h3 className="text-base font-black text-slate-800 m-0">Parâmetros e Ações</h3>
+          </div>
+          <button type="button" className="text-2xl font-bold text-slate-400 hover:text-slate-600 leading-none" onClick={() => setSettingsDrawerOpen(false)}>×</button>
+        </div>
+        
+        <div className="space-y-6 pt-2">
+          {/* TIPO DE ORÇAMENTO COM EXCLUSÃO ESPECÍFICA */}
+          <div className="space-y-2">
+            <label className="block text-xs font-black uppercase text-slate-500">Tipo de Orçamento</label>
+            <div className="flex items-center gap-2">
+              <div className="mapping-methods flex-1">
+                <button type="button" className={type === 'contractor' ? 'active' : ''} onClick={() => { setType('contractor'); setBudgetId(null); }}>Construtora · saídas</button>
+                <button type="button" className={type === 'financing' ? 'active' : ''} onClick={() => { setType('financing'); setBudgetId(null); }}>Financiamento · entradas</button>
               </div>
-              <button className="drawer-close" onClick={() => setSettingsDrawerOpen(false)}>×</button>
-            </div>
-            
-            <div className="mapping-modal-body space-y-6 p-5">
-              {/* TIPO DE ORÇAMENTO COM EXCLUSÃO ESPECÍFICA */}
-              <div className="space-y-2">
-                <label className="block text-xs font-black uppercase text-slate-500">Tipo de Orçamento</label>
-                <div className="flex items-center gap-2">
-                  <div className="mapping-methods flex-1">
-                    <button type="button" className={type === 'contractor' ? 'active' : ''} onClick={() => { setType('contractor'); setBudgetId(null); }}>Construtora · saídas</button>
-                    <button type="button" className={type === 'financing' ? 'active' : ''} onClick={() => { setType('financing'); setBudgetId(null); }}>Financiamento · entradas</button>
-                  </div>
-                  {current && (
-                    <button type="button" className="danger-button p-2 text-red-600 hover:bg-red-50 rounded-xl border border-red-200" title={`Excluir orçamento de ${type === 'contractor' ? 'Construtora' : 'Financiamento'}`} onClick={() => void removeBudget()}>
-                      <Trash2 size={16} />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {/* EDICAO DE NOME */}
               {current && (
-                <div className="space-y-2">
-                  <label className="block text-xs font-black uppercase text-slate-500">Nome da Revisão</label>
-                  {editingName ? (
-                    <label className="budget-name-editor">
-                      <input autoFocus defaultValue={current.name} onKeyDown={(event) => { if (event.key === 'Enter') void persistName(event.currentTarget.value); }} />
-                      <button type="button" className="primary" onClick={(event) => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) void persistName(input.value); }}>Salvar nome</button>
-                    </label>
-                  ) : (
-                    <button type="button" className="w-full text-left p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 flex justify-between items-center" onClick={() => setEditingName(true)}>
-                      <span>✏️ {current.name}</span>
-                      <small className="text-indigo-600 font-bold">Editar</small>
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* IMPORTADOR DE ARQUIVO */}
-              <div className="space-y-2 pt-3 border-t border-slate-100">
-                <label className="block text-xs font-black uppercase text-slate-500">Importação de Planilha</label>
-                <div className="space-y-2">
-                  <select className="w-full p-2.5 border border-slate-200 bg-white rounded-xl text-xs font-bold" value={importMode} onChange={(event) => setImportMode(event.target.value as BudgetImportMode)}>
-                    <option value="budget">Somente orçamento</option>
-                    <option value="links">Somente vínculos</option>
-                    <option value="budget-links">Orçamento e vínculos</option>
-                  </select>
-                  <label className="primary budget-upload w-full flex justify-center items-center gap-2 p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl cursor-pointer">
-                    <Upload size={15} /> Selecionar arquivo
-                    <input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readBudgetFile(file); event.currentTarget.value = ''; }} />
-                  </label>
-                </div>
-              </div>
-
-              {/* ACOES DE PAVIMENTO E EXPORTAÇÃO */}
-              <div className="space-y-2 pt-3 border-t border-slate-100">
-                <label className="block text-xs font-black uppercase text-slate-500">Configurações & Exportações</label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button type="button" className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5" disabled={!tasks.length} onClick={() => { setLotAreasOpen(true); setSettingsDrawerOpen(false); }}>
-                    <Settings size={14} /> Pavimentos
-                  </button>
-                  <button type="button" className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5" disabled={!current || !allocations.length} onClick={exportLinks}>
-                    <Download size={14} /> Exportar vínculos
-                  </button>
-                </div>
-              </div>
-
-              {/* BOTAO DE LIMPAR VÍNCULOS APENAS */}
-              {current && allocations.length > 0 && (
-                <div className="pt-4 border-t border-slate-100 space-y-2">
-                  <label className="block text-xs font-black uppercase text-red-600">Zerar Vínculos do Orçamento</label>
-                  <button type="button" className="w-full p-2.5 bg-red-50 hover:bg-red-100 text-red-700 font-black text-xs rounded-xl border border-red-200 flex items-center justify-center gap-2 cursor-pointer" onClick={() => void clearAllocationsOnly()}>
-                    🧹 Limpar vínculos ({allocations.length})
-                  </button>
-                </div>
+                <button type="button" className="danger-button p-2 text-red-600 hover:bg-red-50 rounded-xl border border-red-200" title={`Excluir orçamento de ${type === 'contractor' ? 'Construtora' : 'Financiamento'}`} onClick={() => void removeBudget()}>
+                  <Trash2 size={16} />
+                </button>
               )}
             </div>
           </div>
+
+          {/* EDICAO DE NOME */}
+          {current && (
+            <div className="space-y-2">
+              <label className="block text-xs font-black uppercase text-slate-500">Nome da Revisão</label>
+              {editingName ? (
+                <label className="budget-name-editor">
+                  <input autoFocus defaultValue={current.name} onKeyDown={(event) => { if (event.key === 'Enter') void persistName(event.currentTarget.value); }} />
+                  <button type="button" className="primary" onClick={(event) => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) void persistName(input.value); }}>Salvar nome</button>
+                </label>
+              ) : (
+                <button type="button" className="w-full text-left p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 hover:bg-slate-100 flex justify-between items-center" onClick={() => setEditingName(true)}>
+                  <span>✏️ {current.name}</span>
+                  <small className="text-indigo-600 font-bold">Editar</small>
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* IMPORTADOR DE ARQUIVO */}
+          <div className="space-y-2 pt-3 border-t border-slate-100">
+            <label className="block text-xs font-black uppercase text-slate-500">Importação de Planilha</label>
+            <div className="space-y-2">
+              <select className="w-full p-2.5 border border-slate-200 bg-white rounded-xl text-xs font-bold" value={importMode} onChange={(event) => setImportMode(event.target.value as BudgetImportMode)}>
+                <option value="budget">Somente orçamento</option>
+                <option value="links">Somente vínculos</option>
+                <option value="budget-links">Orçamento e vínculos</option>
+              </select>
+              <label className="primary budget-upload w-full flex justify-center items-center gap-2 p-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl cursor-pointer">
+                <Upload size={15} /> Selecionar arquivo
+                <input type="file" accept=".xlsx,.xls,.csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) void readBudgetFile(file); event.currentTarget.value = ''; }} />
+              </label>
+            </div>
+          </div>
+
+          {/* ACOES DE PAVIMENTO E EXPORTAÇÃO */}
+          <div className="space-y-2 pt-3 border-t border-slate-100">
+            <label className="block text-xs font-black uppercase text-slate-500">Configurações & Exportações</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5" disabled={!tasks.length} onClick={() => { setLotAreasOpen(true); setSettingsDrawerOpen(false); }}>
+                <Settings size={14} /> Pavimentos
+              </button>
+              <button type="button" className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5" disabled={!current || !allocations.length} onClick={exportLinks}>
+                <Download size={14} /> Exportar vínculos
+              </button>
+            </div>
+          </div>
+
+          {/* BOTAO DE LIMPAR VÍNCULOS APENAS */}
+          {current && allocations.length > 0 && (
+            <div className="pt-4 border-t border-slate-100 space-y-2">
+              <label className="block text-xs font-black uppercase text-red-600">Zerar Vínculos do Orçamento</label>
+              <button type="button" className="w-full p-2.5 bg-red-50 hover:bg-red-100 text-red-700 font-black text-xs rounded-xl border border-red-200 flex items-center justify-center gap-2 cursor-pointer" onClick={() => void clearAllocationsOnly()}>
+                🧹 Limpar vínculos ({allocations.length})
+              </button>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </section>
   );
 }

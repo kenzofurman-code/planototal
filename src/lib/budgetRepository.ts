@@ -202,7 +202,7 @@ export async function saveBudgetAllocations(revision: BudgetRevision) {
       value: itemTotal === undefined ? item.value : Number((itemTotal * weight / 100).toFixed(8))
     };
   });
-  revision.allocations.forEach((item) => { item.id ??= crypto.randomUUID(); });
+  revision.allocations.forEach((item) => { item.id = crypto.randomUUID(); });
   const { data: insertedCount, error } = await supabase.rpc('replace_financial_budget_allocations', {
     p_version_id: revision.versionId,
     p_project_key: revision.projectKey,
