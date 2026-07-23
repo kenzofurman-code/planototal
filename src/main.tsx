@@ -4041,9 +4041,10 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const allocations = current?.allocations ?? [];
   const selected = items.find((item) => item.id === budgetId);
   const linkedTasks = new Set(allocations.map((item) => item.taskId));
-  const visibleItems = items.filter((item) => `${item.code} ${item.description}`.toLocaleLowerCase('pt-BR').includes(budgetSearch.toLocaleLowerCase('pt-BR')));
+  const [budgetUnlinkedOnly, setBudgetUnlinkedOnly] = useState(false);
   const [taskViewFilter, setTaskViewFilter] = useState<'all' | 'linked_only'>('all');
   const selectedLinkedTaskIds = new Set(allocations.filter((a) => a.budgetId === budgetId).map((a) => a.taskId));
+  const selectedAllocationsMap = new Map(allocations.filter((a) => a.budgetId === budgetId).map((a) => [a.taskId, a.weight]));
   const taskLinkedWeightMap = allocations.reduce((map, a) => {
     map.set(a.taskId, (map.get(a.taskId) ?? 0) + a.weight);
     return map;
@@ -4080,12 +4081,23 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   }, new Map<string, number>());
   const directlyLinkedBudgetIds = new Set(directWeightByBudgetId.keys());
   const superiorLinkByItem = new Map<string, BudgetItem>();
-  items.forEach((item) => {
-    if (!directlyLinkedBudgetIds.has(item.id)) return;
-    descendantIds(item.id).forEach((descendantId) => {
-      if (!directlyLinkedBudgetIds.has(descendantId) && !superiorLinkByItem.has(descendantId)) superiorLinkByItem.set(descendantId, item);
+  let visibleItems = items.filter((item) => `${item.code} ${item.description}`.toLocaleLowerCase('pt-BR').includes(budgetSearch.toLocaleLowerCase('pt-BR')));
+  if (budgetUnlinkedOnly) {
+    visibleItems = visibleItems.filter((item) => {
+      const linkedWeight = directWeightByBudgetId.get(item.id) ?? 0;
+      const fullyLinked = linkedWeight > 0 && Math.abs(linkedWeight - 100) <= IMPORT_WEIGHT_TOLERANCE;
+      const superior = superiorLinkByItem.get(item.id);
+      return !fullyLinked && !superior;
     });
+  }
+
+  const level1Items = items.filter((item) => itemLevel(item) === 1);
+  const leafItems = items.filter((item, idx) => {
+    const lvl = itemLevel(item);
+    const nextItem = items[idx + 1];
+    return !nextItem || itemLevel(nextItem) <= lvl;
   });
+  const totalBudgetSum = (level1Items.length > 0 ? level1Items : leafItems).reduce((sum, item) => sum + item.total, 0);
   const allVisibleTasksSelected = visibleTasks.length > 0 && visibleTasks.every((task) => activityIds.includes(task.id));
   const displayedImportFields = importData?.mode === 'links' ? linkImportFields : budgetImportFields;
   const visibleImportReview = reviewOnlyInvalid ? importReview.filter((group) => !isImportReviewGroupComplete(group)) : importReview;
@@ -4542,21 +4554,18 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       </div>
       {message && <p className="financial-message">{message}</p>}
       {!current ? <div className="card empty-state"><h3>Nenhum orçamento de {type === 'contractor' ? 'construtora' : 'financiamento'} importado</h3><p>Importe uma planilha para começar. Projetos novos permanecem sem orçamento até essa etapa.</p></div> : <>
-        <div className="financial-delete-action">
-          {editingName ? <label className="budget-name-editor">Nome <input autoFocus defaultValue={current.name} onKeyDown={(event) => { if (event.key === 'Enter') void persistName(event.currentTarget.value); }} /><button className="primary" onClick={(event) => { const input = event.currentTarget.parentElement?.querySelector('input'); if (input) void persistName(input.value); }}>Salvar nome</button></label> : <button onClick={() => setEditingName(true)}>Editar nome: {current.name}</button>}
-        </div>
         <div className="metric-grid financial-metrics">
-          <Metric label={type === 'contractor' ? 'Total de despesas' : 'Total de entradas'} value={items.reduce((sum, item) => sum + item.total, 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} />
+          <Metric label={type === 'contractor' ? 'Total de despesas' : 'Total de entradas'} value={totalBudgetSum.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} />
           <Metric label="Itens da EAP" value={String(items.length)} /><Metric label="Atividades vinculadas" value={`${linkedTasks.size}/${tasks.length}`} />
         </div>
         <div className="mapping-shell">
           <div className="mapping-panel"><div className="mapping-panel-head"><small>ORÇAMENTO</small><h3>{current.name}</h3><span>{visibleItems.length} itens</span></div>
-            <label className="mapping-search"><Search size={15}/><input value={budgetSearch} onChange={(e) => setBudgetSearch(e.target.value)} placeholder="Buscar código ou descrição..." /></label>
+            <div className="mapping-filter-actions"><label className="mapping-search"><Search size={15}/><input value={budgetSearch} onChange={(e) => setBudgetSearch(e.target.value)} placeholder="Buscar código ou descrição..." /></label><label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer select-none whitespace-nowrap"><input type="checkbox" checked={budgetUnlinkedOnly} onChange={(e) => setBudgetUnlinkedOnly(e.target.checked)} className="w-3.5 h-3.5 rounded text-indigo-600 cursor-pointer" /><span>Sem vínculo</span></label></div>
             <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código / descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linkedWeight = directWeightByBudgetId.get(item.id) ?? 0; const linked = linkedWeight > 0; const fullyLinked = linked && Math.abs(linkedWeight - 100) <= IMPORT_WEIGHT_TOLERANCE; const superior = superiorLinkByItem.get(item.id); const status = fullyLinked ? 'Vinculado totalmente' : linked ? `Vinculado parcial (${linkedWeight.toFixed(2)}%)` : superior ? 'Vinculado no nível superior' : 'Livre'; return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => { setBudgetId(item.id); const itemTaskIds = allocations.filter(a => a.budgetId === item.id).map(a => a.taskId); if (itemTaskIds.length > 0) { setActivityIds(itemTaskIds); if (fullyLinked) setTaskViewFilter('linked_only'); else setTaskViewFilter('all'); } else { setActivityIds([]); setTaskViewFilter('all'); } if (superior) setMessage(`Item contemplado pelo vínculo do nível superior ${superior.code}.`); }}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={fullyLinked || superior ? 'mapping-status linked' : linked ? 'mapping-status partial' : 'mapping-status'} title={superior ? `Contemplado por ${superior.code}` : linked ? `${linkedWeight.toFixed(8)}% vinculado` : undefined}>{status}</span></td></tr>; })}</tbody></table></div>
           </div>
           <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FÍSICA</small><h3>Cronograma da obra</h3><div className="mapping-panel-head-actions"><span>{visibleTasks.length} atividades</span><button type="button" disabled={!visibleTasks.length} onClick={toggleVisibleTasks}><CheckSquare size={15}/>{allVisibleTasksSelected ? 'Limpar seleção' : 'Selecionar todos'}</button></div></div>
             <div className="mapping-filter-actions"><label className="mapping-search"><Search size={15}/><input value={activitySearch} onChange={(e) => setActivitySearch(e.target.value)} placeholder="Buscar atividade, serviço, lote ou grupo..." /></label>{selectedLinkedTaskIds.size > 0 && <div className="mapping-methods"><button type="button" className={taskViewFilter === 'all' ? 'active' : ''} onClick={() => setTaskViewFilter('all')}>Exibir todas</button><button type="button" className={taskViewFilter === 'linked_only' ? 'active' : ''} onClick={() => setTaskViewFilter('linked_only')}>Apenas vinculadas ({selectedLinkedTaskIds.size})</button></div>}{activityIds.length > 0 && <strong>{activityIds.length} selecionada(s)</strong>}</div>
-            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Atividade</th><th>Lote</th><th>% Vinculado</th><th>Prazo</th><th>Status</th></tr></thead><tbody>{visibleTasks.map((task) => { const taskWeight = taskLinkedWeightMap.get(task.id) ?? 0; const taskFullyLinked = taskWeight > 0 && Math.abs(taskWeight - 100) <= IMPORT_WEIGHT_TOLERANCE; const taskPartiallyLinked = taskWeight > 0 && !taskFullyLinked; return <tr key={task.id} className={activityIds.includes(task.id) ? 'mapping-selected' : ''} onClick={() => setActivityIds((currentIds) => currentIds.includes(task.id) ? currentIds.filter((id) => id !== task.id) : [...currentIds, task.id])}><td><input type="checkbox" checked={activityIds.includes(task.id)} readOnly /></td><td><small>{task.service || task.lotMother}</small><strong>{task.packageName}</strong></td><td>{task.lot}</td><td><span className={taskFullyLinked ? 'mapping-status linked' : taskPartiallyLinked ? 'mapping-status partial' : 'mapping-status'}>{taskWeight > 0 ? `${taskWeight.toFixed(1)}%` : '0%'}</span></td><td>{diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1}d</td><td><span className={linkedTasks.has(task.id) ? 'mapping-status linked' : 'mapping-status'}>{linkedTasks.has(task.id) ? 'Vinculada' : 'Livre'}</span></td></tr>; })}</tbody></table></div>
+            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Atividade</th><th>Lote</th><th>{selected ? '% Peso' : '% Vinculado'}</th><th>Prazo</th><th>Status</th></tr></thead><tbody>{visibleTasks.map((task) => { const itemSpecificWeight = selectedAllocationsMap.get(task.id); const taskWeight = selected ? (itemSpecificWeight ?? 0) : (taskLinkedWeightMap.get(task.id) ?? 0); const taskFullyLinked = selected ? (itemSpecificWeight !== undefined && Math.abs(itemSpecificWeight - 100) <= IMPORT_WEIGHT_TOLERANCE) : (taskWeight > 0 && Math.abs(taskWeight - 100) <= IMPORT_WEIGHT_TOLERANCE); const taskPartiallyLinked = taskWeight > 0 && !taskFullyLinked; return <tr key={task.id} className={activityIds.includes(task.id) ? 'mapping-selected' : ''} onClick={() => setActivityIds((currentIds) => currentIds.includes(task.id) ? currentIds.filter((id) => id !== task.id) : [...currentIds, task.id])}><td><input type="checkbox" checked={activityIds.includes(task.id)} readOnly /></td><td><small>{task.service || task.lotMother}</small><strong>{task.packageName}</strong></td><td>{task.lot}</td><td><span className={taskFullyLinked ? 'mapping-status linked' : taskPartiallyLinked ? 'mapping-status partial' : 'mapping-status'}>{taskWeight > 0 ? `${taskWeight.toFixed(selected ? 2 : 1)}%` : '0%'}</span></td><td>{diffDays(parseDate(task.startDate), parseDate(task.endDate)) + 1}d</td><td><span className={linkedTasks.has(task.id) ? 'mapping-status linked' : 'mapping-status'}>{linkedTasks.has(task.id) ? 'Vinculada' : 'Livre'}</span></td></tr>; })}</tbody></table></div>
           </div>
         </div>
         <div className="mapping-action"><Link2 size={18}/><div><strong>{selected?.code ?? 'Selecione um item'} · {activityIds.length} atividade(s)</strong><small>{selected && superiorLinkByItem.has(selected.id) ? `Contemplado pelo nível superior ${superiorLinkByItem.get(selected.id)?.code}.` : 'Defina o critério de ponderação antes de confirmar.'}</small></div><button className="primary" disabled={!selected || !activityIds.length || superiorLinkByItem.has(selected.id)} onClick={openWeightModal}><ArrowLeftRight size={15}/> Vincular</button></div>
