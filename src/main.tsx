@@ -4042,7 +4042,19 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
   const selected = items.find((item) => item.id === budgetId);
   const linkedTasks = new Set(allocations.map((item) => item.taskId));
   const visibleItems = items.filter((item) => `${item.code} ${item.description}`.toLocaleLowerCase('pt-BR').includes(budgetSearch.toLocaleLowerCase('pt-BR')));
-  const visibleTasks = tasks.filter((task) => `${task.packageName} ${task.service ?? ''} ${task.lot} ${task.lotMother}`.toLocaleLowerCase('pt-BR').includes(activitySearch.toLocaleLowerCase('pt-BR')));
+  const selectedLinkedTaskIds = new Set(allocations.filter((a) => a.budgetId === budgetId).map((a) => a.taskId));
+  const selectedWeight = budgetId ? (allocations.filter((a) => a.budgetId === budgetId).reduce((s, a) => s + a.weight, 0)) : 0;
+  const selectedFullyLinked = selectedWeight > 0 && Math.abs(selectedWeight - 100) <= IMPORT_WEIGHT_TOLERANCE;
+
+  const visibleTasks = tasks.filter((task) => {
+    if (selectedFullyLinked && selectedLinkedTaskIds.size > 0) {
+      if (!selectedLinkedTaskIds.has(task.id)) return false;
+    }
+    if (activitySearch) {
+      return `${task.packageName} ${task.service ?? ''} ${task.lot} ${task.lotMother}`.toLocaleLowerCase('pt-BR').includes(activitySearch.toLocaleLowerCase('pt-BR'));
+    }
+    return true;
+  });
   const itemLevel = (item: BudgetItem) => {
     const parsed = Number(String(item.level).replace(',', '.'));
     if (Number.isInteger(parsed) && parsed > 0) return parsed;
@@ -4537,7 +4549,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <div className="mapping-shell">
           <div className="mapping-panel"><div className="mapping-panel-head"><small>ORÇAMENTO</small><h3>{current.name}</h3><span>{visibleItems.length} itens</span></div>
             <label className="mapping-search"><Search size={15}/><input value={budgetSearch} onChange={(e) => setBudgetSearch(e.target.value)} placeholder="Buscar código ou descrição..." /></label>
-            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código / descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linkedWeight = directWeightByBudgetId.get(item.id) ?? 0; const linked = linkedWeight > 0; const fullyLinked = linked && Math.abs(linkedWeight - 100) <= IMPORT_WEIGHT_TOLERANCE; const superior = superiorLinkByItem.get(item.id); const status = fullyLinked ? 'Vinculado totalmente' : linked ? `Vinculado parcial (${linkedWeight.toFixed(2)}%)` : superior ? 'Vinculado no nível superior' : 'Livre'; return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => { setBudgetId(item.id); if (superior) setMessage(`Item contemplado pelo vínculo do nível superior ${superior.code}.`); }}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={fullyLinked || superior ? 'mapping-status linked' : linked ? 'mapping-status partial' : 'mapping-status'} title={superior ? `Contemplado por ${superior.code}` : linked ? `${linkedWeight.toFixed(8)}% vinculado` : undefined}>{status}</span></td></tr>; })}</tbody></table></div>
+            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código / descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linkedWeight = directWeightByBudgetId.get(item.id) ?? 0; const linked = linkedWeight > 0; const fullyLinked = linked && Math.abs(linkedWeight - 100) <= IMPORT_WEIGHT_TOLERANCE; const superior = superiorLinkByItem.get(item.id); const status = fullyLinked ? 'Vinculado totalmente' : linked ? `Vinculado parcial (${linkedWeight.toFixed(2)}%)` : superior ? 'Vinculado no nível superior' : 'Livre'; return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => { setBudgetId(item.id); const itemTaskIds = allocations.filter(a => a.budgetId === item.id).map(a => a.taskId); if (fullyLinked && itemTaskIds.length > 0) { setActivityIds(itemTaskIds); } else if (!linked) { setActivityIds([]); } if (superior) setMessage(`Item contemplado pelo vínculo do nível superior ${superior.code}.`); }}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={fullyLinked || superior ? 'mapping-status linked' : linked ? 'mapping-status partial' : 'mapping-status'} title={superior ? `Contemplado por ${superior.code}` : linked ? `${linkedWeight.toFixed(8)}% vinculado` : undefined}>{status}</span></td></tr>; })}</tbody></table></div>
           </div>
           <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FÍSICA</small><h3>Cronograma da obra</h3><div className="mapping-panel-head-actions"><span>{visibleTasks.length} atividades</span><button type="button" disabled={!visibleTasks.length} onClick={toggleVisibleTasks}><CheckSquare size={15}/>{allVisibleTasksSelected ? 'Limpar seleção' : 'Selecionar todos'}</button></div></div>
             <div className="mapping-filter-actions"><label className="mapping-search"><Search size={15}/><input value={activitySearch} onChange={(e) => setActivitySearch(e.target.value)} placeholder="Buscar atividade, serviço, lote ou grupo..." /></label>{activityIds.length > 0 && <strong>{activityIds.length} selecionada(s)</strong>}</div>
