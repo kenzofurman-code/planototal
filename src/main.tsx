@@ -12,6 +12,7 @@ import { deleteBudget as deleteSavedBudget, loadBudgetRevisionName, loadBudgets,
 import { createScheduleVersion, deleteScheduleVersion, loadScheduleVersions, selectScheduleVersion, updateActiveScheduleVersion, type SavedScheduleVersion } from './lib/scheduleVersionRepository';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { ShortTerm } from './components/ShortTerm';
+import { ChronoFinancial } from './components/ChronoFinancial';
 import { ShortTermTeamScreen } from './components/ShortTermTeamScreen';
 import { AuthGate } from './components/AuthGate';
 import { DependencyEditor } from './components/DependencyEditor';
@@ -34,6 +35,7 @@ const pages: Array<{ key: Page; label: string; icon: React.ReactNode }> = [
   { key: 'medium', label: 'Médio prazo', icon: <CalendarRange /> },
   { key: 'short', label: 'Curto prazo', icon: <CheckSquare /> },
   { key: 'financial', label: 'Físico-financeiro', icon: <LineChart /> },
+  { key: 'chronoFinancial', label: 'Cronograma físico-financeiro', icon: <BarChart3 /> },
   { key: 'settings', label: 'Configurações', icon: <Settings /> }
 ];
 
@@ -243,6 +245,7 @@ function App({ userId }: { userId: string }) {
         {page === 'medium' && <MediumPlan tasks={tasks} projectId={project.id} onPublish={handleMediumPublish} holidays={calendarEvents.filter((event) => event.kind === 'holiday' && (event.projectId === project.id || (!event.projectId && (event.appliesToAll || event.projectIds?.includes(project.id)))))} />}
         {page === 'short' && <ShortTerm tasks={latestMediumTasks} projectId={project.id} />}
         {page === 'financial' && <Financial projectKey={project.id} tasks={tasks} setTasks={setTasks} />}
+        {page === 'chronoFinancial' && <ChronoFinancial projectKey={project.id} tasks={tasks} />}
         {page === 'settings' && <SettingsPage />}
       </main>
     </div>

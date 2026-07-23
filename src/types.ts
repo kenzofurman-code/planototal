@@ -10,6 +10,7 @@ export type Page =
   | 'medium'
   | 'short'
   | 'financial'
+  | 'chronoFinancial'
   | 'settings';
 
 export type Project = {
