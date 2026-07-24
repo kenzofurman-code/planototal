@@ -6,7 +6,8 @@ import {
   Calendar, 
   Download, 
   RefreshCw, 
-  SlidersHorizontal 
+  SlidersHorizontal,
+  X
 } from 'lucide-react';
 import type { Task } from '../types';
 import { loadBudgets, type BudgetRevision, type BudgetItem } from '../lib/budgetRepository';
@@ -85,6 +86,25 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
 
   // Busca textual na EAP
   const [searchFilter, setSearchFilter] = useState<string>('');
+
+  // Seleção de meses na régua de cabeçalho (Filtro de atividades ativas nos meses marcados)
+  const [selectedMonthKeys, setSelectedMonthKeys] = useState<Set<string>>(new Set());
+
+  const toggleMonthSelection = (colKey: string) => {
+    setSelectedMonthKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(colKey)) {
+        next.delete(colKey);
+      } else {
+        next.add(colKey);
+      }
+      return next;
+    });
+  };
+
+  const clearMonthSelection = () => {
+    setSelectedMonthKeys(new Set());
+  };
 
   // --- CARREGAMENTO INICIAL DO SUPABASE ---
   const loadData = async () => {
@@ -581,11 +601,11 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     }
   }, [eapSource, activeBudget, tasks, monthCols, shortTermProgressMap, allocationsByBudgetId]);
 
-  // --- FILTRAGEM DE NÍVEL E BUSCA ---
+  // --- FILTRAGEM DE NÍVEL, BUSCA E MESES SELECIONADOS ---
   const filteredEapRows = useMemo(() => {
     let rows = [...rawEapRows];
 
-    // Filtro por Nível de EAP
+    // 1. Filtro por Nível de EAP
     if (selectedLevel !== 'all') {
       const lvl = Number(selectedLevel);
       if (lvl === 6) {
@@ -597,7 +617,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       }
     }
 
-    // Busca por texto
+    // 2. Busca por texto
     if (searchFilter.trim()) {
       const q = searchFilter.toLowerCase().trim();
       rows = rows.filter(r => 
@@ -606,8 +626,21 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       );
     }
 
+    // 3. Filtro por Meses Selecionados (Exibe apenas atividades com valor > 0 nos meses marcados com borda cinza)
+    if (selectedMonthKeys.size > 0) {
+      const monthKeysArr = Array.from(selectedMonthKeys);
+      rows = rows.filter(row => {
+        return monthKeysArr.some(colKey => {
+          const b = row.baseMonthly[colKey] || 0;
+          const p = row.plannedMonthly[colKey] || 0;
+          const a = row.actualMonthly[colKey] || 0;
+          return (showBase && b > 0) || (showPlanned && p > 0) || (showActual && a > 0) || (b > 0 || p > 0 || a > 0);
+        });
+      });
+    }
+
     return rows;
-  }, [rawEapRows, selectedLevel, searchFilter]);
+  }, [rawEapRows, selectedLevel, searchFilter, selectedMonthKeys, showBase, showPlanned, showActual]);
 
   // --- VALOR TOTAL GERAL DO PROJETO DA EAP SELECIONADA ---
   const grandTotalValue = useMemo(() => {
@@ -972,6 +1005,18 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
               Realizado (Medições)
             </span>
           </label>
+
+          {/* BOTÃO LIMPAR SELEÇÃO DE MESES */}
+          {selectedMonthKeys.size > 0 && (
+            <button
+              onClick={clearMonthSelection}
+              className="ml-auto flex items-center gap-1.5 px-3 py-1 bg-slate-800 text-slate-100 hover:bg-slate-700 rounded-full text-xs font-bold transition border border-slate-600 animate-pulse cursor-pointer select-none"
+              title="Clique para limpar o filtro de meses e exibir o cronograma completo"
+            >
+              <span>Filtro: {selectedMonthKeys.size} mês(es) selecionado(s)</span>
+              <X size={13} className="text-slate-400 hover:text-white" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -1010,12 +1055,31 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
                   Valor Total
                 </th>
 
-                {/* COLUNAS DOS MESES DA OBRA (RÉGUA DE MESES COM SCROLL) */}
-                {monthCols.map(col => (
-                  <th key={col.key} className="p-3 text-center border-r border-slate-700 min-w-[135px] font-black">
-                    {col.label}
-                  </th>
-                ))}
+                {/* COLUNAS DOS MESES DA OBRA (RÉGUA DE MESES MARCÁVEL COM BORDA CINZA) */}
+                {monthCols.map(col => {
+                  const isSelected = selectedMonthKeys.has(col.key);
+                  return (
+                    <th
+                      key={col.key}
+                      onClick={() => toggleMonthSelection(col.key)}
+                      className={`p-2.5 text-center border-r border-slate-700 min-w-[135px] font-black cursor-pointer transition select-none ${
+                        isSelected
+                          ? 'border-2 border-slate-300 bg-slate-700 text-white shadow-inner ring-2 ring-slate-400/60'
+                          : 'hover:bg-slate-700/60'
+                      }`}
+                      title="Clique para selecionar e filtrar atividades ativas neste mês"
+                    >
+                      <div className="flex flex-col items-center justify-center gap-0.5">
+                        <span>{col.label}</span>
+                        {isSelected && (
+                          <span className="text-[8px] bg-slate-200 text-slate-900 font-bold px-1.5 py-0.2 rounded-full uppercase tracking-tighter shadow-xs">
+                            Ativo
+                          </span>
+                        )}
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
 
