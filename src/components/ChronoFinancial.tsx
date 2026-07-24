@@ -199,12 +199,12 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       // 1. Processa itens folha e itens agrupadores com suporte ao Nível 5 (Atividades Vinculadas)
       const allRows: EapRowData[] = [];
       const itemRowsMap = new Map<string, EapRowData>();
-      const itemN5ChildrenMap = new Map<string, EapRowData[]>();
+      const itemN6ChildrenMap = new Map<string, (EapRowData & { taskLot?: string })[]>();
 
-      // Primeiro passo: cria as linhas Nível 5 para cada item de orçamento vinculado
+      // Primeiro passo: cria as linhas Nível 6 para cada item de orçamento vinculado
       items.forEach(item => {
         const itemAllocations = allocationsByBudgetId.get(item.id) || [];
-        const n5Children: EapRowData[] = [];
+        const n6Children: (EapRowData & { taskLot?: string })[] = [];
 
         if (itemAllocations.length > 0) {
           itemAllocations.forEach((alloc, allocIdx) => {
@@ -244,11 +244,11 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
               }
             });
 
-            const n5Row: EapRowData & { taskLot?: string } = {
-              id: `n5_${item.id}_${task.id}`,
+            const n6Row: EapRowData & { taskLot?: string } = {
+              id: `n6_${item.id}_${task.id}`,
               code: `${item.code || '0'}.${allocIdx + 1}`,
               description: `⤷ ${task.packageName} - ${task.service || task.lotMother} (${task.lot})`,
-              level: 5,
+              level: 6,
               startDate: tStart.toISOString().slice(0, 10),
               endDate: tEnd.toISOString().slice(0, 10),
               totalValue: taskVal,
@@ -258,30 +258,30 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
               taskLot: task.lot || ''
             };
 
-            n5Children.push(n5Row);
+            n6Children.push(n6Row);
           });
 
           // Ordena prioritariamente pelo Pavimento / Lote (task.lot) de forma natural
-          n5Children.sort((a, b) => {
-            const lotA = (a as any).taskLot || '';
-            const lotB = (b as any).taskLot || '';
+          n6Children.sort((a, b) => {
+            const lotA = a.taskLot || '';
+            const lotB = b.taskLot || '';
             const cmp = lotA.localeCompare(lotB, undefined, { numeric: true, sensitivity: 'base' });
             if (cmp !== 0) return cmp;
             return a.startDate.localeCompare(b.startDate);
           });
 
           // Reatribui a sequência numérica .1, .2, .3 ordenada
-          n5Children.forEach((child, idx) => {
+          n6Children.forEach((child, idx) => {
             child.code = `${item.code || '0'}.${idx + 1}`;
           });
         }
 
-        itemN5ChildrenMap.set(item.id, n5Children);
+        itemN6ChildrenMap.set(item.id, n6Children);
       });
 
       // Segundo passo: constrói a linha de cada item do orçamento
       items.forEach(item => {
-        const n5Children = itemN5ChildrenMap.get(item.id) || [];
+        const n6Children = itemN6ChildrenMap.get(item.id) || [];
 
         let startMs = Infinity;
         let endMs = -Infinity;
@@ -298,9 +298,9 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
 
         const totalValue = item.total || 0;
 
-        if (n5Children.length > 0) {
-          // Agrega os valores SomarProduto das atividades de Nível 5 filhas
-          n5Children.forEach(child => {
+        if (n6Children.length > 0) {
+          // Agrega os valores SomarProduto das atividades filhas
+          n6Children.forEach(child => {
             const cStart = parseDateLocal(child.startDate).getTime();
             const cEnd = parseDateLocal(child.endDate).getTime();
 
@@ -349,7 +349,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
 
         itemRowsMap.set(item.id, itemRow);
         allRows.push(itemRow);
-        allRows.push(...n5Children);
+        allRows.push(...n6Children);
       });
 
       return allRows.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
@@ -357,12 +357,6 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     } else {
       // --- MODO EAP DE PLANEJAMENTO (LOTE MÃE -> MACROSERVIÇO -> LOTE -> SERVIÇO) ---
       const rows: EapRowData[] = [];
-
-      // Agrupamento hierárquico
-      // Nível 1: Lote Mãe (lotMother)
-      // Nível 2: Macroserviço (packageName) dentro do Lote Mãe
-      // Nível 3: Lote / Pavimento (lot)
-      // Nível 4: Serviço (service)
 
       // Identifica Lotes Mãe únicos
       const lotMothers = Array.from(new Set(tasks.map(t => t.lotMother || 'SEM GRUPO'))).sort();
@@ -509,7 +503,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
 
       return rows.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
     }
-  }, [eapSource, activeBudget, tasks, monthCols, shortTermProgressMap]);
+  }, [eapSource, activeBudget, tasks, monthCols, shortTermProgressMap, allocationsByBudgetId]);
 
   // --- FILTRAGEM DE NÍVEL E BUSCA ---
   const filteredEapRows = useMemo(() => {
@@ -518,11 +512,11 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     // Filtro por Nível de EAP
     if (selectedLevel !== 'all') {
       const lvl = Number(selectedLevel);
-      if (lvl === 5) {
-        // Nível 5 exibe a EAP completa com o detalhamento por atividade
-        rows = rows.filter(r => r.level <= 5);
+      if (lvl === 6) {
+        // Nível 6 exibe a EAP completa incluindo o desdobramento por atividades
+        rows = rows.filter(r => r.level <= 6);
       } else {
-        // Níveis 1 a 4 exibem isoladamente apenas aquele nível específico
+        // Níveis 1 a 5 exibem isoladamente apenas aquele nível específico
         rows = rows.filter(r => r.level === lvl);
       }
     }
@@ -665,15 +659,17 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       case 4:
         return 'bg-[#E6E2DA] text-slate-900 font-semibold hover:bg-[#d8d3c9]';
       case 5:
+        return 'bg-[#F3F0EA] text-slate-900 font-semibold hover:bg-[#e4dfd5]';
+      case 6:
       default:
         return 'bg-white text-slate-800 font-medium hover:bg-slate-50';
     }
   };
 
-  // Helper de renderização de célula para cada LINHA DA TABELA (Calcula % em relação à linha -> soma = 100%)
-  const renderRowCellValue = (val: number, rowTotal: number) => {
+  // Helper de renderização de célula para cada LINHA DA TABELA (Calcula % unificado em relação ao Orçamento Mestre Geral -> soma = 100% igual em todos os níveis)
+  const renderRowCellValue = (val: number) => {
     if (viewUnit === 'percent') {
-      const pct = rowTotal > 0 ? (val / rowTotal) * 100 : 0;
+      const pct = grandTotalValue > 0 ? (val / grandTotalValue) * 100 : 0;
       return formatPercent(pct);
     }
     return formatCurrency(val);
@@ -770,8 +766,9 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
               <option value="1">Nível 1 (Lote Mãe / Totalizador)</option>
               <option value="2">Nível 2 (Macroserviço / Subgrupo)</option>
               <option value="3">Nível 3 (Lote / Pavimento)</option>
-              <option value="4">Nível 4 (Serviços Detalhados)</option>
-              <option value="5">Nível 5 (Atividades Vinculadas)</option>
+              <option value="4">Nível 4 (Grupo de Serviços)</option>
+              <option value="5">Nível 5 (Serviços do Orçamento)</option>
+              <option value="6">Nível 6 (Atividades Vinculadas)</option>
             </select>
           </div>
 
@@ -951,27 +948,27 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
                       const pVal = row.plannedDisp[col.key] || 0;
                       const aVal = row.actualDisp[col.key] || 0;
 
-                      const isN5Active = row.level === 5 && ((showPlanned && pVal > 0) || (showBase && bVal > 0) || (showActual && aVal > 0));
-                      const cellBgClass = isN5Active ? 'bg-[#E0F2FE] text-sky-950 font-bold' : '';
+                      const isN6Active = row.level === 6 && ((showPlanned && pVal > 0) || (showBase && bVal > 0) || (showActual && aVal > 0));
+                      const cellBgClass = isN6Active ? 'bg-[#E0F2FE] text-sky-950 font-bold' : '';
 
                       return (
                         <td key={col.key} className={`p-2 border-r border-slate-200 align-top text-right text-[10px] space-y-1 font-mono ${cellBgClass}`}>
                           {showBase && (
                             <div className="flex justify-between items-center text-slate-500 font-semibold border-b border-slate-100 pb-0.5" title="Base">
                               <span className="text-[8px] font-black text-slate-400 uppercase">B:</span>
-                              <span>{renderRowCellValue(bVal, row.totalValue)}</span>
+                              <span>{renderRowCellValue(bVal)}</span>
                             </div>
                           )}
                           {showPlanned && (
                             <div className="flex justify-between items-center text-indigo-700 font-bold" title="Previsto">
                               <span className="text-[8px] font-black text-indigo-400 uppercase">P:</span>
-                              <span>{renderRowCellValue(pVal, row.totalValue)}</span>
+                              <span>{renderRowCellValue(pVal)}</span>
                             </div>
                           )}
                           {showActual && (
                             <div className="flex justify-between items-center text-emerald-700 font-bold border-t border-slate-100 pt-0.5" title="Realizado">
                               <span className="text-[8px] font-black text-emerald-500 uppercase">R:</span>
-                              <span>{renderRowCellValue(aVal, row.totalValue)}</span>
+                              <span>{renderRowCellValue(aVal)}</span>
                             </div>
                           )}
                         </td>
