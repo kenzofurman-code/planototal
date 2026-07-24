@@ -279,12 +279,27 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
         itemN6ChildrenMap.set(item.id, n6Children);
       });
 
-      // Segundo passo: constrói a linha de cada item do orçamento
+      // 2. Constrói inicialmente o mapa de cada item de orçamento (Folhas e Agrupadores)
+      const itemRowMap = new Map<string, EapRowData>();
+      const isParentMap = new Map<string, boolean>();
+
+      // Determina quais itens são agrupadores (possuem sub-itens de orçamento)
+      items.forEach(a => {
+        if (!a.code) return;
+        items.forEach(b => {
+          if (a.id !== b.id && b.code && b.code.startsWith(`${a.code}.`)) {
+            isParentMap.set(a.id, true);
+          }
+        });
+      });
+
+      // Inicializa cada item de orçamento
       items.forEach(item => {
         const n6Children = itemN6ChildrenMap.get(item.id) || [];
+        const isParent = isParentMap.get(item.id) || false;
 
-        let startMs = Infinity;
-        let endMs = -Infinity;
+        const codeParts = item.code ? item.code.split('.').filter(Boolean) : [];
+        const levelNum = item.level ? Number(item.level) : Math.max(1, codeParts.length);
 
         const baseMonthly: Record<string, number> = {};
         const plannedMonthly: Record<string, number> = {};
@@ -296,60 +311,123 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
           actualMonthly[col.key] = 0;
         });
 
-        const totalValue = item.total || 0;
+        let startMs = Infinity;
+        let endMs = -Infinity;
+        let totalVal = item.total || 0;
 
-        if (n6Children.length > 0) {
-          // Agrega os valores SomarProduto das atividades filhas
-          n6Children.forEach(child => {
-            const cStart = parseDateLocal(child.startDate).getTime();
-            const cEnd = parseDateLocal(child.endDate).getTime();
+        if (!isParent) {
+          // ITEM FOLHA DO ORÇAMENTO
+          if (n6Children.length > 0) {
+            let sumVal = 0;
+            n6Children.forEach(child => {
+              sumVal += child.totalValue || 0;
+              const cStart = parseDateLocal(child.startDate).getTime();
+              const cEnd = parseDateLocal(child.endDate).getTime();
 
-            if (cStart < startMs) startMs = cStart;
-            if (cEnd > endMs) endMs = cEnd;
+              if (cStart < startMs) startMs = cStart;
+              if (cEnd > endMs) endMs = cEnd;
 
-            monthCols.forEach(col => {
-              baseMonthly[col.key] += child.baseMonthly[col.key] || 0;
-              plannedMonthly[col.key] += child.plannedMonthly[col.key] || 0;
-              actualMonthly[col.key] += child.actualMonthly[col.key] || 0;
+              monthCols.forEach(col => {
+                baseMonthly[col.key] += child.baseMonthly[col.key] || 0;
+                plannedMonthly[col.key] += child.plannedMonthly[col.key] || 0;
+                actualMonthly[col.key] += child.actualMonthly[col.key] || 0;
+              });
             });
-          });
-        } else {
-          // Item sem vínculos: distribuição uniforme na vigência da obra
-          const firstCol = monthCols[0];
-          const lastCol = monthCols[monthCols.length - 1];
-          startMs = firstCol.startDate.getTime();
-          endMs = lastCol.endDate.getTime();
+            totalVal = sumVal > 0 ? sumVal : totalVal;
+          } else {
+            // Sem vínculos de planejamento: distribuição uniforme na vigência da obra
+            const firstCol = monthCols[0];
+            const lastCol = monthCols[monthCols.length - 1];
+            startMs = firstCol.startDate.getTime();
+            endMs = lastCol.endDate.getTime();
 
-          const monthlyShare = totalValue / Math.max(1, monthCols.length);
-          monthCols.forEach(col => {
-            baseMonthly[col.key] = monthlyShare;
-            plannedMonthly[col.key] = monthlyShare;
-            actualMonthly[col.key] = 0;
-          });
+            const monthlyShare = totalVal / Math.max(1, monthCols.length);
+            monthCols.forEach(col => {
+              baseMonthly[col.key] = monthlyShare;
+              plannedMonthly[col.key] = monthlyShare;
+              actualMonthly[col.key] = 0;
+            });
+          }
         }
 
         const sDateStr = startMs !== Infinity ? new Date(startMs).toISOString().slice(0, 10) : monthCols[0].startDate.toISOString().slice(0, 10);
         const eDateStr = endMs !== -Infinity ? new Date(endMs).toISOString().slice(0, 10) : monthCols[monthCols.length - 1].endDate.toISOString().slice(0, 10);
 
-        const codeParts = item.code ? item.code.split('.').filter(Boolean) : [];
-        const levelNum = item.level ? Number(item.level) : Math.max(1, codeParts.length);
-
-        const itemRow: EapRowData = {
+        itemRowMap.set(item.id, {
           id: item.id,
           code: item.code || '-',
           description: item.description,
           level: levelNum,
           startDate: sDateStr,
           endDate: eDateStr,
-          totalValue,
+          totalValue: totalVal,
           baseMonthly,
           plannedMonthly,
           actualMonthly
-        };
+        });
+      });
 
-        itemRowsMap.set(item.id, itemRow);
-        allRows.push(itemRow);
-        allRows.push(...n6Children);
+      // 3. Propagação Bottom-Up (SomarProduto dos filhos para os pais na EAP de orçamento)
+      const sortedItemsByCodeDepth = [...items].sort((a, b) => {
+        const depthA = a.code ? a.code.split('.').filter(Boolean).length : 0;
+        const depthB = b.code ? b.code.split('.').filter(Boolean).length : 0;
+        return depthB - depthA; // Maior profundidade primeiro
+      });
+
+      sortedItemsByCodeDepth.forEach(childItem => {
+        if (!childItem.code) return;
+        const childRow = itemRowMap.get(childItem.id);
+        if (!childRow) return;
+
+        // Encontra o pai direto no orçamento (código sem a última parte)
+        const parts = childItem.code.split('.').filter(Boolean);
+        if (parts.length > 1) {
+          const parentCode = parts.slice(0, -1).join('.');
+          const parentItem = items.find(i => i.code === parentCode);
+
+          if (parentItem) {
+            const parentRow = itemRowMap.get(parentItem.id);
+            if (parentRow && isParentMap.get(parentItem.id)) {
+              // Agrega datas min/max
+              const cStart = parseDateLocal(childRow.startDate).getTime();
+              const cEnd = parseDateLocal(childRow.endDate).getTime();
+              const pStart = parseDateLocal(parentRow.startDate).getTime();
+              const pEnd = parseDateLocal(parentRow.endDate).getTime();
+
+              if (cStart < pStart) parentRow.startDate = childRow.startDate;
+              if (cEnd > pEnd) parentRow.endDate = childRow.endDate;
+
+              // Agrega mensalizadores
+              monthCols.forEach(col => {
+                parentRow.baseMonthly[col.key] = (parentRow.baseMonthly[col.key] || 0) + (childRow.baseMonthly[col.key] || 0);
+                parentRow.plannedMonthly[col.key] = (parentRow.plannedMonthly[col.key] || 0) + (childRow.plannedMonthly[col.key] || 0);
+                parentRow.actualMonthly[col.key] = (parentRow.actualMonthly[col.key] || 0) + (childRow.actualMonthly[col.key] || 0);
+              });
+            }
+          }
+        }
+      });
+
+      // Recalcula o totalValue dos pais agrupadores a partir da soma dos meses para bater 100%
+      items.forEach(item => {
+        if (isParentMap.get(item.id)) {
+          const parentRow = itemRowMap.get(item.id);
+          if (parentRow) {
+            let sumP = 0;
+            monthCols.forEach(col => { sumP += parentRow.plannedMonthly[col.key] || 0; });
+            if (sumP > 0) parentRow.totalValue = sumP;
+          }
+        }
+      });
+
+      // 4. Monta a lista completa com sub-itens Nível 6 inseridos logo abaixo de cada item folha do orçamento
+      items.forEach(item => {
+        const itemRow = itemRowMap.get(item.id);
+        if (itemRow) {
+          allRows.push(itemRow);
+          const n6Children = itemN6ChildrenMap.get(item.id) || [];
+          allRows.push(...n6Children);
+        }
       });
 
       return allRows.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
@@ -535,10 +613,12 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
 
   // --- VALOR TOTAL GERAL DO PROJETO DA EAP SELECIONADA ---
   const grandTotalValue = useMemo(() => {
-    return filteredEapRows.reduce((sum, r) => sum + r.totalValue, 0);
-  }, [filteredEapRows]);
+    const n1Rows = rawEapRows.filter(r => r.level === 1);
+    if (n1Rows.length > 0) return n1Rows.reduce((sum, r) => sum + r.totalValue, 0);
+    return rawEapRows.length > 0 ? rawEapRows[0].totalValue : 0;
+  }, [rawEapRows]);
 
-  // --- CÁLCULO DE VALORES MENSIAIS & ACUMULADOS CONSOLIDADOS ---
+  // --- CÁLCULO DE VALORES MENSIAIS & ACUMULADOS CONSOLIDADOS PARA EXIBIÇÃO ---
   const displayEapRows = useMemo(() => {
     return filteredEapRows.map(row => {
       const baseDisp: Record<string, number> = {};
@@ -578,7 +658,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     });
   }, [filteredEapRows, monthCols, accumulationMode]);
 
-  // --- TOTALIZADORES DO RODAPÉ (POR MÊS) ---
+  // --- TOTALIZADOR DO RODAPÉ (Calculado exclusivamente nas linhas Nível 1 para evitar duplicações) ---
   const grandTotalsByMonth = useMemo(() => {
     const baseTotal: Record<string, number> = {};
     const plannedTotal: Record<string, number> = {};
@@ -590,16 +670,37 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       actualTotal[col.key] = 0;
     });
 
-    displayEapRows.forEach(row => {
+    const n1Rows = rawEapRows.filter(r => r.level === 1);
+    const targetRows = n1Rows.length > 0 ? n1Rows : rawEapRows;
+
+    targetRows.forEach(row => {
+      let accBase = 0;
+      let accPlanned = 0;
+      let accActual = 0;
+
       monthCols.forEach(col => {
-        baseTotal[col.key] += row.baseDisp[col.key] || 0;
-        plannedTotal[col.key] += row.plannedDisp[col.key] || 0;
-        actualTotal[col.key] += row.actualDisp[col.key] || 0;
+        const b = row.baseMonthly[col.key] || 0;
+        const p = row.plannedMonthly[col.key] || 0;
+        const a = row.actualMonthly[col.key] || 0;
+
+        accBase += b;
+        accPlanned += p;
+        accActual += a;
+
+        if (accumulationMode === 'accumulated') {
+          baseTotal[col.key] += accBase;
+          plannedTotal[col.key] += accPlanned;
+          actualTotal[col.key] += accActual;
+        } else {
+          baseTotal[col.key] += b;
+          plannedTotal[col.key] += p;
+          actualTotal[col.key] += a;
+        }
       });
     });
 
     return { baseTotal, plannedTotal, actualTotal };
-  }, [displayEapRows, monthCols]);
+  }, [rawEapRows, monthCols, accumulationMode]);
 
   // --- EXPORTAÇÃO PARA EXCEL ---
   const handleExportExcel = () => {
