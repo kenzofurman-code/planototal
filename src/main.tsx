@@ -4110,6 +4110,39 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
     });
   });
 
+  const inferiorLinkByItem = new Map<string, { fully: boolean; percent: number }>();
+  items.forEach((item) => {
+    const directWeight = directWeightByBudgetId.get(item.id) ?? 0;
+    if (directWeight > 0 && Math.abs(directWeight - 100) <= IMPORT_WEIGHT_TOLERANCE) return;
+    if (superiorLinkByItem.has(item.id)) return;
+
+    const descSet = descendantIds(item.id);
+    if (!descSet.size) return;
+
+    const descList = items.filter((i) => descSet.has(i.id));
+    const leafDescendants = descList.filter((i) => descendantIds(i.id).size === 0);
+
+    if (leafDescendants.length > 0) {
+      const allLeavesFullyLinked = leafDescendants.every((leaf) => {
+        const w = directWeightByBudgetId.get(leaf.id) ?? 0;
+        return w > 0 && Math.abs(w - 100) <= IMPORT_WEIGHT_TOLERANCE;
+      });
+
+      const totalLeafValue = leafDescendants.reduce((s, leaf) => s + leaf.total, 0);
+      const allocatedLeafValue = leafDescendants.reduce((s, leaf) => {
+        const w = directWeightByBudgetId.get(leaf.id) ?? 0;
+        return s + (leaf.total * (w / 100));
+      }, 0);
+
+      const percentInferior = totalLeafValue > 0 ? (allocatedLeafValue / totalLeafValue) * 100 : 0;
+      if (allLeavesFullyLinked || (percentInferior > 0 && Math.abs(percentInferior - 100) <= IMPORT_WEIGHT_TOLERANCE)) {
+        inferiorLinkByItem.set(item.id, { fully: true, percent: 100 });
+      } else if (percentInferior > 0) {
+        inferiorLinkByItem.set(item.id, { fully: false, percent: percentInferior });
+      }
+    }
+  });
+
   function compareEapCodes(a: string, b: string): number {
     return (a || '').localeCompare(b || '', undefined, { numeric: true, sensitivity: 'base' });
   }
@@ -4121,7 +4154,9 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
       const linkedWeight = directWeightByBudgetId.get(item.id) ?? 0;
       const fullyLinked = linkedWeight > 0 && Math.abs(linkedWeight - 100) <= IMPORT_WEIGHT_TOLERANCE;
       const superior = superiorLinkByItem.get(item.id);
-      return !fullyLinked && !superior;
+      const inferior = inferiorLinkByItem.get(item.id);
+      const concluded = fullyLinked || Boolean(superior) || Boolean(inferior?.fully);
+      return !concluded;
     });
   }
 
@@ -4590,7 +4625,7 @@ function Financial({ projectKey, tasks }: { projectKey: string; tasks: Task[]; s
         <div className="mapping-shell">
           <div className="mapping-panel"><div className="mapping-panel-head"><small>ORÇAMENTO</small><h3>{current.name}</h3><span>{visibleItems.length} itens</span></div>
             <div className="mapping-filter-actions"><label className="mapping-search"><Search size={15}/><input value={budgetSearch} onChange={(e) => setBudgetSearch(e.target.value)} placeholder="Buscar código ou descrição..." /></label><label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer select-none whitespace-nowrap"><input type="checkbox" checked={budgetUnlinkedOnly} onChange={(e) => setBudgetUnlinkedOnly(e.target.checked)} className="w-3.5 h-3.5 rounded text-indigo-600 cursor-pointer" /><span>Sem vínculo</span></label></div>
-            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código</th><th>Descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linkedWeight = directWeightByBudgetId.get(item.id) ?? 0; const linked = linkedWeight > 0; const fullyLinked = linked && Math.abs(linkedWeight - 100) <= IMPORT_WEIGHT_TOLERANCE; const superior = superiorLinkByItem.get(item.id); const status = fullyLinked ? 'Vinculado totalmente' : linked ? `Vinculado parcial (${linkedWeight.toFixed(2)}%)` : superior ? 'Vinculado no nível superior' : 'Livre'; return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => { setBudgetId(item.id); const itemTaskIds = allocations.filter(a => a.budgetId === item.id).map(a => a.taskId); if (itemTaskIds.length > 0) { setActivityIds(itemTaskIds); if (fullyLinked) setTaskViewFilter('linked_only'); else setTaskViewFilter('all'); } else { setActivityIds([]); setTaskViewFilter('all'); } if (superior) setMessage(`Item contemplado pelo vínculo do nível superior ${superior.code}.`); }}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small></td><td><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={fullyLinked || superior ? 'mapping-status linked' : linked ? 'mapping-status partial' : 'mapping-status'} title={superior ? `Contemplado por ${superior.code}` : linked ? `${linkedWeight.toFixed(8)}% vinculado` : undefined}>{status}</span></td></tr>; })}</tbody></table></div>
+            <div className="mapping-table-wrap"><table><thead><tr><th></th><th>Nível</th><th>Código</th><th>Descrição</th><th>Total</th><th>Status</th></tr></thead><tbody>{visibleItems.map((item) => { const linkedWeight = directWeightByBudgetId.get(item.id) ?? 0; const linked = linkedWeight > 0; const fullyLinked = linked && Math.abs(linkedWeight - 100) <= IMPORT_WEIGHT_TOLERANCE; const superior = superiorLinkByItem.get(item.id); const inferior = inferiorLinkByItem.get(item.id); const isConcluded = fullyLinked || Boolean(superior) || Boolean(inferior?.fully); const status = fullyLinked ? 'Vinculado totalmente' : superior ? 'Vinculado no nível superior' : inferior?.fully ? 'Vinculado no nível inferior' : inferior && inferior.percent > 0 ? `Vinculado parcial (${inferior.percent.toFixed(2)}%)` : linked ? `Vinculado parcial (${linkedWeight.toFixed(2)}%)` : 'Livre'; return <tr key={item.id} className={budgetId === item.id ? 'mapping-selected' : ''} onClick={() => { setBudgetId(item.id); const itemTaskIds = allocations.filter(a => a.budgetId === item.id).map(a => a.taskId); if (itemTaskIds.length > 0) { setActivityIds(itemTaskIds); if (isConcluded) setTaskViewFilter('linked_only'); else setTaskViewFilter('all'); } else { setActivityIds([]); setTaskViewFilter('all'); } if (superior) setMessage(`Item contemplado pelo vínculo do nível superior ${superior.code}.`); else if (inferior?.fully) setMessage(`Item contemplado pelos vínculos do nível inferior.`); }}><td><input type="radio" checked={budgetId === item.id} readOnly /></td><td>{item.level}</td><td><small>{item.code}</small></td><td><strong>{item.description}</strong></td><td>{item.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td><td><span className={isConcluded ? 'mapping-status linked' : (linked || (inferior && inferior.percent > 0)) ? 'mapping-status partial' : 'mapping-status'} title={superior ? `Contemplado por ${superior.code}` : inferior?.fully ? 'Contemplado pelos níveis inferiores' : linked ? `${linkedWeight.toFixed(8)}% vinculado` : undefined}>{status}</span></td></tr>; })}</tbody></table></div>
           </div>
           <div className="mapping-panel"><div className="mapping-panel-head"><small>ORIGEM FÍSICA</small><h3>Cronograma da obra</h3><div className="mapping-panel-head-actions"><span>{visibleTasks.length} atividades</span><button type="button" disabled={!visibleTasks.length} onClick={toggleVisibleTasks}><CheckSquare size={15}/>{allVisibleTasksSelected ? 'Limpar seleção' : 'Selecionar todos'}</button></div></div>
             <div className="mapping-filter-actions"><label className="mapping-search"><Search size={15}/><input value={activitySearch} onChange={(e) => setActivitySearch(e.target.value)} placeholder="Buscar atividade, serviço, lote ou grupo..." /></label>{selectedLinkedTaskIds.size > 0 && <div className="mapping-methods"><button type="button" className={taskViewFilter === 'all' ? 'active' : ''} onClick={() => setTaskViewFilter('all')}>Exibir todas</button><button type="button" className={taskViewFilter === 'linked_only' ? 'active' : ''} onClick={() => setTaskViewFilter('linked_only')}>Apenas vinculadas ({selectedLinkedTaskIds.size})</button></div>}{activityIds.length > 0 && <strong>{activityIds.length} selecionada(s)</strong>}</div>
