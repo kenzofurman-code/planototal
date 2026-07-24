@@ -335,11 +335,18 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
             });
             totalVal = sumVal > 0 ? sumVal : totalVal;
           } else {
-            // Sem vínculos de planejamento: sem alocação temporal (mensalizadores zerados)
+            // Sem vínculos de planejamento: preserva o total orçado e distribui na vigência da obra
             const firstCol = monthCols[0];
             const lastCol = monthCols[monthCols.length - 1];
             startMs = firstCol.startDate.getTime();
             endMs = lastCol.endDate.getTime();
+
+            const monthlyShare = totalVal / Math.max(1, monthCols.length);
+            monthCols.forEach(col => {
+              baseMonthly[col.key] = monthlyShare;
+              plannedMonthly[col.key] = monthlyShare;
+              actualMonthly[col.key] = 0;
+            });
           }
         }
 
@@ -401,14 +408,12 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
         }
       });
 
-      // Recalcula o totalValue dos pais agrupadores a partir da soma dos meses para bater 100%
+      // Garante que os pais agrupadores preservem o seu valor orçado contratual orçado original
       items.forEach(item => {
         if (isParentMap.get(item.id)) {
           const parentRow = itemRowMap.get(item.id);
           if (parentRow) {
-            let sumP = 0;
-            monthCols.forEach(col => { sumP += parentRow.plannedMonthly[col.key] || 0; });
-            if (sumP > 0) parentRow.totalValue = sumP;
+            parentRow.totalValue = item.total || parentRow.totalValue;
           }
         }
       });
