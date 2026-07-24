@@ -181,10 +181,78 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       const allocations = activeBudget.allocations;
       const tasksMap = new Map(tasks.map(t => [t.id, t]));
 
-      // 1. Processa itens folha (com ou sem vínculos)
-      const leafRows = items.map(item => {
+      // 1. Processa itens folha e itens agrupadores com suporte ao Nível 5 (Atividades Vinculadas)
+      const allRows: EapRowData[] = [];
+      const itemRowsMap = new Map<string, EapRowData>();
+      const itemN5ChildrenMap = new Map<string, EapRowData[]>();
+
+      // Primeiro passo: cria as linhas Nível 5 para cada item de orçamento vinculado
+      items.forEach(item => {
         const itemAllocations = allocations.filter(a => a.budgetId === item.id);
-        
+        const n5Children: EapRowData[] = [];
+
+        if (itemAllocations.length > 0) {
+          itemAllocations.forEach((alloc, allocIdx) => {
+            const task = tasksMap.get(alloc.taskId);
+            if (!task) return;
+
+            const tStart = parseDateLocal(task.startDate);
+            const tEnd = parseDateLocal(task.endDate);
+            const taskVal = alloc.value || 0;
+
+            const stProgress = shortTermProgressMap.get(task.id);
+            const realProgress = stProgress !== undefined ? stProgress : (task.progress || 0);
+
+            const totalTaskDays = Math.max(1, Math.ceil((tEnd.getTime() - tStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+
+            const baseMonthly: Record<string, number> = {};
+            const plannedMonthly: Record<string, number> = {};
+            const actualMonthly: Record<string, number> = {};
+
+            monthCols.forEach(col => {
+              baseMonthly[col.key] = 0;
+              plannedMonthly[col.key] = 0;
+              actualMonthly[col.key] = 0;
+            });
+
+            monthCols.forEach(col => {
+              const overlapStart = Math.max(tStart.getTime(), col.startDate.getTime());
+              const overlapEnd = Math.min(tEnd.getTime(), col.endDate.getTime());
+
+              if (overlapStart <= overlapEnd) {
+                const daysInMonth = Math.ceil((overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1;
+                const ratio = Math.min(1, daysInMonth / totalTaskDays);
+
+                baseMonthly[col.key] += taskVal * ratio;
+                plannedMonthly[col.key] += taskVal * ratio;
+                actualMonthly[col.key] += (taskVal * ratio) * (realProgress / 100);
+              }
+            });
+
+            const n5Row: EapRowData = {
+              id: `n5_${item.id}_${task.id}`,
+              code: `${item.code || '0'}.${allocIdx + 1}`,
+              description: `⤷ ${task.packageName} - ${task.service || task.lotMother} (${task.lot})`,
+              level: 5,
+              startDate: tStart.toISOString().slice(0, 10),
+              endDate: tEnd.toISOString().slice(0, 10),
+              totalValue: taskVal,
+              baseMonthly,
+              plannedMonthly,
+              actualMonthly
+            };
+
+            n5Children.push(n5Row);
+          });
+        }
+
+        itemN5ChildrenMap.set(item.id, n5Children);
+      });
+
+      // Segundo passo: constrói a linha de cada item do orçamento
+      items.forEach(item => {
+        const n5Children = itemN5ChildrenMap.get(item.id) || [];
+
         let startMs = Infinity;
         let endMs = -Infinity;
 
@@ -200,40 +268,23 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
 
         const totalValue = item.total || 0;
 
-        if (itemAllocations.length > 0) {
-          // Item possui vínculos com tarefas
-          itemAllocations.forEach(alloc => {
-            const task = tasksMap.get(alloc.taskId);
-            const taskVal = alloc.value || 0;
-            if (!task) return;
+        if (n5Children.length > 0) {
+          // Agrega os valores SomarProduto das atividades de Nível 5 filhas
+          n5Children.forEach(child => {
+            const cStart = parseDateLocal(child.startDate).getTime();
+            const cEnd = parseDateLocal(child.endDate).getTime();
 
-            const tStart = parseDateLocal(task.startDate);
-            const tEnd = parseDateLocal(task.endDate);
-
-            if (tStart.getTime() < startMs) startMs = tStart.getTime();
-            if (tEnd.getTime() > endMs) endMs = tEnd.getTime();
-
-            const stProgress = shortTermProgressMap.get(task.id);
-            const realProgress = stProgress !== undefined ? stProgress : (task.progress || 0);
-
-            const totalTaskDays = Math.max(1, Math.ceil((tEnd.getTime() - tStart.getTime()) / (1000 * 60 * 60 * 24)) + 1);
+            if (cStart < startMs) startMs = cStart;
+            if (cEnd > endMs) endMs = cEnd;
 
             monthCols.forEach(col => {
-              const overlapStart = Math.max(tStart.getTime(), col.startDate.getTime());
-              const overlapEnd = Math.min(tEnd.getTime(), col.endDate.getTime());
-
-              if (overlapStart <= overlapEnd) {
-                const daysInMonth = Math.ceil((overlapEnd - overlapStart) / (1000 * 60 * 60 * 24)) + 1;
-                const ratio = Math.min(1, daysInMonth / totalTaskDays);
-
-                baseMonthly[col.key] += taskVal * ratio;
-                plannedMonthly[col.key] += taskVal * ratio;
-                actualMonthly[col.key] += (taskVal * ratio) * (realProgress / 100);
-              }
+              baseMonthly[col.key] += child.baseMonthly[col.key] || 0;
+              plannedMonthly[col.key] += child.plannedMonthly[col.key] || 0;
+              actualMonthly[col.key] += child.actualMonthly[col.key] || 0;
             });
           });
         } else {
-          // Item sem vínculo direto: distribui uniformemente do início ao fim da obra
+          // Item sem vínculos: distribuição uniforme na vigência da obra
           const firstCol = monthCols[0];
           const lastCol = monthCols[monthCols.length - 1];
           startMs = firstCol.startDate.getTime();
@@ -253,7 +304,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
         const codeParts = item.code ? item.code.split('.').filter(Boolean) : [];
         const levelNum = item.level ? Number(item.level) : Math.max(1, codeParts.length);
 
-        return {
+        const itemRow: EapRowData = {
           id: item.id,
           code: item.code || '-',
           description: item.description,
@@ -265,9 +316,13 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
           plannedMonthly,
           actualMonthly
         };
+
+        itemRowsMap.set(item.id, itemRow);
+        allRows.push(itemRow);
+        allRows.push(...n5Children);
       });
 
-      return leafRows;
+      return allRows.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true }));
 
     } else {
       // --- MODO EAP DE PLANEJAMENTO (LOTE MÃE -> MACROSERVIÇO -> LOTE -> SERVIÇO) ---
@@ -663,6 +718,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
               <option value="2">Nível 2 (Macroserviço / Subgrupo)</option>
               <option value="3">Nível 3 (Lote / Pavimento)</option>
               <option value="4">Nível 4 (Serviços Detalhados)</option>
+              <option value="5">Nível 5 (Atividades Vinculadas)</option>
             </select>
           </div>
 
