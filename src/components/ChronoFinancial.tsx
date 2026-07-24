@@ -171,6 +171,22 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     return cols;
   }, [tasks]);
 
+  // Map O(1) de alocações do orçamento ativo por budgetId
+  const allocationsByBudgetId = useMemo(() => {
+    const map = new Map<string, typeof activeBudget.allocations>();
+    if (activeBudget?.allocations) {
+      for (const a of activeBudget.allocations) {
+        let list = map.get(a.budgetId);
+        if (!list) {
+          list = [];
+          map.set(a.budgetId, list);
+        }
+        list.push(a);
+      }
+    }
+    return map;
+  }, [activeBudget]);
+
   // --- MONTAGEM DAS LINHAS DA EAP ---
   const rawEapRows = useMemo<EapRowData[]>(() => {
     if (monthCols.length === 0) return [];
@@ -178,7 +194,6 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     if (eapSource === 'budget' && activeBudget && activeBudget.items.length > 0) {
       // --- MODO EAP DE ORÇAMENTO COMPLETO (EXIBE 100% DOS ITENS) ---
       const items = activeBudget.items;
-      const allocations = activeBudget.allocations;
       const tasksMap = new Map(tasks.map(t => [t.id, t]));
 
       // 1. Processa itens folha e itens agrupadores com suporte ao Nível 5 (Atividades Vinculadas)
@@ -188,7 +203,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
 
       // Primeiro passo: cria as linhas Nível 5 para cada item de orçamento vinculado
       items.forEach(item => {
-        const itemAllocations = allocations.filter(a => a.budgetId === item.id);
+        const itemAllocations = allocationsByBudgetId.get(item.id) || [];
         const n5Children: EapRowData[] = [];
 
         if (itemAllocations.length > 0) {
@@ -617,6 +632,23 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     XLSX.writeFile(wb, `Cronograma_Fisico_Financeiro_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
+  // Helper de estilos visuais por Nível da EAP (Paleta conforme imagem enviada)
+  const getLevelBgClass = (level: number) => {
+    switch (level) {
+      case 1:
+        return 'bg-teal-900 text-white font-black';
+      case 2:
+        return 'bg-teal-300 text-teal-950 font-bold';
+      case 3:
+        return 'bg-teal-200 text-teal-950 font-semibold';
+      case 4:
+        return 'bg-stone-200 text-stone-900 font-semibold';
+      case 5:
+      default:
+        return 'bg-white text-slate-800 font-medium';
+    }
+  };
+
   // Helper de renderização de célula para cada LINHA DA TABELA (Calcula % em relação à linha -> soma = 100%)
   const renderRowCellValue = (val: number, rowTotal: number) => {
     if (viewUnit === 'percent') {
@@ -636,9 +668,9 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
   };
 
   return (
-    <div className="p-6 space-y-6 bg-slate-50 min-h-screen">
+    <div className="p-4 md:p-6 bg-slate-50 h-[calc(100vh-64px)] overflow-hidden flex flex-col gap-4">
       {/* CABEÇALHO DO MÓDULO */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-6 rounded-3xl border border-slate-200 shadow-xs">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-white p-5 rounded-3xl border border-slate-200 shadow-xs shrink-0">
         <div>
           <div className="flex items-center gap-2">
             <span className="px-2.5 py-1 bg-indigo-50 border border-indigo-200 text-indigo-700 font-black text-[9px] uppercase rounded-lg tracking-wider">
@@ -673,15 +705,15 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       </div>
 
       {/* PAINEL DE FILTROS E OPÇÕES DE VISUALIZAÇÃO */}
-      <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-xs space-y-4">
-        <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-          <SlidersHorizontal size={16} className="text-indigo-600" />
+      <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs space-y-3 shrink-0">
+        <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+          <SlidersHorizontal size={15} className="text-indigo-600" />
           <h2 className="text-xs font-black text-slate-800 uppercase tracking-wider">
             Controles e Parâmetros de Exibição
           </h2>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           {/* 1. Escolha de EAP */}
           <div>
             <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">1. Estrutura EAP</label>
@@ -782,7 +814,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
         </div>
 
         {/* CHECKBOXES DE CAMADAS VISUAIS (PADRÃO: Apenas Previsto marcado) */}
-        <div className="flex flex-wrap items-center gap-6 pt-2 border-t border-slate-100 text-xs font-black uppercase">
+        <div className="flex flex-wrap items-center gap-5 pt-2 border-t border-slate-100 text-xs font-black uppercase">
           <span className="text-[10px] text-slate-400 tracking-wider">Camadas Visíveis:</span>
 
           <label className="flex items-center gap-2 cursor-pointer select-none text-slate-700">
@@ -827,10 +859,10 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       </div>
 
       {/* GRADE DA TABELA DE CRONOGRAMA FÍSICO-FINANCEIRO COM COLUNAS CONGELADAS (STICKY LEFT) */}
-      <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="p-4 bg-slate-900 text-white flex justify-between items-center text-xs font-black uppercase tracking-wider">
+      <div className="flex-1 min-h-0 bg-white rounded-3xl border border-slate-200 shadow-xs flex flex-col overflow-hidden">
+        <div className="p-3 bg-slate-900 text-white flex justify-between items-center text-xs font-black uppercase tracking-wider shrink-0">
           <div className="flex items-center gap-2">
-            <Calendar size={16} className="text-indigo-400" />
+            <Calendar size={15} className="text-indigo-400" />
             <span>
               Matriz Físico-Financeira ({eapSource === 'budget' ? 'EAP Orçamento' : 'EAP Planejamento'}) - {monthCols.length} Meses
             </span>
@@ -840,24 +872,24 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
           </div>
         </div>
 
-        <div className="overflow-x-auto relative max-w-full">
+        <div className="flex-1 min-h-0 overflow-auto relative max-w-full">
           <table className="w-full text-xs text-left border-collapse min-w-max">
-            <thead className="bg-slate-800 text-white uppercase text-[9px] tracking-wider sticky top-0 z-30">
+            <thead className="bg-slate-800 text-white uppercase text-[9px] tracking-wider sticky top-0 z-30 shadow-xs">
               <tr>
                 {/* COLUNAS INICIAIS CONGELADAS DA ESQUERDA (STICKY) */}
                 <th className="p-3 w-24 sticky left-0 bg-slate-800 z-30 border-r border-slate-700 font-black">
                   Código EAP
                 </th>
-                <th className="p-3 w-60 sticky left-[96px] bg-slate-800 z-30 border-r border-slate-700 font-black">
+                <th className="p-3 w-64 sticky left-[96px] bg-slate-800 z-30 border-r border-slate-700 font-black">
                   Atividade / Descrição
                 </th>
-                <th className="p-3 w-24 text-center sticky left-[336px] bg-slate-800 z-30 border-r border-slate-700 font-black">
+                <th className="p-3 w-24 text-center sticky left-[352px] bg-slate-800 z-30 border-r border-slate-700 font-black">
                   Início
                 </th>
-                <th className="p-3 w-24 text-center sticky left-[432px] bg-slate-800 z-30 border-r border-slate-700 font-black">
+                <th className="p-3 w-24 text-center sticky left-[448px] bg-slate-800 z-30 border-r border-slate-700 font-black">
                   Término
                 </th>
-                <th className="p-3 w-32 text-right sticky left-[528px] bg-slate-850 z-30 border-r-2 border-slate-600 shadow-md font-black">
+                <th className="p-3 w-32 text-right sticky left-[544px] bg-slate-850 z-30 border-r-2 border-slate-600 shadow-md font-black">
                   Valor Total
                 </th>
 
@@ -870,74 +902,73 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
               </tr>
             </thead>
 
-            <tbody className="divide-y divide-slate-200 font-medium text-slate-800">
-              {displayEapRows.map((row, idx) => (
-                <tr key={row.id || idx} className="hover:bg-slate-50 transition group">
-                  {/* COLUNAS CONGELADAS NAS LINHAS */}
-                  <td className="p-3 sticky left-0 bg-white group-hover:bg-slate-50 z-20 border-r border-slate-200 font-mono font-bold text-slate-700">
-                    {row.code}
-                  </td>
-                  <td className="p-3 sticky left-[96px] bg-white group-hover:bg-slate-50 z-20 border-r border-slate-200 font-bold uppercase text-[11px] leading-tight truncate max-w-[240px]" title={row.description}>
-                    {row.description}
-                  </td>
-                  <td className="p-3 sticky left-[336px] bg-white group-hover:bg-slate-50 z-20 border-r border-slate-200 text-center font-mono text-[10px]">
-                    {formatDateBR(row.startDate)}
-                  </td>
-                  <td className="p-3 sticky left-[432px] bg-white group-hover:bg-slate-50 z-20 border-r border-slate-200 text-center font-mono text-[10px]">
-                    {formatDateBR(row.endDate)}
-                  </td>
-                  <td className="p-3 sticky left-[528px] bg-slate-50 group-hover:bg-slate-100 z-20 border-r-2 border-slate-300 shadow-md text-right font-black text-slate-900">
-                    {formatCurrency(row.totalValue)}
-                  </td>
+            <tbody className="divide-y divide-slate-200 font-medium">
+              {displayEapRows.map((row, idx) => {
+                const levelBgClass = getLevelBgClass(row.level);
+                return (
+                  <tr key={row.id || idx} className={`${levelBgClass} transition group`}>
+                    {/* COLUNAS CONGELADAS NAS LINHAS */}
+                    <td className={`p-2.5 sticky left-0 ${levelBgClass} z-20 border-r border-slate-200 font-mono font-bold text-slate-800`}>
+                      {row.code}
+                    </td>
+                    <td className={`p-2.5 sticky left-[96px] ${levelBgClass} z-20 border-r border-slate-200 font-bold uppercase text-[11px] leading-tight truncate max-w-[256px]`} title={row.description}>
+                      {row.description}
+                    </td>
+                    <td className={`p-2.5 sticky left-[352px] ${levelBgClass} z-20 border-r border-slate-200 text-center font-mono text-[10px]`}>
+                      {formatDateBR(row.startDate)}
+                    </td>
+                    <td className={`p-2.5 sticky left-[448px] ${levelBgClass} z-20 border-r border-slate-200 text-center font-mono text-[10px]`}>
+                      {formatDateBR(row.endDate)}
+                    </td>
+                    <td className={`p-2.5 sticky left-[544px] ${levelBgClass} z-20 border-r-2 border-slate-300 shadow-md text-right font-black`}>
+                      {formatCurrency(row.totalValue)}
+                    </td>
 
-                  {/* COLUNAS MENSAIS DA LINHA */}
-                  {monthCols.map(col => {
-                    const bVal = row.baseDisp[col.key] || 0;
-                    const pVal = row.plannedDisp[col.key] || 0;
-                    const aVal = row.actualDisp[col.key] || 0;
+                    {/* COLUNAS MENSAIS DA LINHA */}
+                    {monthCols.map(col => {
+                      const bVal = row.baseDisp[col.key] || 0;
+                      const pVal = row.plannedDisp[col.key] || 0;
+                      const aVal = row.actualDisp[col.key] || 0;
 
-                    return (
-                      <td key={col.key} className="p-2 border-r border-slate-200 align-top text-right text-[10px] space-y-1 font-mono">
-                        {showBase && (
-                          <div className="flex justify-between items-center text-slate-500 font-semibold border-b border-slate-100 pb-0.5" title="Base">
-                            <span className="text-[8px] font-black text-slate-400 uppercase">B:</span>
-                            <span>{renderRowCellValue(bVal, row.totalValue)}</span>
-                          </div>
-                        )}
-                        {showPlanned && (
-                          <div className="flex justify-between items-center text-indigo-700 font-bold border-b border-indigo-50 pb-0.5" title="Previsto">
-                            <span className="text-[8px] font-black text-indigo-500 uppercase">P:</span>
-                            <span>{renderRowCellValue(pVal, row.totalValue)}</span>
-                          </div>
-                        )}
-                        {showActual && (
-                          <div className="flex justify-between items-center text-emerald-700 font-black" title="Realizado">
-                            <span className="text-[8px] font-black text-emerald-600 uppercase">R:</span>
-                            <span>{renderRowCellValue(aVal, row.totalValue)}</span>
-                          </div>
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                      const isN5Active = row.level === 5 && ((showPlanned && pVal > 0) || (showBase && bVal > 0) || (showActual && aVal > 0));
+                      const cellBgClass = isN5Active ? 'bg-sky-100 text-sky-950 font-bold' : '';
 
-              {displayEapRows.length === 0 && (
-                <tr>
-                  <td colSpan={5 + monthCols.length} className="p-8 text-center text-slate-400 italic font-bold">
-                    Nenhum item de EAP encontrado com os filtros selecionados.
-                  </td>
-                </tr>
-              )}
+                      return (
+                        <td key={col.key} className={`p-2 border-r border-slate-200 align-top text-right text-[10px] space-y-1 font-mono ${cellBgClass}`}>
+                          {showBase && (
+                            <div className="flex justify-between items-center text-slate-500 font-semibold border-b border-slate-100 pb-0.5" title="Base">
+                              <span className="text-[8px] font-black text-slate-400 uppercase">B:</span>
+                              <span>{renderRowCellValue(bVal, row.totalValue)}</span>
+                            </div>
+                          )}
+                          {showPlanned && (
+                            <div className="flex justify-between items-center text-indigo-700 font-bold" title="Previsto">
+                              <span className="text-[8px] font-black text-indigo-400 uppercase">P:</span>
+                              <span>{renderRowCellValue(pVal, row.totalValue)}</span>
+                            </div>
+                          )}
+                          {showActual && (
+                            <div className="flex justify-between items-center text-emerald-700 font-bold border-t border-slate-100 pt-0.5" title="Realizado">
+                              <span className="text-[8px] font-black text-emerald-500 uppercase">R:</span>
+                              <span>{renderRowCellValue(aVal, row.totalValue)}</span>
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
 
-            {/* RODAPÉ DE TOTALIZAÇÃO GERAL DO PROJETO */}
-            <tfoot className="bg-slate-900 text-white uppercase font-black text-[10px] border-t-2 border-slate-700 sticky bottom-0 z-30">
+            {/* RODAPÉ COM TOTALIZADORES GERAIS */}
+            <tfoot className="bg-slate-900 text-white font-black uppercase text-[10px] sticky bottom-0 z-30 shadow-lg">
               <tr>
-                <td colSpan={4} className="p-3 sticky left-0 bg-slate-900 z-30 text-right tracking-wider border-r border-slate-700">
-                  TOTALIZADOR DO PROJETO ({accumulationMode === 'accumulated' ? 'ACUMULADO' : 'MENSAL'}):
-                </td>
-                <td className="p-3 sticky left-[528px] bg-slate-950 z-30 text-right border-r-2 border-slate-600 shadow-md text-emerald-400 font-black text-xs font-mono">
+                <td className="p-3 sticky left-0 bg-slate-900 z-30 border-r border-slate-700">TOTAL</td>
+                <td className="p-3 sticky left-[96px] bg-slate-900 z-30 border-r border-slate-700">CONSOLIDADO DA OBRA</td>
+                <td className="p-3 sticky left-[352px] bg-slate-900 z-30 border-r border-slate-700 text-center">-</td>
+                <td className="p-3 sticky left-[448px] bg-slate-900 z-30 border-r border-slate-700 text-center">-</td>
+                <td className="p-3 sticky left-[544px] bg-slate-950 z-30 border-r-2 border-slate-600 shadow-md text-right font-black text-emerald-400">
                   {formatCurrency(grandTotalValue)}
                 </td>
 
@@ -947,22 +978,22 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
                   const aTot = grandTotalsByMonth.actualTotal[col.key] || 0;
 
                   return (
-                    <td key={col.key} className="p-2 border-r border-slate-700 text-right space-y-1 font-mono">
+                    <td key={col.key} className="p-2 border-r border-slate-800 align-top text-right text-[10px] space-y-1 font-mono">
                       {showBase && (
-                        <div className="flex justify-between items-center text-slate-300">
-                          <span className="text-[7px] text-slate-400">BASE:</span>
+                        <div className="flex justify-between items-center text-slate-400 font-semibold" title="Base Total">
+                          <span className="text-[8px] font-black text-slate-500">B:</span>
                           <span>{renderFooterCellValue(bTot)}</span>
                         </div>
                       )}
                       {showPlanned && (
-                        <div className="flex justify-between items-center text-indigo-300">
-                          <span className="text-[7px] text-indigo-400">PREV:</span>
+                        <div className="flex justify-between items-center text-indigo-300 font-bold" title="Previsto Total">
+                          <span className="text-[8px] font-black text-indigo-400">P:</span>
                           <span>{renderFooterCellValue(pTot)}</span>
                         </div>
                       )}
                       {showActual && (
-                        <div className="flex justify-between items-center text-emerald-400">
-                          <span className="text-[7px] text-emerald-500">REAL:</span>
+                        <div className="flex justify-between items-center text-emerald-400 font-bold" title="Realizado Total">
+                          <span className="text-[8px] font-black text-emerald-500">R:</span>
                           <span>{renderFooterCellValue(aTot)}</span>
                         </div>
                       )}
