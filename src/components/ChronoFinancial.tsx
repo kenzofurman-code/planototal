@@ -244,7 +244,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
               }
             });
 
-            const n5Row: EapRowData = {
+            const n5Row: EapRowData & { taskLot?: string } = {
               id: `n5_${item.id}_${task.id}`,
               code: `${item.code || '0'}.${allocIdx + 1}`,
               description: `⤷ ${task.packageName} - ${task.service || task.lotMother} (${task.lot})`,
@@ -254,10 +254,25 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
               totalValue: taskVal,
               baseMonthly,
               plannedMonthly,
-              actualMonthly
+              actualMonthly,
+              taskLot: task.lot || ''
             };
 
             n5Children.push(n5Row);
+          });
+
+          // Ordena prioritariamente pelo Pavimento / Lote (task.lot) de forma natural
+          n5Children.sort((a, b) => {
+            const lotA = (a as any).taskLot || '';
+            const lotB = (b as any).taskLot || '';
+            const cmp = lotA.localeCompare(lotB, undefined, { numeric: true, sensitivity: 'base' });
+            if (cmp !== 0) return cmp;
+            return a.startDate.localeCompare(b.startDate);
+          });
+
+          // Reatribui a sequência numérica .1, .2, .3 ordenada
+          n5Children.forEach((child, idx) => {
+            child.code = `${item.code || '0'}.${idx + 1}`;
           });
         }
 
