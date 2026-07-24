@@ -335,18 +335,11 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
             });
             totalVal = sumVal > 0 ? sumVal : totalVal;
           } else {
-            // Sem vínculos de planejamento: distribuição uniforme na vigência da obra
+            // Sem vínculos de planejamento: sem alocação temporal (mensalizadores zerados)
             const firstCol = monthCols[0];
             const lastCol = monthCols[monthCols.length - 1];
             startMs = firstCol.startDate.getTime();
             endMs = lastCol.endDate.getTime();
-
-            const monthlyShare = totalVal / Math.max(1, monthCols.length);
-            monthCols.forEach(col => {
-              baseMonthly[col.key] = monthlyShare;
-              plannedMonthly[col.key] = monthlyShare;
-              actualMonthly[col.key] = 0;
-            });
           }
         }
 
