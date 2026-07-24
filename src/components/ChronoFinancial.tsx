@@ -503,7 +503,13 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     // Filtro por Nível de EAP
     if (selectedLevel !== 'all') {
       const lvl = Number(selectedLevel);
-      rows = rows.filter(r => r.level === lvl);
+      if (lvl === 5) {
+        // Nível 5 exibe a EAP completa com o detalhamento por atividade
+        rows = rows.filter(r => r.level <= 5);
+      } else {
+        // Níveis 1 a 4 exibem isoladamente apenas aquele nível específico
+        rows = rows.filter(r => r.level === lvl);
+      }
     }
 
     // Busca por texto
@@ -632,20 +638,20 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     XLSX.writeFile(wb, `Cronograma_Fisico_Financeiro_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
-  // Helper de estilos visuais por Nível da EAP (Paleta conforme imagem enviada)
+  // Helper de estilos visuais por Nível da EAP (Cores exatas especificadas)
   const getLevelBgClass = (level: number) => {
     switch (level) {
       case 1:
-        return 'bg-teal-900 text-white font-black';
+        return 'bg-[#000000] text-white font-black hover:bg-slate-900';
       case 2:
-        return 'bg-teal-300 text-teal-950 font-bold';
+        return 'bg-[#1A665B] text-white font-bold hover:bg-[#145249]';
       case 3:
-        return 'bg-teal-200 text-teal-950 font-semibold';
+        return 'bg-[#A3C6B8] text-slate-900 font-bold hover:bg-[#92b8a9]';
       case 4:
-        return 'bg-stone-200 text-stone-900 font-semibold';
+        return 'bg-[#E6E2DA] text-slate-900 font-semibold hover:bg-[#d8d3c9]';
       case 5:
       default:
-        return 'bg-white text-slate-800 font-medium';
+        return 'bg-white text-slate-800 font-medium hover:bg-slate-50';
     }
   };
 
@@ -931,7 +937,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
                       const aVal = row.actualDisp[col.key] || 0;
 
                       const isN5Active = row.level === 5 && ((showPlanned && pVal > 0) || (showBase && bVal > 0) || (showActual && aVal > 0));
-                      const cellBgClass = isN5Active ? 'bg-sky-100 text-sky-950 font-bold' : '';
+                      const cellBgClass = isN5Active ? 'bg-[#E0F2FE] text-sky-950 font-bold' : '';
 
                       return (
                         <td key={col.key} className={`p-2 border-r border-slate-200 align-top text-right text-[10px] space-y-1 font-mono ${cellBgClass}`}>
