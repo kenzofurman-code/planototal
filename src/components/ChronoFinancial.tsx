@@ -7,6 +7,7 @@ import {
   Download, 
   RefreshCw, 
   SlidersHorizontal,
+  Settings,
   X
 } from 'lucide-react';
 import type { Task } from '../types';
@@ -601,6 +602,9 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
     }
   }, [eapSource, activeBudget, tasks, monthCols, shortTermProgressMap, allocationsByBudgetId]);
 
+  // Controle do modal flutuante de configurações
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+
   // --- FILTRAGEM DE NÍVEL, BUSCA E MESES SELECIONADOS ---
   const filteredEapRows = useMemo(() => {
     let rows = [...rawEapRows];
@@ -626,7 +630,7 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
       );
     }
 
-    // 3. Filtro por Meses Selecionados (Exibe apenas atividades com valor > 0 nos meses marcados com borda cinza)
+    // 3. Filtro por Meses Selecionados (Exibe estritamente linhas com execução > 0 nas camadas ativas nos meses marcados)
     if (selectedMonthKeys.size > 0) {
       const monthKeysArr = Array.from(selectedMonthKeys);
       rows = rows.filter(row => {
@@ -634,7 +638,16 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
           const b = row.baseMonthly[colKey] || 0;
           const p = row.plannedMonthly[colKey] || 0;
           const a = row.actualMonthly[colKey] || 0;
-          return (showBase && b > 0) || (showPlanned && p > 0) || (showActual && a > 0) || (b > 0 || p > 0 || a > 0);
+
+          const hasBase = showBase && b > 0.0001;
+          const hasPlanned = showPlanned && p > 0.0001;
+          const hasActual = showActual && a > 0.0001;
+
+          if (!showBase && !showPlanned && !showActual) {
+            return b > 0.0001 || p > 0.0001 || a > 0.0001;
+          }
+
+          return hasBase || hasPlanned || hasActual;
         });
       });
     }
@@ -850,175 +863,223 @@ export function ChronoFinancial({ projectKey, tasks }: ChronoFinancialProps) {
           >
             <Download size={15} /> Exportar Excel
           </button>
+
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-xs transition flex items-center gap-2 cursor-pointer active:scale-95 border border-slate-700"
+            title="Abrir configurações e parâmetros de exibição"
+          >
+            <Settings size={15} className="text-indigo-400" /> Configurações
+          </button>
         </div>
       </div>
 
-      {/* PAINEL DE FILTROS E OPÇÕES DE VISUALIZAÇÃO */}
-      <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-xs space-y-3 shrink-0">
-        <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
-          <SlidersHorizontal size={15} className="text-indigo-600" />
-          <h2 className="text-xs font-black text-slate-800 uppercase tracking-wider">
-            Controles e Parâmetros de Exibição
-          </h2>
+      {/* BARRA DE ATALHOS RÁPIDOS & INDICADOR DE FILTROS ATIVOS */}
+      <div className="bg-white p-3.5 rounded-3xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div className="flex items-center gap-3 flex-1 min-w-[240px] max-w-md">
+          <label className="text-[10px] font-black uppercase text-slate-500 whitespace-nowrap">Filtrar EAP:</label>
+          <input
+            type="text"
+            placeholder="Pesquisar código ou descrição..."
+            value={searchFilter}
+            onChange={e => setSearchFilter(e.target.value)}
+            className="w-full px-3 py-1.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-xl text-xs font-bold text-slate-800 outline-none"
+          />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-          {/* 1. Escolha de EAP */}
-          <div>
-            <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">1. Estrutura EAP</label>
-            <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
-              <button
-                onClick={() => setEapSource('budget')}
-                className={`flex-1 py-1.5 rounded-lg transition ${
-                  eapSource === 'budget' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Orçamento
-              </button>
-              <button
-                onClick={() => setEapSource('schedule')}
-                className={`flex-1 py-1.5 rounded-lg transition ${
-                  eapSource === 'schedule' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Planejamento
-              </button>
-            </div>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 text-xs font-bold text-slate-600 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
+            <span className="text-[10px] font-black text-slate-400 uppercase">Nível:</span>
+            <span className="font-black text-indigo-700">{selectedLevel === 'all' ? 'Todos' : `Nível ${selectedLevel}`}</span>
+            <span className="text-slate-300">|</span>
+            <span className="font-black text-indigo-700">{viewUnit === 'percent' ? '%' : 'R$'}</span>
+            <span className="text-slate-300">|</span>
+            <span className="font-black text-indigo-700">{eapSource === 'budget' ? 'Orçamento' : 'Planejamento'}</span>
           </div>
 
-          {/* 2. Nível da EAP (PADRÃO: Nível 3) */}
-          <div>
-            <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">2. Nível da EAP</label>
-            <select
-              value={selectedLevel}
-              onChange={e => setSelectedLevel(e.target.value)}
-              className="w-full p-2 border border-slate-200 bg-slate-50 focus:bg-white rounded-xl text-xs font-bold text-slate-800 outline-none"
-            >
-              <option value="all">Todos os Níveis</option>
-              <option value="1">Nível 1 (Lote Mãe / Totalizador)</option>
-              <option value="2">Nível 2 (Macroserviço / Subgrupo)</option>
-              <option value="3">Nível 3 (Lote / Pavimento)</option>
-              <option value="4">Nível 4 (Grupo de Serviços)</option>
-              <option value="5">Nível 5 (Serviços do Orçamento)</option>
-              <option value="6">Nível 6 (Atividades Vinculadas)</option>
-            </select>
-          </div>
-
-          {/* 3. Unidade (PADRÃO: %) */}
-          <div>
-            <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">3. Exibir em</label>
-            <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
-              <button
-                onClick={() => setViewUnit('percent')}
-                className={`flex-1 py-1.5 rounded-lg transition ${
-                  viewUnit === 'percent' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                % (Porcentagem)
-              </button>
-              <button
-                onClick={() => setViewUnit('currency')}
-                className={`flex-1 py-1.5 rounded-lg transition ${
-                  viewUnit === 'currency' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                R$ (Valores)
-              </button>
-            </div>
-          </div>
-
-          {/* 4. Modo de Acúmulo (PADRÃO: Mensal) */}
-          <div>
-            <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">4. Visão Temporal</label>
-            <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
-              <button
-                onClick={() => setAccumulationMode('monthly')}
-                className={`flex-1 py-1.5 rounded-lg transition ${
-                  accumulationMode === 'monthly' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Mensal
-              </button>
-              <button
-                onClick={() => setAccumulationMode('accumulated')}
-                className={`flex-1 py-1.5 rounded-lg transition ${
-                  accumulationMode === 'accumulated' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Acumulado
-              </button>
-            </div>
-          </div>
-
-          {/* 5. Pesquisa Textual */}
-          <div>
-            <label className="block text-[9px] font-black uppercase text-slate-500 mb-1">5. Filtrar EAP</label>
-            <input
-              type="text"
-              placeholder="Pesquisar código ou descrição..."
-              value={searchFilter}
-              onChange={e => setSearchFilter(e.target.value)}
-              className="w-full p-2 border border-slate-200 bg-slate-50 focus:bg-white rounded-xl text-xs font-bold text-slate-800 outline-none"
-            />
-          </div>
-        </div>
-
-        {/* CHECKBOXES DE CAMADAS VISUAIS (PADRÃO: Apenas Previsto marcado) */}
-        <div className="flex flex-wrap items-center gap-5 pt-2 border-t border-slate-100 text-xs font-black uppercase">
-          <span className="text-[10px] text-slate-400 tracking-wider">Camadas Visíveis:</span>
-
-          <label className="flex items-center gap-2 cursor-pointer select-none text-slate-700">
-            <input
-              type="checkbox"
-              checked={showBase}
-              onChange={e => setShowBase(e.target.checked)}
-              className="w-4 h-4 rounded text-slate-600 focus:ring-slate-500 cursor-pointer"
-            />
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block" />
-              Base (Baseline)
-            </span>
-          </label>
-
-          <label className="flex items-center gap-2 cursor-pointer select-none text-indigo-700">
-            <input
-              type="checkbox"
-              checked={showPlanned}
-              onChange={e => setShowPlanned(e.target.checked)}
-              className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
-            />
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 inline-block" />
-              Previsto (Cronograma)
-            </span>
-          </label>
-
-          <label className="flex items-center gap-2 cursor-pointer select-none text-emerald-700">
-            <input
-              type="checkbox"
-              checked={showActual}
-              onChange={e => setShowActual(e.target.checked)}
-              className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-            />
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block" />
-              Realizado (Medições)
-            </span>
-          </label>
-
-          {/* BOTÃO LIMPAR SELEÇÃO DE MESES */}
           {selectedMonthKeys.size > 0 && (
             <button
               onClick={clearMonthSelection}
-              className="ml-auto flex items-center gap-1.5 px-3 py-1 bg-slate-800 text-slate-100 hover:bg-slate-700 rounded-full text-xs font-bold transition border border-slate-600 animate-pulse cursor-pointer select-none"
-              title="Clique para limpar o filtro de meses e exibir o cronograma completo"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-slate-100 hover:bg-slate-800 rounded-xl text-xs font-bold transition border border-slate-700 animate-pulse cursor-pointer select-none"
+              title="Clique para limpar a seleção de meses"
             >
-              <span>Filtro: {selectedMonthKeys.size} mês(es) selecionado(s)</span>
+              <span>Filtro: {selectedMonthKeys.size} mês(es) ativados</span>
               <X size={13} className="text-slate-400 hover:text-white" />
             </button>
           )}
+
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition cursor-pointer"
+            title="Ajustar parâmetros de exibição"
+          >
+            <SlidersHorizontal size={18} />
+          </button>
         </div>
       </div>
+
+      {/* MODAL FLUTUANTE DE CONFIGURAÇÕES (NO CANTO SUPERIOR DIREITO) */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-4 bg-slate-900 text-white flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Settings size={18} className="text-indigo-400" />
+                <h3 className="text-sm font-black uppercase tracking-wider">Parâmetros do Cronograma Físico-Financeiro</h3>
+              </div>
+              <button
+                onClick={() => setIsSettingsOpen(false)}
+                className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[80vh] overflow-auto">
+              {/* 1. Escolha de EAP */}
+              <div>
+                <label className="block text-[10px] font-black uppercase text-slate-500 mb-1.5">1. Estrutura EAP</label>
+                <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
+                  <button
+                    onClick={() => setEapSource('budget')}
+                    className={`flex-1 py-2 rounded-lg transition ${
+                      eapSource === 'budget' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Orçamento Completo
+                  </button>
+                  <button
+                    onClick={() => setEapSource('schedule')}
+                    className={`flex-1 py-2 rounded-lg transition ${
+                      eapSource === 'schedule' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Planejamento de Campo
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Nível da EAP */}
+              <div>
+                <label className="block text-[10px] font-black uppercase text-slate-500 mb-1.5">2. Nível da EAP</label>
+                <select
+                  value={selectedLevel}
+                  onChange={e => setSelectedLevel(e.target.value)}
+                  className="w-full p-2.5 border border-slate-200 bg-slate-50 focus:bg-white rounded-xl text-xs font-bold text-slate-800 outline-none"
+                >
+                  <option value="all">Todos os Níveis (EAP Completa)</option>
+                  <option value="1">Nível 1 (Lote Mãe / Totalizador)</option>
+                  <option value="2">Nível 2 (Macroserviço / Subgrupo)</option>
+                  <option value="3">Nível 3 (Lote / Pavimento)</option>
+                  <option value="4">Nível 4 (Grupo de Serviços)</option>
+                  <option value="5">Nível 5 (Serviços do Orçamento)</option>
+                  <option value="6">Nível 6 (Atividades Vinculadas)</option>
+                </select>
+              </div>
+
+              {/* 3. Unidade de Exibição */}
+              <div>
+                <label className="block text-[10px] font-black uppercase text-slate-500 mb-1.5">3. Exibir em</label>
+                <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
+                  <button
+                    onClick={() => setViewUnit('percent')}
+                    className={`flex-1 py-2 rounded-lg transition ${
+                      viewUnit === 'percent' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    % (Porcentagem)
+                  </button>
+                  <button
+                    onClick={() => setViewUnit('currency')}
+                    className={`flex-1 py-2 rounded-lg transition ${
+                      viewUnit === 'currency' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    R$ (Valores Monetários)
+                  </button>
+                </div>
+              </div>
+
+              {/* 4. Modo de Acúmulo */}
+              <div>
+                <label className="block text-[10px] font-black uppercase text-slate-500 mb-1.5">4. Visão Temporal</label>
+                <div className="flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
+                  <button
+                    onClick={() => setAccumulationMode('monthly')}
+                    className={`flex-1 py-2 rounded-lg transition ${
+                      accumulationMode === 'monthly' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Mensal (Evolução por Mês)
+                  </button>
+                  <button
+                    onClick={() => setAccumulationMode('accumulated')}
+                    className={`flex-1 py-2 rounded-lg transition ${
+                      accumulationMode === 'accumulated' ? 'bg-white text-indigo-700 shadow-xs font-black' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Acumulado (Curva S)
+                  </button>
+                </div>
+              </div>
+
+              {/* 5. Camadas Visíveis */}
+              <div className="pt-2 border-t border-slate-100">
+                <label className="block text-[10px] font-black uppercase text-slate-500 mb-2">5. Camadas Visíveis na Tabela</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs font-bold">
+                  <label className="flex items-center gap-2 p-2.5 border border-slate-200 rounded-xl cursor-pointer hover:bg-slate-50 select-none">
+                    <input
+                      type="checkbox"
+                      checked={showBase}
+                      onChange={e => setShowBase(e.target.checked)}
+                      className="w-4 h-4 rounded text-slate-600 focus:ring-slate-500 cursor-pointer"
+                    />
+                    <span className="flex items-center gap-1.5 text-slate-700">
+                      <span className="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block" />
+                      Base (Baseline)
+                    </span>
+                  </label>
+
+                  <label className="flex items-center gap-2 p-2.5 border border-indigo-200 rounded-xl cursor-pointer hover:bg-indigo-50/40 select-none">
+                    <input
+                      type="checkbox"
+                      checked={showPlanned}
+                      onChange={e => setShowPlanned(e.target.checked)}
+                      className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <span className="flex items-center gap-1.5 text-indigo-700">
+                      <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 inline-block" />
+                      Previsto (Cronograma)
+                    </span>
+                  </label>
+
+                  <label className="flex items-center gap-2 p-2.5 border border-emerald-200 rounded-xl cursor-pointer hover:bg-emerald-50/40 select-none">
+                    <input
+                      type="checkbox"
+                      checked={showActual}
+                      onChange={e => setShowActual(e.target.checked)}
+                      className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                    />
+                    <span className="flex items-center gap-1.5 text-emerald-700">
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 inline-block" />
+                      Realizado (Medições)
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button
+                onClick={() => setIsSettingsOpen(false)}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-xs transition cursor-pointer"
+              >
+                Concluído
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* GRADE DA TABELA DE CRONOGRAMA FÍSICO-FINANCEIRO COM COLUNAS CONGELADAS (STICKY LEFT) */}
       <div className="flex-1 min-h-0 bg-white rounded-3xl border border-slate-200 shadow-xs flex flex-col overflow-hidden">
